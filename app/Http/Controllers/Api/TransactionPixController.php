@@ -13,30 +13,33 @@ class TransactionPixController extends Controller
 {
     private const MAX_PIX_REAIS = 5000;
 
+    /**
+     * Create a new PIX transaction
+     */
     public function store(Request $request, LumnisService $lumnis)
     {
-        // 🔒 Headers obrigatórios
+        // 🔒 Required headers
         $auth   = $request->header('X-Auth-Key');
         $secret = $request->header('X-Secret-Key');
 
         if (!$auth || !$secret) {
             return response()->json([
                 'success' => false,
-                'error'   => 'Headers ausentes'
+                'error'   => 'Missing authentication headers.'
             ], 401);
         }
 
-        // 🔑 Resolução do usuário
+        // 🔑 Resolve user by keys
         $user = $this->resolveUser($auth, $secret);
 
         if (!$user) {
             return response()->json([
                 'success' => false,
-                'error'   => 'Credenciais inválidas'
+                'error'   => 'Invalid credentials.'
             ], 401);
         }
 
-        // 🧩 Validação básica
+        // 🧩 Basic validation
         $data = $request->validate([
             'amount'   => ['required', 'numeric', 'min:0.01'],
             'name'     => ['sometimes', 'string', 'max:100'],
@@ -49,7 +52,7 @@ class TransactionPixController extends Controller
         $amountCents = (int) round($amountReais * 100);
 
         // ======================
-        // 📌 CPF (VALIDAÇÃO REAL)
+        // 📌 CPF validation
         // ======================
         $cpf = preg_replace('/\D/', '', ($data['document'] ?? $user->cpf_cnpj ?? ''));
 
@@ -57,12 +60,12 @@ class TransactionPixController extends Controller
             return response()->json([
                 'success' => false,
                 'field'   => 'document',
-                'error'   => 'CPF inválido. Informe um documento válido.'
+                'error'   => 'Invalid CPF. Provide a valid document.'
             ], 422);
         }
 
         // =======================
-        // 📌 TELEFONE (VALIDAÇÃO)
+        // 📌 Phone validation
         // =======================
         $phone = preg_replace('/\D/', '', ($data['phone'] ?? $user->phone ?? ''));
 
@@ -70,28 +73,27 @@ class TransactionPixController extends Controller
             return response()->json([
                 'success' => false,
                 'field'   => 'phone',
-                'error'   => 'Telefone inválido. Use DDD + número. Ex: 11999999999'
+                'error'   => 'Invalid phone number. Use DDD + number. Example: 11999999999'
             ], 422);
         }
 
         // =======================
-        // Dados do cliente
+        // Customer data
         // =======================
-        $name  = $data['name']  ?? $user->name ?? $user->nome_completo ?? 'Cliente';
-        $email = $data['email'] ?? $user->email ?? 'sem-email@teste.com';
+        $name  = $data['name']  ?? $user->name ?? $user->nome_completo ?? 'Client';
+        $email = $data['email'] ?? $user->email ?? 'no-email@placeholder.com';
 
         // =======================
-        // Identificador único
+        // Unique identifier
         // =======================
         $externalId = $this->randomNumeric(18);
 
         try {
-
             $result = DB::transaction(function () use (
                 $user, $request, $amountReais, $amountCents, $cpf, $name, $email, $phone, $externalId, $lumnis
             ) {
 
-                // 📌 Criação local da transação
+                // 📌 Create local transaction
                 $tx = Transaction::create([
                     'tenant_id'          => $user->tenant_id,
                     'user_id'            => $user->id,
@@ -114,7 +116,7 @@ class TransactionPixController extends Controller
                 ]);
 
                 // ======================
-                // 📦 Payload para Lumnis
+                // 📦 Payload for Lumnis
                 // ======================
                 $payload = [
                     "amount"      => $amountCents,
@@ -126,17 +128,17 @@ class TransactionPixController extends Controller
                         "phone"    => $phone,
                         "document" => $cpf,
                         "address"  => [
-                            "street"  => "Rua Desconhecida",
-                            "number"  => "S/N",
+                            "street"  => "Unknown Street",
+                            "number"  => "N/A",
                             "city"    => "São Paulo",
                             "state"   => "SP",
-                            "country" => "Brasil",
+                            "country" => "Brazil",
                             "zip"     => "00000-000",
                         ],
                     ],
                     "items" => [
                         [
-                            "title"     => "Pagamento Pix",
+                            "title"     => "PIX Payment",
                             "unitPrice" => $amountCents,
                             "quantity"  => 1,
                             "tangible"  => false,
@@ -146,27 +148,26 @@ class TransactionPixController extends Controller
                     "installments" => 1,
                 ];
 
-                \Log::info("LUMNIS_PAYLOAD_ENVIO", $payload);
+                \Log::info("LUMNIS_PAYLOAD_SENT", $payload);
 
                 // ======================================
-                // 🌍 ENVIO PARA A LUMNIS (CHAMADA REAL)
+                // 🌍 Send to Lumnis API
                 // ======================================
                 $response = $lumnis->createTransaction($payload);
 
                 if (!in_array($response["status"], [200, 201])) {
-                    throw new \Exception("Erro Lumnis: " . json_encode($response["body"]));
+                    throw new \Exception("Lumnis error: " . json_encode($response["body"]));
                 }
 
                 $dataAPI = $response["body"];
-
                 $transactionId = data_get($dataAPI, 'id');
                 $qrCodeText    = data_get($dataAPI, 'qrcode');
 
                 if (!$transactionId || !$qrCodeText) {
-                    throw new \Exception("Retorno inválido da Lumnis");
+                    throw new \Exception("Invalid Lumnis response");
                 }
 
-                // 📌 Atualizar transação local
+                // 📌 Update local record
                 DB::table('transactions')
                     ->where('id', $tx->id)
                     ->update([
@@ -198,8 +199,7 @@ class TransactionPixController extends Controller
             ]);
 
         } catch (\Throwable $e) {
-
-            \Log::error("ERRO_PIX_PRODUCAO", [
+            \Log::error("PIX_CREATION_ERROR", [
                 'error' => $e->getMessage(),
                 'line'  => $e->getLine(),
                 'file'  => $e->getFile(),
@@ -207,13 +207,67 @@ class TransactionPixController extends Controller
 
             return response()->json([
                 'success' => false,
-                'error'   => 'ERRO_PIX_500'
+                'error'   => 'Internal server error while creating PIX.'
             ], 500);
         }
     }
 
+    /**
+     * 🔍 Check transaction status by TXID
+     * GET /api/v1/transaction/status/{txid}
+     */
+    public function status(Request $request, string $txid)
+    {
+        $auth   = $request->header('X-Auth-Key');
+        $secret = $request->header('X-Secret-Key');
+
+        if (!$auth || !$secret) {
+            return response()->json([
+                'success' => false,
+                'error'   => 'Missing authentication headers.'
+            ], 401);
+        }
+
+        // Find user
+        $user = $this->resolveUser($auth, $secret);
+
+        if (!$user) {
+            return response()->json([
+                'success' => false,
+                'error'   => 'Invalid credentials.'
+            ], 401);
+        }
+
+        // Find transaction
+        $transaction = Transaction::where('txid', $txid)
+            ->where('user_id', $user->id)
+            ->first();
+
+        if (!$transaction) {
+            return response()->json([
+                'success' => false,
+                'error'   => 'Transaction not found.'
+            ], 404);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'id'              => $transaction->id,
+                'txid'            => $transaction->txid,
+                'status'          => $transaction->status,
+                'amount'          => $transaction->amount,
+                'fee'             => $transaction->fee,
+                'created_at'      => $transaction->created_at,
+                'updated_at'      => $transaction->updated_at,
+                'provider'        => $transaction->provider,
+                'provider_payload'=> json_decode($transaction->provider_payload, true),
+            ]
+        ]);
+    }
+
     // =================================================
-    // 🔍 Validação Usuário
+    // 🔍 Resolve User
     // =================================================
     private function resolveUser(string $auth, string $secret)
     {
@@ -223,7 +277,7 @@ class TransactionPixController extends Controller
     }
 
     // =================================================
-    // 💸 Cálculo de Taxa
+    // 💸 Compute Fee
     // =================================================
     private function computeFee($user, float $amount): float
     {
@@ -241,7 +295,7 @@ class TransactionPixController extends Controller
     }
 
     // =================================================
-    // 🔢 Número Aleatório
+    // 🔢 Random numeric generator
     // =================================================
     private function randomNumeric(int $len): string
     {
@@ -251,7 +305,7 @@ class TransactionPixController extends Controller
     }
 
     // =================================================
-    // 🧠 VALIDADOR DE CPF (BANCO / RECEITA FEDERAL)
+    // 🧠 CPF validator
     // =================================================
     private function validateCpf($cpf): bool
     {

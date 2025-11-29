@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\Route;
 // Controllers principais
 use App\Http\Controllers\Api\TransactionPixController;
 use App\Http\Controllers\Api\WithdrawOutController;
+use App\Http\Controllers\Api\BalanceController;
 
 use App\Http\Controllers\Webhooks\VeltraxWebhookController;
 use App\Http\Controllers\Webhooks\GatewayWebhookController;
@@ -28,6 +29,7 @@ use App\Http\Controllers\Api\Webhooks\PluggouPayoutWebhookController;
 use App\Http\Controllers\Api\Webhooks\LumnisWebhookController;
 use App\Http\Controllers\Api\Webhooks\LumnisWithdrawController;
 
+
 // ───────────────────────────────────────────────────────────────────────────────
 // HEALTHCHECK
 // ───────────────────────────────────────────────────────────────────────────────
@@ -36,6 +38,7 @@ Route::get('/ping', fn () => response()->json([
     'timestamp' => now()->toIso8601String(),
 ]))->name('api.ping');
 
+
 // ───────────────────────────────────────────────────────────────────────────────
 // USER AUTH
 // ───────────────────────────────────────────────────────────────────────────────
@@ -43,33 +46,52 @@ Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
     return $request->user();
 })->name('api.me');
 
+
 // ───────────────────────────────────────────────
 // PIX
 // ───────────────────────────────────────────────
-Route::prefix('pix')->name('api.pix.')->group(function () {
-    // reservado para futuras rotas PIX
-});
 
 // Criar transação Pix (CashIn)
 Route::post('/transaction/pix', [TransactionPixController::class, 'store'])
     ->middleware('throttle:30,1')
     ->name('transaction.pix.store');
 
-// Buscar transação por TXID
+// Consultar status da transação por TXID
+Route::get('/v1/transaction/status/{txid}', [TransactionPixController::class, 'status'])
+    ->where('txid', '[A-Za-z0-9]+')
+    ->middleware('throttle:60,1')
+    ->name('transaction.pix.status');
+
+// (Opcional antigo — buscar TXID direto)
 Route::get('/transaction/pix/{txid}', [TransactionPixController::class, 'showByTxid'])
     ->where('txid', '[A-Za-z0-9]+')
     ->middleware('throttle:60,1')
     ->name('transaction.pix.show');
 
-// Saque (CashOut)
+
+// ───────────────────────────────────────────────
+// WITHDRAW (CashOut)
+// ───────────────────────────────────────────────
 Route::post('/withdraw/out', [WithdrawOutController::class, 'store'])
     ->middleware('throttle:10,1')
     ->name('withdraw.out.store');
 
-// TrustPay OUT
+
+// ───────────────────────────────────────────────
+// TRUSTPAY OUT
+// ───────────────────────────────────────────────
 Route::post('/trustpay/out', [TrustPayOutController::class, 'store'])
     ->middleware('throttle:10,1')
     ->name('trustpay.out');
+
+
+// ───────────────────────────────────────────────
+// BALANCE (Consulta de Saldo)
+// ───────────────────────────────────────────────
+Route::get('/v1/balance/available', [BalanceController::class, 'available'])
+    ->middleware('throttle:60,1')
+    ->name('balance.available');
+
 
 // ───────────────────────────────────────────────────────────────────────────────
 // WEBHOOKS
@@ -144,14 +166,14 @@ Route::prefix('webhooks')->name('webhooks.')->group(function () {
         ->name('pluggou.payout');
 
     // ────────────────────────────
-    // REFLOWPAY PAYIN (CashIn)
+    // REFLOWPAY PAYIN
     // ────────────────────────────
     Route::post('/reflowpay', ReflowPayWebhookController::class)
         ->middleware('throttle:120,1')
         ->name('reflowpay');
 
     // ────────────────────────────
-    // REFLOWPAY PAYOUT (CashOut)
+    // REFLOWPAY PAYOUT
     // ────────────────────────────
     Route::post('/reflowpay/cashout', ReflowPayCashoutWebhookController::class)
         ->middleware('throttle:120,1')
@@ -160,13 +182,10 @@ Route::prefix('webhooks')->name('webhooks.')->group(function () {
     // ────────────────────────────
     // LUMNIS WEBHOOKS
     // ────────────────────────────
-
-    // (1) PAYIN → Recebimento de transações Pix
     Route::post('/lumnis', LumnisWebhookController::class)
         ->middleware('throttle:120,1')
         ->name('lumnis');
 
-    // (2) PAYOUT → Webhook de saques Pix (cashout)
     Route::post('/lumnis/withdraw', LumnisWithdrawController::class)
         ->middleware('throttle:120,1')
         ->name('lumnis.withdraw');
