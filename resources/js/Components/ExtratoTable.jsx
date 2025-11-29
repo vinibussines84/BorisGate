@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 
 /* =====================================================================================
-   FORMATADORES
+   FORMATTERS
 ===================================================================================== */
 const formatCurrency = (value) =>
   (Number(value) || 0).toLocaleString("pt-BR", {
@@ -34,9 +34,9 @@ const mapStatus = (s) => {
   const normalized = String(s || "").trim().toLowerCase();
 
   const groups = {
-    EFETIVADO: ["paga", "paid", "approved", "completed"],
-    FALHADO: ["falha", "failed", "erro", "error"],
-    PENDENTE: ["pendente", "pending", "processing", "under_review"],
+    COMPLETED: ["paga", "paid", "approved", "completed"],
+    FAILED: ["falha", "failed", "erro", "error"],
+    PENDING: ["pendente", "pending", "processing", "under_review"],
   };
 
   for (const [key, values] of Object.entries(groups)) {
@@ -50,25 +50,25 @@ const StatusPill = ({ status }) => {
   const s = String(status || "").toUpperCase();
 
   const map = {
-    PENDENTE: {
+    PENDING: {
       cls: "bg-amber-500/10 text-amber-500 border-amber-500/20",
       icon: Clock,
-      label: "Pendente",
+      label: "Pending",
     },
-    PROCESSANDO: {
+    PROCESSING: {
       cls: "bg-sky-500/10 text-sky-500 border-sky-500/20",
       icon: Loader2,
-      label: "Processando",
+      label: "Processing",
     },
-    EFETIVADO: {
+    COMPLETED: {
       cls: "bg-[#02fb5c]/10 text-[#02fb5c] border-[#02fb5c]/30",
       icon: CheckCircle2,
-      label: "Efetivado",
+      label: "Completed",
     },
-    FALHADO: {
+    FAILED: {
       cls: "bg-[#ff3b5c]/10 text-[#ff3b5c] border-[#ff3b5c]/20",
       icon: XCircle,
-      label: "Falhado",
+      label: "Failed",
     },
   };
 
@@ -83,7 +83,7 @@ const StatusPill = ({ status }) => {
     <span
       className={`inline-flex items-center gap-1.5 px-2 py-0.5 text-[11px] rounded-lg border font-medium ${cfg.cls}`}
     >
-      <Icon size={12} className={s === "PROCESSANDO" ? "animate-spin" : ""} />
+      <Icon size={12} className={s === "PROCESSING" ? "animate-spin" : ""} />
       {cfg.label}
     </span>
   );
@@ -103,15 +103,15 @@ const OriginPill = ({ type }) => {
       }`}
     >
       {credit ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}
-      {credit ? "Entrada (PIX)" : "Débito (Saque)"}
+      {credit ? "Credit (PIX)" : "Debit (Withdrawal)"}
     </span>
   );
 };
 
 /* =====================================================================================
-   COMPONENTE PRINCIPAL — ExtratoTable
+   MAIN COMPONENT — ExtractTable
 ===================================================================================== */
-export default function ExtratoTable({
+export default function ExtractTable({
   transactions = [],
   onView,
   page,
@@ -130,27 +130,27 @@ export default function ExtratoTable({
       <div>
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-base font-semibold text-white">
-            Histórico de Transações
+            Transaction History
           </h3>
           <span className="text-[11px] text-gray-400">
             {loading
-              ? "Carregando..."
-              : `${transactions.length} resultados nesta página (${totalItems} total)`}
+              ? "Loading..."
+              : `${transactions.length} results on this page (${totalItems} total)`}
           </span>
         </div>
 
-        {/* TABELA */}
+        {/* TABLE */}
         <div className="overflow-x-auto rounded-2xl border border-white/10 min-h-[340px]">
           <table className="min-w-full text-sm">
             <thead className="sticky top-0 bg-[#0a0a0a]/95 backdrop-blur border-b border-white/10">
               <tr className="text-left text-gray-400">
                 <th className="py-2.5 px-4">ID/Ref.</th>
-                <th className="py-2.5 px-4">Tipo</th>
-                <th className="py-2.5 px-4 text-right">Valor</th>
+                <th className="py-2.5 px-4">Type</th>
+                <th className="py-2.5 px-4 text-right">Amount</th>
                 <th className="py-2.5 px-4">Status</th>
                 <th className="py-2.5 px-4">E2E</th>
-                <th className="py-2.5 px-4">Data</th>
-                <th className="py-2.5 px-4 text-center">Ação</th>
+                <th className="py-2.5 px-4">Date</th>
+                <th className="py-2.5 px-4 text-center">Action</th>
               </tr>
             </thead>
 
@@ -166,7 +166,7 @@ export default function ExtratoTable({
               ) : transactions.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="py-12 text-center text-gray-400">
-                    Nenhuma transação encontrada.
+                    No transactions found.
                   </td>
                 </tr>
               ) : (
@@ -192,7 +192,6 @@ export default function ExtratoTable({
                       <StatusPill status={mapStatus(t.status)} />
                     </td>
 
-                    {/* NOVA COLUNA E2E — agora compatível com e2e, e2e_id e endtoend */}
                     <td className="py-2.5 px-4 font-mono text-xs text-gray-400">
                       {t.e2e ?? t.e2e_id ?? t.endtoend ?? "—"}
                     </td>
@@ -209,7 +208,7 @@ export default function ExtratoTable({
                         }}
                         className="inline-flex items-center gap-1 px-2 py-1 rounded-lg border text-xs border-white/10 text-gray-300 hover:bg-[#1a1a1a]"
                       >
-                        <FileText size={13} /> Detalhes
+                        <FileText size={13} /> Details
                       </button>
                     </td>
                   </tr>
@@ -220,10 +219,10 @@ export default function ExtratoTable({
         </div>
       </div>
 
-      {/* PAGINAÇÃO */}
+      {/* PAGINATION */}
       <div className="mt-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <p className="text-xs text-gray-400">
-          Página {page} de {totalPages}
+          Page {page} of {totalPages}
         </p>
 
         <div className="flex items-center gap-2">
@@ -236,8 +235,9 @@ export default function ExtratoTable({
                 : "border-white/10 text-gray-600 cursor-not-allowed"
             }`}
           >
-            ← Anterior
+            ← Previous
           </button>
+
           <button
             disabled={!canNext}
             onClick={() => canNext && setPage(page + 1)}
@@ -247,7 +247,7 @@ export default function ExtratoTable({
                 : "border-white/10 text-gray-600 cursor-not-allowed"
             }`}
           >
-            Próxima →
+            Next →
           </button>
         </div>
       </div>

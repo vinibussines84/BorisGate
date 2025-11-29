@@ -36,7 +36,7 @@ const norm = (s) => String(s || "").trim().toLowerCase();
 const normalizeStatusKey = (s) => {
   const v = norm(s);
   if (["paga", "paid", "completed", "confirmed", "settled"].includes(v))
-    return "paga";
+    return "paid";
   if (["pending", "pendente", "processing", "authorized", "created"].includes(v))
     return "pending";
   if (["failed", "falha", "denied", "canceled", "cancelled"].includes(v))
@@ -48,24 +48,24 @@ const normalizeStatusKey = (s) => {
 };
 
 const statusMap = {
-  paga: {
-    label: "Paga",
+  paid: {
+    label: "Paid",
     color: "bg-emerald-500/10 text-emerald-300 border-emerald-500/20",
   },
   pending: {
-    label: "Pendente",
+    label: "Pending",
     color: "bg-amber-500/10 text-amber-300 border-amber-500/20",
   },
   failed: {
-    label: "Falhou",
+    label: "Failed",
     color: "bg-red-600/10 text-red-300 border-red-600/20",
   },
   canceled: {
-    label: "Cancelada",
+    label: "Canceled",
     color: "bg-zinc-700/20 text-zinc-400 border-zinc-600/30",
   },
   mediation: {
-    label: "Em Análise",
+    label: "Under Review",
     color: "bg-sky-500/10 text-sky-300 border-sky-500/20",
   },
 };
@@ -86,10 +86,10 @@ const Skeleton = ({ className = "" }) => (
 );
 
 /* ------------------------------
-    ITEM DE TRANSAÇÃO
+    TRANSACTION ITEM
 ------------------------------- */
 const FeedItem = React.memo(function FeedItem({ it, selected, onSelect }) {
-  const badgeKey = normalizeStatusKey(it.status || "paga");
+  const badgeKey = normalizeStatusKey(it.status || "paid");
   const statusCfg =
     statusMap[badgeKey] || {
       label: it.statusLabel || it.status || "",
@@ -104,7 +104,7 @@ const FeedItem = React.memo(function FeedItem({ it, selected, onSelect }) {
       }`}
     >
       <div className="flex items-center justify-between gap-4">
-        {/* ícone */}
+        {/* icon */}
         <div className="flex items-center gap-3.5 flex-1 min-w-0">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl ring-1 ring-inset ring-zinc-800 bg-zinc-900/80">
             {it.credit ? (
@@ -114,10 +114,10 @@ const FeedItem = React.memo(function FeedItem({ it, selected, onSelect }) {
             )}
           </div>
 
-          {/* nome */}
+          {/* name */}
           <div className="min-w-0 flex-1">
             <p className="truncate font-medium text-[15px] text-zinc-100">
-              {it.kind === "SAQUE" ? "Saque" : "EquitPay"}
+              {it.kind === "SAQUE" ? "Withdrawal" : "EquitPay"}
             </p>
             <p className="text-[12px] text-zinc-500 truncate mt-0.5">
               {`E2E: ${it.e2e || "—"}`}
@@ -125,7 +125,7 @@ const FeedItem = React.memo(function FeedItem({ it, selected, onSelect }) {
           </div>
         </div>
 
-        {/* valores */}
+        {/* values */}
         <div className="text-right flex-shrink-0">
           <span
             className={`inline-flex items-center justify-end gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium border ${statusCfg.color} mb-1`}
@@ -146,14 +146,14 @@ const FeedItem = React.memo(function FeedItem({ it, selected, onSelect }) {
         </div>
       </div>
 
-      {/* DETALHES */}
+      {/* DETAILS */}
       {selected && (
         <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 text-zinc-200 animate-fadeIn">
-          <DetailLine label="Tipo" value={it.kind} />
-          <DetailLine label="Valor Bruto" value={currencyBRL(it.amount)} />
-          <DetailLine label="Taxa" value={currencyBRL(it.fee)} />
-          <DetailLine label="Líquido" value={currencyBRL(it.net)} />
-          <DetailLine label="Pago em" value={fmtDateTime(it.paidAt)} />
+          <DetailLine label="Type" value={it.kind} />
+          <DetailLine label="Gross Amount" value={currencyBRL(it.amount)} />
+          <DetailLine label="Fee" value={currencyBRL(it.fee)} />
+          <DetailLine label="Net Amount" value={currencyBRL(it.net)} />
+          <DetailLine label="Paid At" value={fmtDateTime(it.paidAt)} />
           <DetailLine label="E2E" value={it.e2e || "—"} />
         </div>
       )}
@@ -162,7 +162,7 @@ const FeedItem = React.memo(function FeedItem({ it, selected, onSelect }) {
 });
 
 /* ------------------------------
-            MAIN
+            MAIN CARD
 ------------------------------- */
 export default function SidebarCard() {
   const [selectedItem, setSelectedItem] = useState(null);
@@ -198,26 +198,25 @@ export default function SidebarCard() {
           credentials: "include",
         });
 
-        // se não for JSON válido, retorna erro legível
         const text = await res.text();
         let json = {};
         try {
           json = JSON.parse(text);
         } catch {
           throw new Error(
-            "A resposta do servidor não é JSON válida.\n" +
-              "Verifique se você está autenticado ou se a API retornou erro HTML."
+            "The server response is not valid JSON.\n" +
+              "Check authentication or whether the API returned an HTML error."
           );
         }
 
         if (!res.ok) {
-          throw new Error(json?.message || "Erro ao carregar transações.");
+          throw new Error(json?.message || "Failed to load transactions.");
         }
 
         setItems(Array.isArray(json?.data) ? json.data : []);
       } catch (e) {
-        console.error("Erro ao buscar /api/metrics/paid-feed:", e);
-        setError(e?.message || "Falha ao conectar-se ao servidor.");
+        console.error("Error fetching /api/metrics/paid-feed:", e);
+        setError(e?.message || "Failed to connect to server.");
       } finally {
         setLoading(false);
       }
@@ -244,10 +243,10 @@ export default function SidebarCard() {
           <div>
             <h3 className="text-base md:text-lg font-semibold text-white tracking-tight flex items-center gap-2">
               <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.7)]" />
-              Transações Pagas
+              Paid Transactions
             </h3>
             <p className="text-[12px] text-zinc-500 mt-0.5">
-              PIX recebidos e saques concluídos
+              Received PIX and completed withdrawals
             </p>
           </div>
 
@@ -257,7 +256,7 @@ export default function SidebarCard() {
               className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border border-zinc-800 bg-zinc-900/60 text-zinc-300 hover:border-emerald-500/40 hover:text-emerald-300 hover:shadow-[0_0_10px_rgba(16,185,129,0.25)] transition-all"
             >
               <Calendar size={16} />
-              Período
+              Period
             </button>
             {isCalendarOpen && (
               <div className="absolute right-0 mt-2 z-30">
@@ -271,7 +270,7 @@ export default function SidebarCard() {
         </div>
       </div>
 
-      {/* Conteúdo */}
+      {/* Content */}
       <div className="flex-1 overflow-y-auto pr-1 custom-scrollbar">
         {loading ? (
           <div className="grid grid-cols-1 gap-3 p-4">
@@ -291,11 +290,9 @@ export default function SidebarCard() {
             <div className="h-14 w-14 rounded-xl border border-zinc-800 bg-zinc-900 flex items-center justify-center">
               <Info className="h-6 w-6 text-zinc-500" />
             </div>
-            <p className="text-zinc-300 font-medium">
-              Nenhum registro encontrado
-            </p>
+            <p className="text-zinc-300 font-medium">No records found</p>
             <p className="text-[12px] text-zinc-500 mt-1">
-              Aguarde processamento ou ajuste o período.
+              Please wait for processing or adjust the selected period.
             </p>
           </div>
         ) : (

@@ -21,14 +21,14 @@ import {
 
 /* ================= Helpers ================= */
 const toBRL = (v) =>
-  (Number(v) || 0).toLocaleString("pt-BR", {
+  (Number(v) || 0).toLocaleString("en-US", {
     style: "currency",
-    currency: "BRL",
+    currency: "USD",
     minimumFractionDigits: 2,
   });
 
 const toPct = (v) =>
-  `${(Number(v) || 0).toLocaleString("pt-BR", {
+  `${(Number(v) || 0).toLocaleString("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}%`;
@@ -47,7 +47,7 @@ function computeFee(enabled, fixed, percent) {
   if (!enabled) {
     return {
       enabled: false,
-      type: "Desativada",
+      type: "Disabled",
       valueStr: "—",
       badgeTone: "bg-zinc-900 text-zinc-500 border-zinc-700",
     };
@@ -55,27 +55,27 @@ function computeFee(enabled, fixed, percent) {
   if (pct > 0 && f > 0)
     return {
       enabled: true,
-      type: "Misto",
+      type: "Mixed",
       valueStr: `${toPct(pct)} + ${toBRL(f)}`,
       badgeTone: "bg-[#02fb5c]/10 text-[#02fb5c] border-[#02fb5c]/30",
     };
   if (pct > 0)
     return {
       enabled: true,
-      type: "Percentual",
+      type: "Percentage",
       valueStr: toPct(pct),
       badgeTone: "bg-[#02fb5c]/10 text-[#02fb5c] border-[#02fb5c]/30",
     };
   if (f > 0)
     return {
       enabled: true,
-      type: "Fixo",
+      type: "Fixed",
       valueStr: toBRL(f),
       badgeTone: "bg-[#02fb5c]/10 text-[#02fb5c] border-[#02fb5c]/30",
     };
   return {
     enabled: true,
-    type: "Sem valor definido",
+    type: "No value defined",
     valueStr: "—",
     badgeTone: "bg-[#1a1a1a] text-gray-400 border-zinc-700",
   };
@@ -132,14 +132,14 @@ const ApiKeyCard = ({ label, value, hidden, copiedKey, copyWarningKey, onCopy })
   );
 };
 
-const FeeRow = ({ icon: Icon, titulo, fee }) => (
+const FeeRow = ({ icon: Icon, title, fee }) => (
   <div className="flex items-center justify-between bg-[#111]/70 border border-white/10 rounded-xl p-4">
     <div className="flex items-center gap-3">
       <div className="p-2 rounded-lg bg-[#0b0b0b]/70 border border-white/10">
         <Icon size={18} className="text-[#02fb5c]" />
       </div>
       <div>
-        <p className="text-white text-sm">{titulo}</p>
+        <p className="text-white text-sm">{title}</p>
         <span
           className={`inline-flex items-center gap-2 px-2 py-1 mt-1 text-xs rounded-lg border ${fee.badgeTone}`}
         >
@@ -173,11 +173,11 @@ const WebhookRow = ({ label, url, copied, onCopy, enabled }) => {
           <p className="text-sm text-white">{label}</p>
           <div className="flex items-center gap-2 mt-1">
             <span className="px-2 py-0.5 bg-[#02fb5c]/10 rounded-md border border-[#02fb5c]/30 text-[11px] text-[#02fb5c] flex items-center gap-1">
-              <Clock size={12} /> Assíncrono
+              <Clock size={12} /> Async
             </span>
             {!enabled && (
               <span className="text-[11px] flex items-center gap-1 text-gray-500">
-                <Power size={12} /> desativado
+                <Power size={12} /> disabled
               </span>
             )}
           </div>
@@ -204,7 +204,7 @@ const WebhookRow = ({ label, url, copied, onCopy, enabled }) => {
   );
 };
 
-/* =================== Página =================== */
+/* =================== Page =================== */
 export default function Api() {
   const { user } = usePage().props;
   const [hidden, setHidden] = useState(true);
@@ -248,7 +248,7 @@ export default function Api() {
 
   return (
     <AuthenticatedLayout>
-      <Head title="API & Integração" />
+      <Head title="API & Integration" />
 
       <div className="min-h-screen bg-[#0B0B0B] px-6 py-12 text-gray-100">
         <div className="max-w-5xl mx-auto space-y-10">
@@ -257,8 +257,8 @@ export default function Api() {
             <div className="flex items-center gap-4">
               <div className="w-1 h-10 rounded-full bg-[#02fb5c]" />
               <div>
-                <h1 className="text-2xl font-semibold text-white">Integração com API</h1>
-                <p className="text-gray-400 text-sm">Gerencie suas credenciais e webhooks</p>
+                <h1 className="text-2xl font-semibold text-white">API Integration</h1>
+                <p className="text-gray-400 text-sm">Manage your credentials and webhooks</p>
               </div>
             </div>
 
@@ -268,7 +268,7 @@ export default function Api() {
                 className="flex items-center gap-2 px-5 py-2 rounded-full bg-[#02fb5c] hover:bg-[#29ff78] text-[#0b0b0b] font-semibold transition shadow-[0_0_15px_rgba(2,251,92,0.3)]"
               >
                 {hidden ? <Eye size={16} /> : <EyeOff size={16} />}
-                {hidden ? "Mostrar Chaves" : "Ocultar Chaves"}
+                {hidden ? "Show Keys" : "Hide Keys"}
               </button>
 
               <a
@@ -276,12 +276,12 @@ export default function Api() {
                 className="flex items-center gap-2 px-5 py-2 rounded-full border border-[#02fb5c]/40 text-[#02fb5c] font-semibold hover:bg-[#02fb5c]/10 transition shadow-[0_0_10px_rgba(2,251,92,0.2)]"
               >
                 <BookOpen size={16} />
-                Documentação
+                Documentation
               </a>
             </div>
           </HeaderCapsule>
 
-          {/* CHAVES */}
+          {/* KEYS */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <ApiKeyCard
               label="AuthKey"
@@ -302,12 +302,12 @@ export default function Api() {
             />
           </div>
 
-          {/* TAXAS */}
+          {/* FEES */}
           <Card className="p-6">
-            <SectionTitle icon={Percent} title="Configurações de Taxas" />
+            <SectionTitle icon={Percent} title="Fee Settings" />
             <div className="space-y-3">
-              <FeeRow icon={Percent} titulo="Cash In" fee={feeIn} />
-              <FeeRow icon={Banknote} titulo="Cash Out" fee={feeOut} />
+              <FeeRow icon={Percent} title="Cash In" fee={feeIn} />
+              <FeeRow icon={Banknote} title="Cash Out" fee={feeOut} />
             </div>
           </Card>
 
@@ -317,9 +317,9 @@ export default function Api() {
             <div className="mb-4 flex items-center gap-2 text-xs">
               <span className="px-2 py-1 rounded-md border border-[#02fb5c]/30 bg-[#02fb5c]/10 text-[#02fb5c] flex items-center gap-1">
                 <Power size={12} />
-                {webhookEnabled ? "Ativado" : "Desativado"}
+                {webhookEnabled ? "Enabled" : "Disabled"}
               </span>
-              <span className="text-gray-500">(Fila assíncrona)</span>
+              <span className="text-gray-500">(Asynchronous queue)</span>
             </div>
 
             <div className="space-y-3">
@@ -340,10 +340,10 @@ export default function Api() {
             </div>
           </Card>
 
-          {/* RODAPÉ */}
+          {/* FOOTER */}
           <div className="flex items-center gap-3 text-gray-500 text-xs">
             <ShieldCheck size={14} className="text-[#02fb5c]" />
-            <p>Mantenha suas credenciais sempre em segurança.</p>
+            <p>Keep your credentials secure at all times.</p>
           </div>
         </div>
       </div>

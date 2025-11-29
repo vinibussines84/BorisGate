@@ -10,13 +10,13 @@ import {
 } from "lucide-react";
 
 const STATUS_TABS = [
-  { key: "all", label: "Todos" },
-  { key: "EFETIVADO", label: "Efetivado" },
-  { key: "PENDENTE", label: "Pendente" },
-  { key: "FALHADO", label: "Falhado" },
+  { key: "all", label: "All" },
+  { key: "EFETIVADO", label: "Completed" },
+  { key: "PENDENTE", label: "Pending" },
+  { key: "FALHADO", label: "Failed" },
 ];
 
-export default function ExtratoHeader({
+export default function ExtractHeader({
   saldo = 0,
   entradas = 0,
   saidas = 0,
@@ -49,15 +49,15 @@ export default function ExtratoHeader({
 
   return (
     <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[#0b0b0b]/95 p-6 sm:p-7 backdrop-blur-sm min-h-[180px]">
-      {/* TOPO */}
+      {/* TOP */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div className="flex items-center gap-3">
           <div className="p-3 rounded-2xl border border-white/10 bg-[#0a0a0a]/90 shrink-0">
             <FileText className="w-5 h-5 text-[#02fb5c]" />
           </div>
           <div>
-            <h1 className="text-xl font-semibold text-white leading-none">Extrato</h1>
-            <p className="text-gray-400 text-sm mt-0.5">Visão geral das movimentações</p>
+            <h1 className="text-xl font-semibold text-white leading-none">Statement</h1>
+            <p className="text-gray-400 text-sm mt-0.5">Overview of account activity</p>
           </div>
         </div>
 
@@ -67,16 +67,16 @@ export default function ExtratoHeader({
             text-gray-200 border border-white/10 rounded-lg bg-[#0a0a0a]/90 hover:bg-[#141414] transition-colors"
         >
           <RefreshCw size={14} className="text-gray-300" />
-          Atualizar
+          Refresh
         </button>
       </div>
 
-      {/* SALDO */}
+      {/* BALANCE */}
       <div className="mt-6 flex flex-col sm:flex-row sm:items-center justify-between gap-6">
         <div className="flex-1 rounded-2xl bg-[#0a0a0a]/95 border border-white/10 px-6 py-5 min-h-[110px] flex flex-col justify-between shadow-[0_0_25px_rgba(0,0,0,0.4)]">
           <div className="flex items-center gap-2 text-[11px] uppercase tracking-wide text-gray-400">
             <CreditCard size={12} className="text-gray-500" />
-            Saldo disponível
+            Available Balance
           </div>
           <p className="text-4xl font-semibold text-white tabular-nums leading-none transition-opacity duration-300">
             {formatCurrency(saldo)}
@@ -84,24 +84,26 @@ export default function ExtratoHeader({
         </div>
 
         <div className="flex sm:flex-row flex-col gap-3 shrink-0">
+          {/* ENTRADAS */}
           <div className="flex items-center justify-between sm:justify-start gap-3 rounded-2xl px-5 py-3 bg-[#0a0a0a]/95 border border-[#1b1b1b] shadow-inner w-[180px]">
             <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-[#02fb5c]/20 border border-[#02fb5c]/40">
               <ArrowUpRight size={15} className="text-[#02fb5c]" />
             </div>
             <div className="flex flex-col">
-              <span className="text-[12px] text-gray-400">Entradas</span>
+              <span className="text-[12px] text-gray-400">Credits</span>
               <span className="text-sm font-medium text-white tabular-nums">
                 {formatCurrency(entradas)}
               </span>
             </div>
           </div>
 
+          {/* SAÍDAS */}
           <div className="flex items-center justify-between sm:justify-start gap-3 rounded-2xl px-5 py-3 bg-[#0a0a0a]/95 border border-[#1b1b1b] shadow-inner w-[180px]">
             <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-[#2b0000]/40 border border-[#ff3b5c]/40">
               <ArrowDownRight size={15} className="text-[#ff3b5c]" />
             </div>
             <div className="flex flex-col">
-              <span className="text-[12px] text-gray-400">Saídas</span>
+              <span className="text-[12px] text-gray-400">Debits</span>
               <span className="text-sm font-medium text-white tabular-nums">
                 {formatCurrency(saidas)}
               </span>
@@ -110,7 +112,7 @@ export default function ExtratoHeader({
         </div>
       </div>
 
-      {/* FILTROS */}
+      {/* FILTERS */}
       <div className="mt-8 flex flex-col lg:flex-row gap-3 items-center justify-between">
         <div className="flex items-center gap-2 w-full lg:w-auto">
           <span className="text-[11px] text-gray-400 flex items-center gap-1.5 shrink-0">
@@ -141,7 +143,7 @@ export default function ExtratoHeader({
           </div>
         </div>
 
-        {/* BUSCA */}
+        {/* SEARCH */}
         <label className="relative flex-1 max-w-full sm:max-w-[380px]">
           <Search
             size={14}
@@ -150,7 +152,7 @@ export default function ExtratoHeader({
           <input
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Buscar por ID, referência, CPF/CNPJ, etc."
+            placeholder="Search by ID, reference, CPF/CNPJ, etc."
             className="w-full pl-9 pr-3 py-2 text-xs rounded-lg bg-[#050505]/80 border border-[#1a1a1a]
               text-gray-200 placeholder:text-gray-500 focus:ring-2 focus:ring-[#02fb5c]/40 transition-all duration-200"
           />

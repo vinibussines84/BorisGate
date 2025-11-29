@@ -320,14 +320,14 @@ export default function AuthenticatedLayout({ header, children, boxed = false })
 
   const nav = useMemo(
     () => [
-      { key: 'dashboard', label: 'Início', href: urlFor('dashboard', '/dashboard'), icon: Home, primary: true },
-      { key: 'extrato', label: 'Extrato', href: '/extrato', icon: FileText, primary: true },
-      { key: 'cobranca', label: 'Cobrança', href: '/cobranca', icon: CreditCard, primary: true },
-      { key: 'saque', label: 'Saque', href: '/saques', icon: Wallet, primary: true },
-      { key: 'med', label: 'Med', href: '/med', icon: Activity, primary: true },
+      { key: 'dashboard', label: 'Dashboard', href: urlFor('dashboard', '/dashboard'), icon: Home, primary: true },
+      { key: 'extrato', label: 'Statement', href: '/extrato', icon: FileText, primary: true },
+      { key: 'cobranca', label: 'Billing', href: '/cobranca', icon: CreditCard, primary: true },
+      { key: 'saque', label: 'Withdraw', href: '/saques', icon: Wallet, primary: true },
+      { key: 'med', label: 'Mediation', href: '/med', icon: Activity, primary: true },
       {
-        key: 'integracao',
-        label: 'Integração',
+        key: 'integration',
+        label: 'Integration',
         icon: Code,
         primary: true,
         isDropdown: true,

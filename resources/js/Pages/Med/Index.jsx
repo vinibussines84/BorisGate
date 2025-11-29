@@ -14,9 +14,9 @@ import {
    Helpers
 ========================== */
 const BRL = (v) =>
-  (Number(v) || 0).toLocaleString("pt-BR", {
+  (Number(v) || 0).toLocaleString("en-US", {
     style: "currency",
-    currency: "BRL",
+    currency: "USD",
     minimumFractionDigits: 2,
   });
 
@@ -24,7 +24,7 @@ const fmtDateTime = (iso) => {
   if (!iso) return "—";
   const d = new Date(iso);
   if (isNaN(d.getTime())) return "—";
-  return d.toLocaleString("pt-BR", {
+  return d.toLocaleString("en-US", {
     dateStyle: "short",
     timeStyle: "short",
   });
@@ -42,7 +42,7 @@ function Pagination({ meta }) {
     <div className="mt-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
       <p className="text-xs text-zinc-500">
         {typeof from === "number" && typeof to === "number" && typeof total === "number"
-          ? `Exibindo ${from}–${to} de ${total}`
+          ? `Showing ${from}–${to} of ${total}`
           : null}
       </p>
 
@@ -81,7 +81,7 @@ function Pagination({ meta }) {
               className={[
                 "px-3 py-2 text-xs rounded-lg border transition-colors",
                 isActive
-                  ? "border-[#41FF85]/30 bg-[#41FF85]/10 text-[#41FF85]"
+                  ? "border-[#02fb5c]/30 bg-[#02fb5c]/10 text-[#02fb5c]"
                   : "border-white/10 text-zinc-300 hover:bg-white/5",
               ].join(" ")}
               dangerouslySetInnerHTML={{ __html: l.label }}
@@ -94,10 +94,10 @@ function Pagination({ meta }) {
 }
 
 /* ==========================
-   Página principal
+   Main Page
 ========================== */
 export default function Med({ transactions, totalMed }) {
-  const [motivoView, setMotivoView] = useState(null);
+  const [reasonView, setReasonView] = useState(null);
 
   const data = transactions?.data ?? [];
 
@@ -110,48 +110,48 @@ export default function Med({ transactions, totalMed }) {
 
   return (
     <AuthenticatedLayout>
-      <Head title="Em Mediação" />
+      <Head title="Under Mediation" />
 
       <div className="min-h-screen bg-[#0B0B0B] py-10 px-4 sm:px-6 lg:px-8 text-gray-100">
         <div className="max-w-6xl mx-auto space-y-10">
 
           {/* ==========================
-              HEADER — MESMO DO WEBHOOKS
+              HEADER — IDENTICAL TO WEBHOOK DESIGN
           =========================== */}
-          <div className="bg-[#0f1115]/80 border border-white/10 rounded-3xl p-6 shadow-xl flex items-center gap-5 backdrop-blur">
-            <div className="h-full w-1.5 rounded-full bg-[#41FF85]" />
+          <div className="bg-[#0b0b0b]/90 border border-white/10 rounded-3xl p-6 shadow-[0_0_40px_-10px_rgba(0,0,0,0.7)] flex items-center gap-5 backdrop-blur">
+            <div className="h-full w-1.5 rounded-full bg-[#02fb5c]" />
 
             <div className="flex items-center gap-4">
               <div className="p-3 rounded-2xl border border-white/10 bg-black/40">
-                <AlertTriangle className="w-6 h-6 text-[#41FF85]" />
+                <AlertTriangle className="w-6 h-6 text-[#02fb5c]" />
               </div>
 
               <div>
                 <h1 className="text-2xl font-bold text-white">
-                  Transações em Mediação
+                  Transactions in Mediation
                 </h1>
                 <p className="text-zinc-400 text-sm mt-1">
-                  Acompanhe suas transações
-                  <span className="text-zinc-300"> em análise ou disputa</span>.
+                  Track your transactions that are
+                  <span className="text-zinc-300"> under review or dispute</span>.
                 </p>
               </div>
             </div>
           </div>
 
-          {/* Cards */}
+          {/* CARDS */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <Card title="Em Análise" value={totalMed} icon={Clock} color="text-[#41FF85]" />
-            <Card title="Em Disputa" value="0" icon={AlertTriangle} color="text-rose-400" />
-            <Card title="Finalizado" value="0" icon={FileText} color="text-emerald-400" />
-            <Card title="Estornado" value="0" icon={Info} color="text-amber-400" />
+            <Card title="Under Review" value={totalMed} icon={Clock} color="text-[#02fb5c]" />
+            <Card title="In Dispute" value="0" icon={AlertTriangle} color="text-rose-400" />
+            <Card title="Completed" value="0" icon={FileText} color="text-emerald-400" />
+            <Card title="Refunded" value="0" icon={Info} color="text-amber-400" />
           </div>
 
-          {/* Tabela */}
-          <div className="bg-[#0f1115]/80 backdrop-blur-sm rounded-3xl border border-white/10 shadow-lg p-6">
+          {/* TABLE */}
+          <div className="bg-[#0b0b0b]/90 backdrop-blur-sm rounded-3xl border border-white/10 shadow-lg p-6">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-base font-semibold text-white">Transações</h3>
+              <h3 className="text-base font-semibold text-white">Transactions</h3>
               <span className="text-xs text-gray-500">
-                {data.length} resultados nesta página
+                {data.length} results on this page
               </span>
             </div>
 
@@ -160,12 +160,12 @@ export default function Med({ transactions, totalMed }) {
                 <thead>
                   <tr className="text-left text-gray-400 border-b border-white/10">
                     <th className="py-2">ID</th>
-                    <th className="py-2">Valor</th>
-                    <th className="py-2">Taxa</th>
+                    <th className="py-2">Amount</th>
+                    <th className="py-2">Fee</th>
                     <th className="py-2">E2E</th>
-                    <th className="py-2">Método</th>
-                    <th className="py-2">Data</th>
-                    <th className="py-2 text-right">Motivo</th>
+                    <th className="py-2">Method</th>
+                    <th className="py-2">Date</th>
+                    <th className="py-2 text-right">Reason</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -187,11 +187,11 @@ export default function Med({ transactions, totalMed }) {
                       <td className="py-3 text-right">
                         <button
                           onClick={() =>
-                            setMotivoView(t.description || "Sem motivo informado")
+                            setReasonView(t.description || "No reason provided")
                           }
                           className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-white/10 text-gray-300 text-xs hover:bg-white/10 transition"
                         >
-                          <Eye size={13} /> Ver
+                          <Eye size={13} /> View
                         </button>
                       </td>
                     </tr>
@@ -203,17 +203,17 @@ export default function Med({ transactions, totalMed }) {
             <Pagination meta={meta} />
           </div>
 
-          {/* Modal */}
-          {motivoView && (
+          {/* MODAL */}
+          {reasonView && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
-              <div className="bg-[#0f1115] border border-white/10 rounded-2xl shadow-2xl max-w-md w-full mx-4 p-6">
+              <div className="bg-[#0b0b0b] border border-white/10 rounded-2xl shadow-2xl max-w-md w-full mx-4 p-6">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-base font-semibold text-gray-200 flex items-center gap-2">
-                    <Eye size={16} className="text-[#41FF85]" />
-                    Motivo da Mediação
+                    <Eye size={16} className="text-[#02fb5c]" />
+                    Mediation Reason
                   </h3>
                   <button
-                    onClick={() => setMotivoView(null)}
+                    onClick={() => setReasonView(null)}
                     className="text-gray-400 hover:text-white transition"
                   >
                     ✕
@@ -221,15 +221,15 @@ export default function Med({ transactions, totalMed }) {
                 </div>
 
                 <div className="text-sm text-gray-300 leading-relaxed whitespace-pre-wrap border-y border-white/10 py-4 max-h-60 overflow-y-auto">
-                  {motivoView}
+                  {reasonView}
                 </div>
 
                 <div className="flex justify-end mt-4">
                   <button
-                    onClick={() => setMotivoView(null)}
+                    onClick={() => setReasonView(null)}
                     className="px-4 py-2 rounded-lg border border-white/10 bg-white/5 text-gray-300 hover:bg-white/10 transition text-sm"
                   >
-                    Fechar
+                    Close
                   </button>
                 </div>
               </div>
@@ -243,7 +243,7 @@ export default function Med({ transactions, totalMed }) {
 }
 
 /* =====================
-   Subcomponente — Card
+   Subcomponent — Card
 ===================== */
 function Card({ title, value, icon: Icon, color }) {
   return (

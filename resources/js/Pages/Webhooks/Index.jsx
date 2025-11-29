@@ -1,4 +1,4 @@
-/** ✅ COMPLETO + SEM BOTÃO DE CADASTRAR + SEM MODAL DE CADASTRO **/
+/** ✅ COMPLETE + WITHOUT REGISTER BUTTON + WITHOUT REGISTER MODAL **/
 
 import React, { useState, useEffect } from "react";
 import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout";
@@ -19,13 +19,13 @@ import {
 } from "lucide-react";
 
 /* ----------------------------------------
- * Formatador de Data
+ * Date Formatter
  * ---------------------------------------- */
 const fmtDateTime = (iso) => {
     if (!iso) return "—";
     try {
         const d = new Date(iso);
-        return d.toLocaleString("pt-BR", {
+        return d.toLocaleString("en-US", {
             dateStyle: "short",
             timeStyle: "short",
         });
@@ -35,7 +35,7 @@ const fmtDateTime = (iso) => {
 };
 
 /* ----------------------------------------
- * Paginação local
+ * Local Pagination
  * ---------------------------------------- */
 function paginate(data, page, perPage = 10) {
     const total = data.length;
@@ -49,7 +49,7 @@ function paginate(data, page, perPage = 10) {
 }
 
 /* ----------------------------------------
- * Paginação visual
+ * Pagination Component
  * ---------------------------------------- */
 const Pagination = ({ page, totalPages, setPage }) => {
     if (totalPages <= 1) return null;
@@ -72,7 +72,7 @@ const Pagination = ({ page, totalPages, setPage }) => {
             </button>
 
             <span className="px-4 py-1 rounded-full border border-white/10 text-gray-300 text-sm">
-                Página {page} de {totalPages}
+                Page {page} of {totalPages}
             </span>
 
             <button
@@ -117,7 +117,7 @@ const Toast = ({ message, type = "success", onClose }) => {
 };
 
 /* ----------------------------------------
- * Modal de Confirmação
+ * Confirmation Modal
  * ---------------------------------------- */
 const ConfirmModal = ({ show, onConfirm, onCancel }) => {
     if (!show) return null;
@@ -125,10 +125,10 @@ const ConfirmModal = ({ show, onConfirm, onCancel }) => {
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50">
             <div className="bg-[#0b0b0b] border border-white/10 rounded-2xl p-8 max-w-sm w-full text-center shadow-[0_0_20px_rgba(0,0,0,0.8)]">
                 <h2 className="text-lg font-semibold text-white mb-3">
-                    Deseja reenviar este webhook?
+                    Do you want to resend this webhook?
                 </h2>
                 <p className="text-gray-400 text-sm mb-6">
-                    O evento será reenviado para o endpoint configurado.
+                    The event will be resent to the configured endpoint.
                 </p>
 
                 <div className="flex justify-center gap-4">
@@ -136,14 +136,14 @@ const ConfirmModal = ({ show, onConfirm, onCancel }) => {
                         onClick={onCancel}
                         className="px-5 py-2.5 rounded-full border border-white/20 text-gray-300 hover:bg-white/10 transition"
                     >
-                        Cancelar
+                        Cancel
                     </button>
 
                     <button
                         onClick={onConfirm}
                         className="px-5 py-2.5 rounded-full bg-[#02fb5c] text-[#0b0b0b] font-medium shadow-[0_0_10px_rgba(2,251,92,0.4)] hover:brightness-110 active:scale-95 transition"
                     >
-                        Reenviar
+                        Resend
                     </button>
                 </div>
             </div>
@@ -152,7 +152,7 @@ const ConfirmModal = ({ show, onConfirm, onCancel }) => {
 };
 
 /* ----------------------------------------
- * Página Principal
+ * Main Page
  * ---------------------------------------- */
 export default function WebhooksIndex({ webhooks = [] }) {
     const [activeTab, setActiveTab] = useState("webhooks");
@@ -165,10 +165,11 @@ export default function WebhooksIndex({ webhooks = [] }) {
     const [confirmId, setConfirmId] = useState(null);
     const [toast, setToast] = useState({ message: "", type: "success" });
 
-    /* -------- Reenvio de Webhook -------- */
+    /* -------- Ask to Resend -------- */
     const handleAskResend = (id) => setConfirmId(id);
     const closeConfirm = () => setConfirmId(null);
 
+    /* -------- Resend Webhook -------- */
     const handleResend = async () => {
         const id = confirmId;
         if (!id) return;
@@ -188,23 +189,23 @@ export default function WebhooksIndex({ webhooks = [] }) {
 
             const data = await response.json();
 
-            if (!response.ok) throw new Error(data.message || "Erro ao reenviar");
+            if (!response.ok) throw new Error(data.message || "Failed to resend");
 
             setToast({
-                message: "✔️ Webhook reenviado com sucesso!",
+                message: "✔️ Webhook successfully resent!",
                 type: "success",
             });
 
             fetchLogs();
         } catch {
-            setToast({ message: "✖️ Falha ao reenviar webhook.", type: "error" });
+            setToast({ message: "✖️ Failed to resend webhook.", type: "error" });
         } finally {
             setResendingId(null);
             setTimeout(() => setToast({ message: "", type: "success" }), 4000);
         }
     };
 
-    /* -------- Logs automáticos -------- */
+    /* -------- Auto Logs Fetch -------- */
     const fetchLogs = async () => {
         setLoadingLogs(true);
         try {
@@ -215,7 +216,7 @@ export default function WebhooksIndex({ webhooks = [] }) {
             const data = await res.json();
             setLogs(data);
         } catch {
-            setToast({ message: "✖️ Erro ao carregar logs.", type: "error" });
+            setToast({ message: "✖️ Error loading logs.", type: "error" });
         } finally {
             setLoadingLogs(false);
             setTimeout(() => setToast({ message: "", type: "success" }), 4000);
@@ -242,7 +243,7 @@ export default function WebhooksIndex({ webhooks = [] }) {
                                 <span className="w-2 h-8 bg-[#02fb5c] rounded-full shadow-[0_0_10px_rgba(2,251,92,0.5)]"></span>
 
                                 <h1 className="text-xl sm:text-2xl font-semibold text-white">
-                                    Gerenciamento de Webhooks
+                                    Webhook Management
                                 </h1>
                             </div>
 
@@ -260,7 +261,7 @@ export default function WebhooksIndex({ webhooks = [] }) {
                                     >
                                         {tab === "webhooks"
                                             ? "Webhooks"
-                                            : "Eventos enviados"}
+                                            : "Sent Events"}
                                     </button>
                                 ))}
                             </div>
@@ -274,7 +275,7 @@ export default function WebhooksIndex({ webhooks = [] }) {
                                 <Database size={22} className="text-[#02fb5c]" />
                             </div>
                             <div>
-                                <p className="text-sm text-gray-400">Webhooks cadastrados</p>
+                                <p className="text-sm text-gray-400">Registered webhooks</p>
                                 <h3 className="text-xl font-bold text-white">
                                     {webhooks.length}
                                 </h3>
@@ -286,7 +287,7 @@ export default function WebhooksIndex({ webhooks = [] }) {
                                 <Activity size={22} className="text-[#02fb5c]" />
                             </div>
                             <div>
-                                <p className="text-sm text-gray-400">Eventos recentes</p>
+                                <p className="text-sm text-gray-400">Recent events</p>
                                 <h3 className="text-xl font-bold text-white">
                                     {logs.length ?? 0}
                                 </h3>
@@ -294,17 +295,17 @@ export default function WebhooksIndex({ webhooks = [] }) {
                         </div>
                     </div>
 
-                    {/* TABELAS */}
+                    {/* TABLES */}
                     {activeTab === "webhooks" ? (
                         <>
                             <div className="bg-[#0b0b0b]/90 rounded-3xl border border-white/10 shadow-xl p-6 overflow-x-auto">
                                 <table className="min-w-full text-sm">
                                     <thead className="text-gray-400 border-b border-white/10">
                                         <tr>
-                                            <th className="text-left pb-3">URL de Postback</th>
-                                            <th className="text-left pb-3">Tipo de Evento</th>
-                                            <th className="text-left pb-3">Criado em</th>
-                                            <th className="text-right pb-3">Ações</th>
+                                            <th className="text-left pb-3">Postback URL</th>
+                                            <th className="text-left pb-3">Event Type</th>
+                                            <th className="text-left pb-3">Created At</th>
+                                            <th className="text-right pb-3">Actions</th>
                                         </tr>
                                     </thead>
 
@@ -315,7 +316,7 @@ export default function WebhooksIndex({ webhooks = [] }) {
                                                     colSpan={4}
                                                     className="py-10 text-center text-gray-500"
                                                 >
-                                                    Nenhum webhook cadastrado.
+                                                    No webhooks registered.
                                                 </td>
                                             </tr>
                                         ) : (
@@ -374,7 +375,7 @@ export default function WebhooksIndex({ webhooks = [] }) {
                             <div className="bg-[#0b0b0b]/90 rounded-3xl border border-white/10 shadow-xl p-6 overflow-x-auto">
                                 <div className="flex items-center justify-between mb-4">
                                     <h2 className="text-lg font-semibold text-white">
-                                        Histórico de Eventos
+                                        Event History
                                     </h2>
 
                                     <button
@@ -383,27 +384,27 @@ export default function WebhooksIndex({ webhooks = [] }) {
                                         className="flex items-center gap-2 text-sm px-4 py-2 rounded-full border border-[#02fb5c]/30 text-[#02fb5c] hover:bg-[#02fb5c]/10 transition disabled:opacity-50"
                                     >
                                         <RefreshCcw size={16} />
-                                        Atualizar
+                                        Refresh
                                     </button>
                                 </div>
 
                                 {loadingLogs ? (
                                     <div className="text-center py-8 text-gray-400">
-                                        Carregando eventos...
+                                        Loading events...
                                     </div>
                                 ) : logsPaginated.items.length === 0 ? (
                                     <div className="text-center py-8 text-gray-500">
-                                        Nenhum evento registrado ainda.
+                                        No events registered yet.
                                     </div>
                                 ) : (
                                     <table className="min-w-full text-sm">
                                         <thead className="text-gray-400 border-b border-white/10">
                                             <tr>
-                                                <th className="text-left py-2">Tipo</th>
+                                                <th className="text-left py-2">Type</th>
                                                 <th className="text-left py-2">Status</th>
-                                                <th className="text-left py-2">Código</th>
-                                                <th className="text-left py-2">Data</th>
-                                                <th className="text-right py-2">Ações</th>
+                                                <th className="text-left py-2">Code</th>
+                                                <th className="text-left py-2">Date</th>
+                                                <th className="text-right py-2">Actions</th>
                                             </tr>
                                         </thead>
 
@@ -466,7 +467,7 @@ export default function WebhooksIndex({ webhooks = [] }) {
                                                                     ? "text-blue-400 animate-pulse"
                                                                     : "text-gray-400 hover:text-blue-400 hover:bg-blue-400/10"
                                                             }`}
-                                                            title="Reenviar webhook"
+                                                            title="Resend webhook"
                                                         >
                                                             <RotateCcw size={16} />
                                                         </button>
@@ -488,7 +489,7 @@ export default function WebhooksIndex({ webhooks = [] }) {
                 </div>
             </div>
 
-            {/* Modal de Reenvio */}
+            {/* Resend Modal */}
             <ConfirmModal
                 show={!!confirmId}
                 onConfirm={handleResend}

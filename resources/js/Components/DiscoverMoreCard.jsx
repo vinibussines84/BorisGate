@@ -22,14 +22,14 @@ const toNumber = (v) => {
 const BRL = (v) => {
   const n = toNumber(v);
   if (!Number.isFinite(n)) return "—";
-  return n.toLocaleString("pt-BR", {
+  return n.toLocaleString("en-US", {
     style: "currency",
-    currency: "BRL",
+    currency: "USD",
     minimumFractionDigits: 2,
   });
 };
 
-/* Tile (preto fixo) */
+/* Tile (fixed dark theme) */
 function KpiTile({
   icon: Icon,
   label,
@@ -90,7 +90,7 @@ export default function DiscoverMoreCard() {
       const d = json?.data ?? {};
       setData(d);
     } catch (e) {
-      setErr(e?.message || "Falha ao carregar indicadores.");
+      setErr(e?.message || "Failed to load metrics.");
     } finally {
       setLoading(false);
     }
@@ -100,26 +100,26 @@ export default function DiscoverMoreCard() {
     fetchMonth();
   }, []);
 
-  const entradaMes = toNumber(data?.entradaMes) || 0;
-  const saidaMes = toNumber(data?.saidaMes) || 0;
-  const pendentes = Number.isFinite(toNumber(data?.pendentes))
+  const incomingMonth = toNumber(data?.entradaMes) || 0;
+  const outgoingMonth = toNumber(data?.saidaMes) || 0;
+  const pending = Number.isFinite(toNumber(data?.pendentes))
     ? toNumber(data?.pendentes)
     : 0;
-  const chargebacksMes = Number.isFinite(toNumber(data?.chargebacksMes))
+  const chargebacksMonth = Number.isFinite(toNumber(data?.chargebacksMes))
     ? toNumber(data?.chargebacksMes)
     : 0;
-  const volumePix = Number.isFinite(toNumber(data?.volumePix))
+  const pixVolume = Number.isFinite(toNumber(data?.volumePix))
     ? toNumber(data?.volumePix)
     : 0;
-  const periodo = data?.periodo ?? "Este mês";
+  const period = data?.periodo ?? "This month";
 
-  const entradaFmt = BRL(entradaMes);
-  const saidaFmt = BRL(saidaMes);
-  const volumePixFmt = BRL(volumePix);
+  const incomingFmt = BRL(incomingMonth);
+  const outgoingFmt = BRL(outgoingMonth);
+  const pixVolumeFmt = BRL(pixVolume);
 
   return (
     <section className="w-full mx-auto max-w-5xl">
-      {/* Cabeçalho */}
+      {/* Header */}
       <div className="mb-3 flex items-center justify-between">
         <h3 className="text-sm sm:text-base font-semibold text-neutral-100">
           <span className="relative inline-block">
@@ -127,12 +127,12 @@ export default function DiscoverMoreCard() {
               aria-hidden
               className="absolute -top-1 left-0 h-[3px] w-3 bg-neutral-300 rounded-sm"
             />
-            Indicadores do mês
+            Monthly Indicators
           </span>
         </h3>
         <span className="hidden sm:flex items-center text-[11px] text-neutral-400">
           <CalendarDays size={12} className="inline mr-1 opacity-80" />
-          {periodo}
+          {period}
         </span>
       </div>
 
@@ -147,44 +147,46 @@ export default function DiscoverMoreCard() {
         </div>
       ) : !data ? (
         <div className="text-center text-neutral-400 text-sm py-4">
-          Não foi possível carregar os indicadores.
+          Unable to load indicators.
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 auto-rows-[1fr]">
           <KpiTile
             icon={ArrowUpRight}
-            label="Entradas do mês"
-            value={entradaFmt}
+            label="Incoming (month)"
+            value={incomingFmt}
             iconColor="text-green-500"
           />
+
           <KpiTile
             icon={ArrowDownRight}
-            label="Saídas do mês"
-            value={saidaFmt}
+            label="Outgoing (month)"
+            value={outgoingFmt}
             iconColor="text-red-500"
           />
+
           <KpiTile
             icon={Zap}
-            label="Volume total Pix"
-            value={volumePixFmt}
-            hint="Volume total processado via Pix"
+            label="Total Pix Volume"
+            value={pixVolumeFmt}
+            hint="Total processed Pix volume"
             iconColor="text-sky-400"
           />
 
           <KpiTile
             icon={AlertTriangle}
-            label="Chargebacks do mês"
-            value={String(chargebacksMes)}
-            hint={`${chargebacksMes} chargebacks no período`}
+            label="Monthly Chargebacks"
+            value={String(chargebacksMonth)}
+            hint={`${chargebacksMonth} chargebacks this period`}
             iconColor="text-yellow-400"
           />
 
           <KpiTile
             icon={ListChecks}
-            label="Pendentes"
-            value={String(pendentes)}
+            label="Pending"
+            value={String(pending)}
             className="md:col-span-2 md:col-start-2"
-            hint="Transações aguardando confirmação"
+            hint="Transactions awaiting confirmation"
           />
         </div>
       )}
