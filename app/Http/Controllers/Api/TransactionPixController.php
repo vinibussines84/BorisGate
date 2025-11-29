@@ -257,6 +257,10 @@ class TransactionPixController extends Controller
             ->first();
 
         if ($tx) {
+            $payload = is_array($tx->provider_payload)
+                ? $tx->provider_payload
+                : json_decode($tx->provider_payload ?? '{}', true);
+
             return response()->json([
                 'success' => true,
                 'type'    => 'pix_in',
@@ -267,11 +271,14 @@ class TransactionPixController extends Controller
                     'amount'         => (float) $tx->amount,
                     'fee'            => (float) $tx->fee,
                     'txid'           => $tx->txid,
-                    'e2e_id'         => $tx->e2e_id,
-                    'payer_name'     => $tx->payer_name,
-                    'payer_document' => $tx->payer_document,
+                    'e2e'            => $tx->e2e_id,
+                    'payer_name'     => data_get($payload, 'payer_name'),
+                    'payer_document' => data_get($payload, 'payer_document'),
+                    'identifier'     => data_get($payload, 'provider_raw.identifier'),
+                    'provider_payload' => $payload,
                     'created_at'     => $tx->created_at,
                     'updated_at'     => $tx->updated_at,
+                    'paid_at'        => $tx->paid_at,
                 ]
             ]);
         }
@@ -305,9 +312,9 @@ class TransactionPixController extends Controller
                     'identifier'     => $meta['identifier'] ?? null,
                     'receiver_name'  => $meta['receiver_name'] ?? null,
                     'receiver_bank'  => $meta['receiver_bank'] ?? null,
-                    'receiver_isbp'  => $meta['receiver_bank_ispb'] ?? null,
+                    'receiver_ispb'  => $meta['receiver_bank_ispb'] ?? null,
                     'paid_at'        => $meta['paid_at'] ?? $withdraw->processed_at,
-                    'provider_payload' => $meta['raw_provider_payload'] ?? null,
+                    'provider_payload' => $this->cleanWithdrawPayload($meta['raw_provider_payload'] ?? null),
 
                     'created_at' => $withdraw->created_at,
                     'updated_at' => $withdraw->updated_at,
@@ -319,6 +326,22 @@ class TransactionPixController extends Controller
             'success' => false,
             'error'   => 'No transaction or withdraw found for this external_id.',
         ], 404);
+    }
+
+    /**
+     * 🚿 Remove dados sensíveis como o campo postback
+     */
+    private function cleanWithdrawPayload($payload)
+    {
+        if (!is_array($payload)) {
+            return $payload;
+        }
+
+        if (isset($payload['operation']['postback'])) {
+            unset($payload['operation']['postback']);
+        }
+
+        return $payload;
     }
 
     private function resolveUser(string $auth, string $secret)
