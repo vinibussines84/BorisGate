@@ -23,12 +23,16 @@ return [
         ],
     ],
 
+    // ---------------------------------------
     // KYC local
+    // ---------------------------------------
     'kyc' => [
         'endpoint' => env('KYC_ENDPOINT', 'http://127.0.0.1:8001'),
     ],
 
+    // ---------------------------------------
     // VeltraxPay (cashout)
+    // ---------------------------------------
     'veltrax' => [
         'base_url'      => env('VELTRAX_BASE_URL', 'https://api.veltraxpay.com'),
         'client_id'     => env('VELTRAX_CLIENT_ID'),
@@ -37,7 +41,9 @@ return [
         'timeout'       => env('WEBHOOK_TIMEOUT_SECONDS', 5),
     ],
 
+    // ---------------------------------------
     // TrustIn Legacy
+    // ---------------------------------------
     'trustin' => [
         'base_url'                 => env('TRUSTIN_BASE_URL', 'https://hub.getpay.one'),
         'email'                    => env('TRUSTIN_EMAIL'),
@@ -50,7 +56,9 @@ return [
         'token_cache_key'          => env('TRUSTIN_TOKEN_CACHE_KEY', 'trustin.jwt.token'),
     ],
 
+    // ---------------------------------------
     // Cashtime (PIX novo)
+    // ---------------------------------------
     'cashtime' => [
         'base_url'   => env('CASHTIME_BASE_URL', 'https://api.cashtime.com.br'),
         'key'        => env('CASHTIME_KEY'),
@@ -106,6 +114,16 @@ return [
         'timeout'  => env('REFLOWPAY_TIMEOUT', 15),
         'min_reais' => env('REFLOWPAY_MIN_REAIS', 20),
         'fixed_fee' => env('REFLOWPAY_FIXED_FEE', 10.00),
+    ],
+
+    // ---------------------------------------
+    // LUMNIS (Integração PIX / Pagamentos)
+    // ---------------------------------------
+    'lumnis' => [
+        'base_url' => env('LUMNIS_BASE_URL', 'https://api.lumnisolucoes.com.br'),
+        'code'     => env('LUMNIS_CODE'),
+        'token'    => env('LUMNIS_TOKEN'),
+        'timeout'  => env('LUMNIS_TIMEOUT', 15),
     ],
 
 ];

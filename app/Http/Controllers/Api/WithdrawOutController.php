@@ -5,7 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\Withdraw;
-use App\Services\Pluggou\PluggouWithdrawService;
+use App\Services\Lumnis\LumnisCashoutService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -15,123 +15,77 @@ use Illuminate\Support\Facades\Schema;
 class WithdrawOutController extends Controller
 {
     public function __construct(
-        private readonly PluggouWithdrawService $pluggou
+        private readonly LumnisCashoutService $lumnis
     ) {}
 
     public function store(Request $request)
     {
-        /* -------------------------------------------
-         * 🔐 Autenticação via Headers
-         * ------------------------------------------- */
+        // 🔐 Autenticação via Headers
         $authKey   = $request->header('X-Auth-Key');
         $secretKey = $request->header('X-Secret-Key');
-        $idempKey  = $request->header('Idempotency-Key');
 
         if (!$authKey || !$secretKey) {
             return response()->json([
                 'success' => false,
-                'error'   => 'Headers de autenticação ausentes.',
-                'expect'  => ['X-Auth-Key', 'X-Secret-Key'],
+                'error'   => 'Headers ausentes. Envie X-Auth-Key e X-Secret-Key.',
             ], 401);
         }
 
-        /** @var User|null $user */
         $user = User::where('authkey', $authKey)
             ->where('secretkey', $secretKey)
             ->first();
 
         if (!$user) {
-            return response()->json([
-                'success' => false,
-                'error'   => 'Credenciais inválidas.',
-            ], 401);
+            return response()->json(['success' => false, 'error' => 'Credenciais inválidas.'], 401);
         }
 
-        /* -------------------------------------------
-         * 🧾 Validação dos parâmetros
-         * ------------------------------------------- */
+        // 🧾 Validação dos campos recebidos
         $data = $request->validate([
-            'amount'      => ['required', 'numeric', 'min:0.01'], // BRUTO
-            'pixkey'      => ['required', 'string'],
-            'pixkey_type' => ['required', Rule::in(['cpf', 'cnpj', 'email', 'phone', 'random'])],
+            'amount'            => ['required', 'numeric', 'min:0.01'],
+            'key'               => ['required', 'string'],
+            'key_type'          => ['required', Rule::in(['EVP', 'EMAIL', 'PHONE', 'CPF', 'CNPJ'])],
+            'description'       => ['nullable', 'string', 'max:255'],
+            'details.name'      => ['required', 'string', 'max:100'],
+            'details.document'  => ['required', 'string', 'max:20'],
         ]);
 
-        /* -------------------------------------------
-         * ⚙️ Verificação de permissão de saque
-         * ------------------------------------------- */
+        // ⚙️ Verificação de permissão de saque
         if (!$user->tax_out_enabled) {
             return response()->json([
                 'success' => false,
                 'error'   => 'Cashout desabilitado para este usuário.',
-                'code'    => 'CASHOUT_DISABLED',
             ], 403);
         }
 
-        /* -------------------------------------------
-         * 🧮 Cálculo de taxas
-         * ------------------------------------------- */
+        // 💰 Cálculo de taxas
         $gross = (float) $data['amount'];
-        $fee   = 0;
-        $mode  = strtolower($user->tax_out_mode);
-
-        $fixed   = (float) ($user->tax_out_fixed ?? 0);
+        $fixed = (float) ($user->tax_out_fixed ?? 0);
         $percent = (float) ($user->tax_out_percent ?? 0);
-
-        switch ($mode) {
-            case 'fixed':
-                $fee = $fixed;
-                break;
-
-            case 'percent':
-                $fee = $gross * ($percent / 100);
-                break;
-
-            case 'both':
-            case 'mixed':
-            case 'fixed_percent':
-                $fee = $fixed + ($gross * ($percent / 100));
-                break;
-
-            default:
-                $fee = 0;
-        }
-
-        $fee = round($fee, 2);
+        $fee = round($fixed + ($gross * $percent / 100), 2);
         $net = round($gross - $fee, 2);
 
         if ($net <= 0) {
-            return response()->json([
-                'success' => false,
-                'error'   => 'Valor líquido resultante deve ser maior que zero.',
-            ], 422);
+            return response()->json(['success' => false, 'error' => 'Valor líquido inválido.'], 422);
         }
 
-        /* -------------------------------------------
-         * 🔖 externalId único
-         * ------------------------------------------- */
-        $externalId = 'withdraw_' . random_int(1000000, 9999999);
+        // 🔖 Referência local
+        $externalId = 'withdraw_' . now()->timestamp . '_' . random_int(1000, 9999);
 
         try {
-            /* -------------------------------------------
-             * (1) Débito + criação do registro
-             * ------------------------------------------- */
-            $result = DB::transaction(function () use ($user, $gross, $net, $fee, $data, $idempKey, $externalId, $request) {
-
+            // 1️⃣ Criação e débito local
+            $result = DB::transaction(function () use ($user, $gross, $net, $fee, $data, $externalId) {
                 $u = User::where('id', $user->id)->lockForUpdate()->first();
-                $available = (float) $u->amount_available;
 
-                if ($available < $gross) {
+                if ($u->amount_available < $gross) {
                     return ['error' => [
                         'success'   => false,
                         'error'     => 'Saldo insuficiente.',
-                        'available' => $available,
+                        'available' => $u->amount_available,
                         'required'  => $gross,
-                        'code'      => 'INSUFFICIENT_FUNDS',
                     ]];
                 }
 
-                // Debita o BRUTO
-                $u->amount_available = round($available - $gross, 2);
+                $u->amount_available = round($u->amount_available - $gross, 2);
                 $u->save();
 
                 $payload = [
@@ -139,27 +93,23 @@ class WithdrawOutController extends Controller
                     'amount'          => $net,
                     'gross_amount'    => $gross,
                     'fee_amount'      => $fee,
-                    'pixkey'          => $data['pixkey'],
-                    'pixkey_type'     => $data['pixkey_type'],
+                    'pixkey'          => $data['key'],
+                    'pixkey_type'     => strtolower($data['key_type']),
                     'status'          => 'pending',
-                    'provider'        => 'pluggou',
-                    'idempotency_key' => $idempKey ?: $externalId,
+                    'provider'        => 'lumnis',
+                    'idempotency_key' => $externalId,
                 ];
 
                 if (Schema::hasColumn('withdraws', 'meta')) {
                     $payload['meta'] = [
-                        'requested_gross' => $gross,
-                        'tax_mode'        => $u->tax_out_mode,
-                        'tax_fixed'       => $u->tax_out_fixed,
-                        'tax_percent'     => $u->tax_out_percent,
-                        'api_request'     => true,
-                        'external_id'     => $externalId,
+                        'internal_reference' => $externalId,
+                        'tax_fixed'   => $u->tax_out_fixed,
+                        'tax_percent' => $u->tax_out_percent,
                     ];
                 }
 
                 $withdraw = Withdraw::create($payload);
-
-                return ['withdraw' => $withdraw, 'user' => $u];
+                return ['withdraw' => $withdraw];
             });
 
             if (isset($result['error'])) {
@@ -169,70 +119,84 @@ class WithdrawOutController extends Controller
             /** @var Withdraw $withdraw */
             $withdraw = $result['withdraw'];
 
-            /* -------------------------------------------
-             * (2) Chamada Pluggou: cria o saque
-             * ------------------------------------------- */
-            $pixKey = preg_replace('/\D+/', '', $withdraw->pixkey);
+            // 2️⃣ Body Lumnis
+            $payload = [
+                "amount"       => (int) round($net * 100),
+                "key"          => $data['key'],
+                "key_type"     => strtoupper($data['key_type']),
+                "description"  => $data['description'] ?? 'Saque via API',
+                "details"      => [
+                    "name"     => $data['details']['name'],
+                    "document" => $data['details']['document'],
+                ],
+            ];
 
-            $resp = $this->pluggou->createWithdrawal([
-                'amount'    => (int) round($net * 100), // em centavos
-                'key_type'  => strtolower($withdraw->pixkey_type),
-                'key_value' => $pixKey,
-            ], $idempKey);
+            // 3️⃣ Chamada API
+            $resp = $this->lumnis->createWithdrawal($payload);
 
-            /* -------------------------------------------
-             * (3) Atualiza a transação
-             * ------------------------------------------- */
-            DB::transaction(function () use ($withdraw, $resp, $externalId) {
+            // 🧩 Verificação de erro Lumnis
+            if (!$resp['success']) {
+                $body = $resp['data'] ?? [];
+                $content = $body['content'] ?? [];
+                $errorName = $content['name'] ?? null;
 
-                $data = $resp['data']['data'] ?? null;
+                // ⚠️ Caso seja saldo insuficiente no provedor
+                if ($errorName === 'INSUFFICIENT_FUNDS') {
+                    // rollback de saldo
+                    DB::transaction(function () use ($user, $gross) {
+                        $u = User::where('id', $user->id)->lockForUpdate()->first();
+                        $u->amount_available += $gross;
+                        $u->save();
+                    });
 
-                if ($data) {
-                    if (Schema::hasColumn('withdraws', 'provider_reference')) {
-                        $withdraw->provider_reference = $data['id'] ?? null;
-                    }
+                    $withdraw->update(['status' => 'failed']);
 
-                    $withdraw->status = $data['status'] ?? 'pending';
-
-                    if (Schema::hasColumn('withdraws', 'provider_message')) {
-                        $withdraw->provider_message = $resp['data']['message'] ?? null;
-                    }
-
-                    if (Schema::hasColumn('withdraws', 'meta')) {
-                        $meta = (array) $withdraw->meta;
-                        $meta['provider_echo'] = $resp;
-                        $withdraw->meta = $meta;
-                    }
+                    return response()->json([
+                        'success' => false,
+                        'error'   => 'Tente novamente em 5 minutos ou contate o suporte.',
+                    ], 422);
                 }
 
+                $msg = is_array($resp['message']) ? implode('; ', $resp['message']) : ($resp['message'] ?? 'Erro Lumnis Cashout');
+                throw new \Exception($msg);
+            }
+
+            // ✅ Sucesso
+            $batch = $resp['data']['data'][0] ?? null;
+            $identifier = $batch['identifier'] ?? null;
+            $status = strtolower($batch['status'] ?? 'pending');
+
+            DB::transaction(function () use ($withdraw, $identifier, $status, $resp) {
+                $withdraw->status = $status;
+                $withdraw->provider_reference = $identifier;
+                if (Schema::hasColumn('withdraws', 'meta')) {
+                    $meta = (array) $withdraw->meta;
+                    $meta['lumnis_response'] = $resp;
+                    $withdraw->meta = $meta;
+                }
                 $withdraw->save();
             });
 
-            /* -------------------------------------------
-             * (4) Retorno final para API
-             * ------------------------------------------- */
             return response()->json([
                 'success' => true,
-                'message' => 'Saque solicitado com sucesso! Aguardando aprovação.',
+                'message' => 'Saque solicitado com sucesso!',
                 'data' => [
                     'id'            => $withdraw->id,
                     'amount'        => $gross,
                     'liquid_amount' => $net,
-                    'pix_key_type'  => $withdraw->pixkey_type,
                     'pix_key'       => $withdraw->pixkey,
-                    'status'        => $withdraw->status,
-                    'created_at'    => $withdraw->created_at->format('Y-m-d H:i:s'),
-                ]
+                    'pix_key_type'  => $withdraw->pixkey_type,
+                    'status'        => $status,
+                    'reference'     => $identifier,
+                ],
             ]);
-
         } catch (\Throwable $e) {
-
-            Log::error('Erro ao criar saque', [
+            Log::error('Erro ao criar saque via Lumnis', [
                 'user_id' => $user->id,
-                'error'   => $e->getMessage(),
+                'message' => $e->getMessage(),
             ]);
 
-            // reverte saldo
+            // rollback geral
             DB::transaction(function () use ($user, $gross) {
                 $u = User::where('id', $user->id)->lockForUpdate()->first();
                 $u->amount_available += $gross;
@@ -240,13 +204,12 @@ class WithdrawOutController extends Controller
             });
 
             if (isset($withdraw)) {
-                $withdraw->status = 'failed';
-                $withdraw->save();
+                $withdraw->update(['status' => 'failed']);
             }
 
             return response()->json([
                 'success' => false,
-                'error'   => 'Falha ao criar saque no provedor.',
+                'error'   => 'Falha ao criar saque. ' . $e->getMessage(),
             ], 502);
         }
     }

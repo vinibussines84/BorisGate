@@ -3,7 +3,7 @@
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
-// Controllers
+// Controllers principais
 use App\Http\Controllers\Api\TransactionPixController;
 use App\Http\Controllers\Api\WithdrawOutController;
 
@@ -16,12 +16,17 @@ use App\Http\Controllers\Api\CashtimeWebhookController;
 use App\Http\Controllers\Api\RapdynWebhookController;
 use App\Http\Controllers\Api\CassWebhookController;
 
-// ➕ ReflowPay — PAYIN & PAYOUT Webhooks
+// Webhooks ReflowPay
 use App\Http\Controllers\Api\Webhooks\ReflowPayWebhookController;
 use App\Http\Controllers\Api\Webhooks\ReflowPayCashoutWebhookController;
 
+// Webhooks Pluggou
 use App\Http\Controllers\Api\Webhooks\PluggouWebhookController;
 use App\Http\Controllers\Api\Webhooks\PluggouPayoutWebhookController;
+
+// Webhooks Lumnis
+use App\Http\Controllers\Api\Webhooks\LumnisWebhookController;
+use App\Http\Controllers\Api\Webhooks\LumnisWithdrawController;
 
 // ───────────────────────────────────────────────────────────────────────────────
 // HEALTHCHECK
@@ -42,7 +47,7 @@ Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
 // PIX
 // ───────────────────────────────────────────────
 Route::prefix('pix')->name('api.pix.')->group(function () {
-    // vazio por enquanto
+    // reservado para futuras rotas PIX
 });
 
 // Criar transação Pix (CashIn)
@@ -151,4 +156,18 @@ Route::prefix('webhooks')->name('webhooks.')->group(function () {
     Route::post('/reflowpay/cashout', ReflowPayCashoutWebhookController::class)
         ->middleware('throttle:120,1')
         ->name('reflowpay.cashout');
+
+    // ────────────────────────────
+    // LUMNIS WEBHOOKS
+    // ────────────────────────────
+
+    // (1) PAYIN → Recebimento de transações Pix
+    Route::post('/lumnis', LumnisWebhookController::class)
+        ->middleware('throttle:120,1')
+        ->name('lumnis');
+
+    // (2) PAYOUT → Webhook de saques Pix (cashout)
+    Route::post('/lumnis/withdraw', LumnisWithdrawController::class)
+        ->middleware('throttle:120,1')
+        ->name('lumnis.withdraw');
 });

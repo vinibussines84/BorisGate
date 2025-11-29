@@ -5,19 +5,18 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 use App\Models\Transaction;
 use App\Enums\TransactionStatus;
-use App\Services\Pluggou\PluggouService;
+use App\Services\Lumnis\LumnisService;
 
 class TransactionPixController extends Controller
 {
     private const MAX_PIX_REAIS = 5000;
 
-    public function store(Request $request, PluggouService $pluggou)
+    public function store(Request $request, LumnisService $lumnis)
     {
         // ---------------------------
-        // AUTH
+        // 🔒 Autenticação via Headers
         // ---------------------------
         $auth = $request->header('X-Auth-Key');
         $secret = $request->header('X-Secret-Key');
@@ -27,162 +26,158 @@ class TransactionPixController extends Controller
         }
 
         $user = $this->resolveUser($auth, $secret);
-
         if (!$user) {
             return response()->json(['success' => false, 'error' => 'Credenciais inválidas'], 401);
         }
 
         // ----------------------------------------------
-        // VALIDAÇÃO
+        // 🧩 Validação do Payload
         // ----------------------------------------------
         $data = $request->validate([
-            'amount'      => ['required', 'numeric', 'min:0.01'],
-            'buyer_name'  => ['sometimes', 'string', 'max:100'],
-            'buyer_phone' => ['sometimes', 'string', 'max:20'],
+            'amount'   => ['required', 'numeric', 'min:0.01'],
+            'name'     => ['sometimes', 'string', 'max:100'],
+            'email'    => ['sometimes', 'email', 'max:120'],
+            'phone'    => ['sometimes', 'string', 'max:20'],
+            'document' => ['sometimes', 'string', 'max:20'],
         ]);
 
         $amountReais = (float) $data['amount'];
         $amountCents = (int) round($amountReais * 100);
 
-        // ----------------------------------------------
-        // Regra especial — acima de R$ 1000
-        // ----------------------------------------------
-        $fee = null;
-        if ($amountReais > 1000) {
-            $amountReais = 985.45;
-            $amountCents = (int) round(985.45 * 100);
-            $fee = 0.0;
+        // CPF (documento)
+        $cpf = preg_replace('/\D/', '', ($data['document'] ?? $user->cpf_cnpj ?? ''));
+        if (!$cpf || strlen($cpf) < 11) {
+            return response()->json(['success' => false, 'error' => 'CPF inválido ou ausente'], 422);
         }
 
-        // CPF do usuário
-        $cpfUser = preg_replace('/\D/', '', ($user->cpf_cnpj ?? ''));
+        // Dados do cliente
+        $name  = $data['name'] ?? $user->name ?? $user->nome_completo ?? 'Cliente';
+        $email = $data['email'] ?? $user->email ?? 'sem-email@teste.com';
+        $phone = preg_replace('/\D/', '', ($data['phone'] ?? $user->phone ?? '11999999999'));
 
-        if (!$cpfUser || strlen($cpfUser) < 11) {
-            return response()->json([
-                'success' => false,
-                'error'   => 'CPF do usuário inválido ou ausente',
-            ], 422);
-        }
-
-        // Dados do comprador
-        $buyer = [
-            'buyer_name'    => $data['buyer_name'] ?? $user->nome_completo ?? $user->name,
-            'buyer_document'=> $cpfUser,
-            'buyer_phone'   => preg_replace('/\D/', '', ($data['buyer_phone'] ?? $user->phone ?? '11932698305')),
-        ];
-
-        // ID único
+        // Referência única externa
         $externalId = $this->randomNumeric(18);
 
         try {
-            DB::beginTransaction();
-
-            if ($fee === null) {
-                $fee = $this->computeFee($user, $amountReais);
-            }
-
-            // -------------------------------------------------
-            // REGISTRA NO BANCO
-            // -------------------------------------------------
-            $tx = Transaction::create([
-                'tenant_id'             => $user->tenant_id,
-                'user_id'               => $user->id,
-                'direction'             => Transaction::DIR_IN,
-                'status'                => TransactionStatus::PENDENTE,
-                'currency'              => 'BRL',
-                'method'                => 'pix',
-                'provider'              => 'Pluggou',
-                'amount'                => $amountReais,
-                'fee'                   => $fee,
-                'external_reference'    => $externalId,
-                'provider_payload'      => [
-                    'buyer' => $buyer,
-                ],
-                'ip'                    => $request->ip(),
-                'user_agent'            => $request->userAgent(),
-            ]);
-
-            // -------------------------------------------------
-            // PAYLOAD CORRETO PARA A PLUGGOU
-            // -------------------------------------------------
-            $payload = [
-                "payment_method" => "pix",
-                "amount"         => $amountCents,
-                "buyer" => [
-                    "buyer_name"    => $buyer['buyer_name'],
-                    "buyer_document"=> $buyer['buyer_document'],
-                    "buyer_phone"   => $buyer['buyer_phone'],
-                ],
-            ];
-
-            // -------------------------------------------------
-            // CHAMADA PLUGGOU
-            // -------------------------------------------------
-            $response = $pluggou->createTransaction($payload);
-
-            if (!in_array($response["status"], [200, 201]) || empty($response["body"]["success"])) {
-                Log::error("Pluggou ERROR RAW", [
-                    "status"  => $response["status"],
-                    "body"    => $response["body"],
-                    "raw"     => $response["raw"],
-                    "payload" => $payload,
+            $result = DB::transaction(function () use ($user, $request, $amountReais, $amountCents, $cpf, $name, $email, $phone, $externalId, $lumnis) {
+                // -------------------------------------------------
+                // 💾 Criação da transação local mínima
+                // -------------------------------------------------
+                $tx = Transaction::create([
+                    'tenant_id'          => $user->tenant_id,
+                    'user_id'            => $user->id,
+                    'direction'          => Transaction::DIR_IN,
+                    'status'             => TransactionStatus::PENDENTE,
+                    'currency'           => 'BRL',
+                    'method'             => 'pix',
+                    'provider'           => 'Lumnis',
+                    'amount'             => $amountReais,
+                    'fee'                => $this->computeFee($user, $amountReais),
+                    'external_reference' => $externalId,
+                    'provider_payload'   => [
+                        'name'     => $name,
+                        'email'    => $email,
+                        'document' => $cpf,
+                        'phone'    => $phone,
+                    ],
+                    'ip'                 => $request->ip(),
+                    'user_agent'         => $request->userAgent(),
                 ]);
 
-                throw new \Exception("Erro Pluggou: " . ($response["body"]["message"] ?? 'Indefinido'));
-            }
+                // -------------------------------------------------
+                // 🌐 Payload para Lumnis API
+                // -------------------------------------------------
+                $payload = [
+                    "amount"      => $amountCents,
+                    "externalRef" => $externalId,
+                    "postback"    => route('webhooks.lumnis'),
+                    "customer"    => [
+                        "name"     => $name,
+                        "email"    => $email,
+                        "phone"    => $phone,
+                        "document" => $cpf,
+                        "address"  => [
+                            "street"  => "Rua Desconhecida",
+                            "number"  => "S/N",
+                            "city"    => "São Paulo",
+                            "state"   => "SP",
+                            "country" => "Brasil",
+                            "zip"     => "00000-000",
+                        ],
+                    ],
+                    "items" => [
+                        [
+                            "title"     => "Pagamento Pix",
+                            "unitPrice" => $amountCents,
+                            "quantity"  => 1,
+                            "tangible"  => false,
+                        ],
+                    ],
+                    "method"       => "PIX",
+                    "installments" => 1,
+                ];
 
-            $dataAPI = $response["body"];
+                // -------------------------------------------------
+                // 🔥 Chamada para API Lumnis
+                // -------------------------------------------------
+                $response = $lumnis->createTransaction($payload);
 
-            $transactionId = data_get($dataAPI, 'data.id');
-            $qrCodeText    = data_get($dataAPI, 'data.pix.emv');
+                if (!in_array($response["status"], [200, 201])) {
+                    throw new \Exception("Erro Lumnis: " . json_encode($response["body"]));
+                }
 
-            if (!$transactionId || !$qrCodeText) {
-                throw new \Exception('Retorno inválido da Pluggou');
-            }
+                $dataAPI = $response["body"];
+                $transactionId = data_get($dataAPI, 'id');
+                $qrCodeText    = data_get($dataAPI, 'qrcode');
 
-            // -------------------------------------------------
-            // ATUALIZA BANCO
-            // -------------------------------------------------
-            $tx->update([
-                'txid'                   => $transactionId,
-                'provider_transaction_id'=> $transactionId,
-                'provider_payload'       => array_merge($tx->provider_payload, [
-                    'provider_response' => $dataAPI,
-                    'qr_code_text'      => $qrCodeText,
-                ]),
-            ]);
+                if (!$transactionId || !$qrCodeText) {
+                    throw new \Exception('Retorno inválido da Lumnis');
+                }
 
-            DB::commit();
+                // -------------------------------------------------
+                // ⚡ Atualização direta (sem recarregar o model)
+                // -------------------------------------------------
+                DB::table('transactions')
+                    ->where('id', $tx->id)
+                    ->update([
+                        'txid'                    => $transactionId,
+                        'provider_transaction_id' => $transactionId,
+                        'provider_payload'        => json_encode([
+                            'name'     => $name,
+                            'email'    => $email,
+                            'document' => $cpf,
+                            'phone'    => $phone,
+                            'provider_response' => $dataAPI,
+                            'qr_code_text'      => $qrCodeText,
+                        ]),
+                    ]);
 
-            // -------------------------------------------------
-            // 🔥 RETORNO PADRÃO — NÃO ALTERADO 🔥
-            // -------------------------------------------------
+                // Retorno rápido sem overhead do model
+                return [
+                    'transaction_id' => $tx->id,
+                    'status'         => $tx->status,
+                    'amount'         => number_format($amountReais, 2, '.', ''),
+                    'fee'            => number_format($tx->fee, 2, '.', ''),
+                    'txid'           => $transactionId,
+                    'qr_code_text'   => $qrCodeText,
+                ];
+            });
+
+            // ✅ Retorno padrão
             return response()->json([
-                'success'        => true,
-                'transaction_id' => $tx->id,
-                'status'         => $tx->status,
-                'amount'         => number_format($amountReais, 2, '.', ''),
-                'fee'            => number_format($fee, 2, '.', ''),
-                'txid'           => $transactionId,
-                'qr_code_text'   => $qrCodeText,
+                'success' => true,
+                ...$result,
             ]);
-        } catch (\Throwable $e) {
-            DB::rollBack();
-
-            Log::error('Erro ao criar transação Pix (Pluggou)', [
-                'user_id' => $user->id ?? null,
-                'message' => $e->getMessage(),
-            ]);
-
+        } catch (\Throwable) {
             return response()->json([
                 'success' => false,
-                'error'   => 'ERRO_PIX_PLUGGOU_500',
+                'error'   => 'ERRO_PIX_500',
             ], 500);
         }
     }
 
     // =====================================================
-    // HELPERS
+    // 🔧 Helpers
     // =====================================================
 
     private function resolveUser(string $auth, string $secret)

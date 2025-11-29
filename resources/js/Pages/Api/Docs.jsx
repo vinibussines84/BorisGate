@@ -189,90 +189,124 @@ export default function ApiDocs({
   const createEndpoint   = `${base_url}/transaction/pix`;
   const withdrawEndpoint = `${base_url}/withdraw/out`;
 
-  /* ------- Criar Pagamento ------- */
-  const exampleRequestCreate = useMemo(
-    () => `POST ${createEndpoint}
-Content-Type: application/json
-X-Auth-Key: <sua_auth_key>
-X-Secret-Key: <sua_secret_key>
-
-{"amount": 20}`, [createEndpoint]);
-
-  const exampleResponseCreate = `{
-    "success": true,
-    "transaction_id": 75,
-    "status": "pendente",
-    "amount": "20.00",
-    "txid": "3BUDSFCVC3A7EEWS9PZG4KGNLC543X45",
-    "qr_code_text": "00020126860014br.gov.bcb.pix2564pix.ecomovi.com.br/qr/v3/at/926c9dd0-e5ae-404b-9758-25ea370c1e895204000053039865802BR5925SANTOS_INTERMEDIACOES_LTD6009JOINVILLE62070503***6304B2C9",
-    "expires_at": null
-}`;
-
-  const exampleCurlCreate = `curl -X POST ${createEndpoint} \\
-  -H "Content-Type: application/json" \\
-  -H "X-Auth-Key: SEU_AUTH_KEY" \\
-  -H "X-Secret-Key: SEU_SECRET_KEY" \\
-  -d '{"amount": 20}'`;
-
-  const fieldsCreate = [
-    ["amount", "number", ">= 0.01", "Valor do depósito em BRL."],
-  ];
-
-  const errorsCreate = [
-    ["401", "Headers de autenticação ausentes ou inválidos."],
-    ["409", "Depósito duplicado (idempotente)."],
-    ["422", "Validação: payload com campos faltantes/invalidos."],
-    ["502", "Falha no provedor ao gerar a cobrança PIX."],
-  ];
-
-  /* ------- Criar Saque (Withdraw Out) ------- */
-  const exampleRequestWithdraw = useMemo(
-    () => `POST ${withdrawEndpoint}
+/* ------- Criar Pagamento ------- */
+const exampleRequestCreate = useMemo(
+  () => `POST ${createEndpoint}
 Content-Type: application/json
 X-Auth-Key: <sua_auth_key>
 X-Secret-Key: <sua_secret_key>
 
 {
-  "amount": 5,
-  "pixkey": "seuemail@gmail.com",
-  "pixkey_type": "email",
-  "description": "Saque do João"
-}`, [withdrawEndpoint]);
+  "amount": 29.90,
+  "name": "João da Silva",
+  "email": "joao.silva@example.com",
+  "document": "12345678900",
+  "phone": "11999999999"
+}`, 
+  [createEndpoint]
+);
 
-  const exampleResponseWithdraw = `{
+const exampleResponseCreate = `{
   "success": true,
-  "withdraw_id": 42,
-  "status": "processing",
-  "amount": "5.00",
-  "fee_amount": "0.50",
-  "amount_net": "4.50",
-  "message": "Saque registrado e enviado."
+  "transaction_id": 75,
+  "status": "pendente",
+  "amount": "29.90",
+  "fee": "0.00",
+  "txid": "1994635172387971457",
+  "qr_code_text": "00020101021226840014br.gov.bcb.pix2562qrcode.cartwavehub.com.br/pix/F04471E794CB48D09F2EB7FFACCAD7605204000053039865802BR5922RENOVA PAGAMENTOS LTDA6010PLANALTINA62070503***6304DC19"
 }`;
 
-  const exampleCurlWithdraw = `curl -X POST ${withdrawEndpoint} \\
+const exampleCurlCreate = `curl -X POST ${createEndpoint} \\
   -H "Content-Type: application/json" \\
   -H "X-Auth-Key: SEU_AUTH_KEY" \\
   -H "X-Secret-Key: SEU_SECRET_KEY" \\
   -d '{
-    "amount": 5,
-    "pixkey": "seuemail@gmail.com",
-    "pixkey_type": "email",
-    "description": "Saque do João"
+    "amount": 29.90,
+    "name": "João da Silva",
+    "email": "joao.silva@example.com",
+    "document": "12345678900",
+    "phone": "11999999999"
   }'`;
 
-  const fieldsWithdraw = [
-    ["amount", "number", ">= 1.00", "Valor solicitado para saque (líquido será calculado pela taxa do cliente)."],
-    ["pixkey", "string", "1..200", "Chave Pix de destino (e-mail, CPF, CNPJ ou telefone)."],
-    ["pixkey_type", "string", "EMAIL | CPF | CNPJ | PHONE | EVP", "Tipo da chave Pix."],
-    ["description", "string", "opcional", "Descrição/observação do saque."],
-  ];
+const fieldsCreate = [
+  ["amount", "number", ">= 0.01", "Valor do pagamento em reais (R$)."],
+  ["name", "string", "Required", "Nome completo do cliente (será usado na cobrança)."],
+  ["email", "string", "Required", "E-mail do cliente para identificação."],
+  ["document", "string", "Required", "CPF do cliente (somente números)."],
+  ["phone", "string", "Required", "Telefone do cliente (somente números, DDD + número)."],
+];
 
-  const errorsWithdraw = [
-    ["401", "Headers de autenticação ausentes ou inválidos."],
-    ["402", "Saldo insuficiente para o saque bruto (valor + taxa)."],
-    ["422", "Validação: payload com campos faltantes/invalidos."],
-    ["502", "Falha ao criar saque."],
-  ];
+const errorsCreate = [
+  ["401", "Headers de autenticação ausentes ou inválidos."],
+  ["422", "Validação: payload com campos faltantes ou inválidos."],
+  ["502", "Falha no provedor ao gerar a cobrança PIX."],
+];
+
+
+ /* ------- Criar Saque (Withdraw Out) ------- */
+const exampleRequestWithdraw = useMemo(
+  () => `POST ${withdrawEndpoint}
+Content-Type: application/json
+X-Auth-Key: <sua_auth_key>
+X-Secret-Key: <sua_secret_key>
+
+{
+  "amount": 20000,
+  "key": "17ce9060-b29d-4ab5-89cd-20550ce6e7ac",
+  "key_type": "EVP",
+  "description": "Saque solicitado via API",
+  "details": {
+    "name": "João Martins",
+    "document": "88424563354"
+  }
+}`, [withdrawEndpoint]);
+
+const exampleResponseWithdraw = `{
+  "success": true,
+  "message": "Saque solicitado com sucesso!",
+  "data": {
+    "id": 74,
+    "amount": 20000,
+    "liquid_amount": 19900,
+    "pix_key": "17ce9060-b29d-4ab5-89cd-20550ce6e7ac",
+    "pix_key_type": "evp",
+    "status": "pending",
+    "reference": "38508223304568832"
+  }
+}`;
+
+const exampleCurlWithdraw = `curl -X POST ${withdrawEndpoint} \\
+  -H "Content-Type: application/json" \\
+  -H "X-Auth-Key: SEU_AUTH_KEY" \\
+  -H "X-Secret-Key: SEU_SECRET_KEY" \\
+  -d '{
+    "amount": 20000,
+    "key": "17ce9060-b29d-4ab5-89cd-20550ce6e7ac",
+    "key_type": "EVP",
+    "description": "Saque solicitado via API",
+    "details": {
+      "name": "João Martins",
+      "document": "88424563354"
+    }
+  }'`;
+
+const fieldsWithdraw = [
+  ["amount", "number", ">= 0.01", "Valor do saque em centavos (ex: 20000 = R$200,00)."],
+  ["key", "string", "1..200", "Chave Pix de destino (e-mail, CPF, CNPJ, telefone ou EVP)."],
+  ["key_type", "string", "EMAIL | CPF | CNPJ | PHONE | EVP", "Tipo da chave Pix utilizada."],
+  ["description", "string", "opcional", "Descrição ou observação do saque."],
+  ["details.name", "string", "1..100", "Nome do titular da conta de destino."],
+  ["details.document", "string", "1..20", "CPF ou CNPJ do titular da conta de destino."],
+];
+
+const errorsWithdraw = [
+  ["401", "Headers de autenticação ausentes ou inválidos."],
+  ["403", "Cashout desabilitado para este usuário."],
+  ["422", "Validação: campos ausentes, inválidos ou valor líquido <= 0."],
+  ["502", "Falha no provedor ao criar o saque."],
+  ["INSUFFICIENT_FUNDS", "Tente novamente em 5 minutos ou contate o suporte."],
+];
+
 
   /* ------- Accordions state (endpoints) ------- */
   const [openCreate, setOpenCreate]     = useState(false);
