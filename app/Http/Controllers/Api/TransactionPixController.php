@@ -51,9 +51,7 @@ class TransactionPixController extends Controller
         $amountReais = (float) $data['amount'];
         $amountCents = (int) round($amountReais * 100);
 
-        // ======================
-        // 📌 CPF validation
-        // ======================
+        // CPF validation
         $cpf = preg_replace('/\D/', '', ($data['document'] ?? $user->cpf_cnpj ?? ''));
 
         if (!$cpf || strlen($cpf) !== 11 || !$this->validateCpf($cpf)) {
@@ -64,9 +62,7 @@ class TransactionPixController extends Controller
             ], 422);
         }
 
-        // =======================
-        // 📌 Phone validation
-        // =======================
+        // Phone validation
         $phone = preg_replace('/\D/', '', ($data['phone'] ?? $user->phone ?? ''));
 
         if (!$phone || strlen($phone) < 11 || strlen($phone) > 12) {
@@ -77,15 +73,11 @@ class TransactionPixController extends Controller
             ], 422);
         }
 
-        // =======================
         // Customer data
-        // =======================
         $name  = $data['name']  ?? $user->name ?? $user->nome_completo ?? 'Client';
         $email = $data['email'] ?? $user->email ?? 'no-email@placeholder.com';
 
-        // =======================
         // Unique identifier
-        // =======================
         $externalId = $this->randomNumeric(18);
 
         try {
@@ -93,7 +85,7 @@ class TransactionPixController extends Controller
                 $user, $request, $amountReais, $amountCents, $cpf, $name, $email, $phone, $externalId, $lumnis
             ) {
 
-                // 📌 Create local transaction
+                // Create local transaction
                 $tx = Transaction::create([
                     'tenant_id'          => $user->tenant_id,
                     'user_id'            => $user->id,
@@ -115,9 +107,7 @@ class TransactionPixController extends Controller
                     'user_agent'         => $request->userAgent(),
                 ]);
 
-                // ======================
-                // 📦 Payload for Lumnis
-                // ======================
+                // Payload for Lumnis
                 $payload = [
                     "amount"      => $amountCents,
                     "externalRef" => $externalId,
@@ -127,14 +117,6 @@ class TransactionPixController extends Controller
                         "email"    => $email,
                         "phone"    => $phone,
                         "document" => $cpf,
-                        "address"  => [
-                            "street"  => "Unknown Street",
-                            "number"  => "N/A",
-                            "city"    => "São Paulo",
-                            "state"   => "SP",
-                            "country" => "Brazil",
-                            "zip"     => "00000-000",
-                        ],
                     ],
                     "items" => [
                         [
@@ -150,16 +132,18 @@ class TransactionPixController extends Controller
 
                 \Log::info("LUMNIS_PAYLOAD_SENT", $payload);
 
-                // ======================================
-                // 🌍 Send to Lumnis API
-                // ======================================
+                // Send to Lumnis API
                 $response = $lumnis->createTransaction($payload);
 
                 if (!in_array($response["status"], [200, 201])) {
                     throw new \Exception("Lumnis error: " . json_encode($response["body"]));
                 }
 
-                $dataAPI = $response["body"];
+                // Normalize body to array
+                $dataAPI = is_array($response["body"])
+                    ? $response["body"]
+                    : json_decode($response["body"], true);
+
                 $transactionId = data_get($dataAPI, 'id');
                 $qrCodeText    = data_get($dataAPI, 'qrcode');
 
@@ -167,19 +151,19 @@ class TransactionPixController extends Controller
                     throw new \Exception("Invalid Lumnis response");
                 }
 
-                // 📌 Update local record
+                // Update local record
                 DB::table('transactions')
                     ->where('id', $tx->id)
                     ->update([
                         'txid'                    => $transactionId,
                         'provider_transaction_id' => $transactionId,
                         'provider_payload'        => json_encode([
-                            'name'     => $name,
-                            'email'    => $email,
-                            'document' => $cpf,
-                            'phone'    => $phone,
-                            'provider_response' => $dataAPI,
-                            'qr_code_text'      => $qrCodeText,
+                            'name'            => $name,
+                            'email'           => $email,
+                            'document'        => $cpf,
+                            'phone'           => $phone,
+                            'qr_code_text'    => $qrCodeText,
+                            'provider_raw'    => $dataAPI,
                         ]),
                     ]);
 
@@ -213,7 +197,7 @@ class TransactionPixController extends Controller
     }
 
     /**
-     * 🔍 Check transaction status by TXID
+     * 🔍 Check transaction status by TXID (Banco local)
      * GET /api/v1/transaction/status/{txid}
      */
     public function status(Request $request, string $txid)
@@ -228,7 +212,7 @@ class TransactionPixController extends Controller
             ], 401);
         }
 
-        // Find user
+        // Validate user
         $user = $this->resolveUser($auth, $secret);
 
         if (!$user) {
@@ -238,7 +222,7 @@ class TransactionPixController extends Controller
             ], 401);
         }
 
-        // Find transaction
+        // Locate local transaction
         $transaction = Transaction::where('txid', $txid)
             ->where('user_id', $user->id)
             ->first();
@@ -253,22 +237,17 @@ class TransactionPixController extends Controller
         return response()->json([
             'success' => true,
             'data' => [
-                'id'              => $transaction->id,
-                'txid'            => $transaction->txid,
-                'status'          => $transaction->status,
-                'amount'          => $transaction->amount,
-                'fee'             => $transaction->fee,
-                'created_at'      => $transaction->created_at,
-                'updated_at'      => $transaction->updated_at,
-                'provider'        => $transaction->provider,
-                'provider_payload'=> json_decode($transaction->provider_payload, true),
+                'id'         => $transaction->id,
+                'txid'       => $transaction->txid,
+                'amount'     => (float) $transaction->amount,
+                'fee'        => (float) $transaction->fee,
+                'status'     => $transaction->status,
+                'created_at' => $transaction->created_at,
+                'updated_at' => $transaction->updated_at,
             ]
         ]);
     }
 
-    // =================================================
-    // 🔍 Resolve User
-    // =================================================
     private function resolveUser(string $auth, string $secret)
     {
         return \App\Models\User::where('authkey', $auth)
@@ -276,9 +255,6 @@ class TransactionPixController extends Controller
                                ->first();
     }
 
-    // =================================================
-    // 💸 Compute Fee
-    // =================================================
     private function computeFee($user, float $amount): float
     {
         if (!($user->tax_in_enabled ?? false)) {
@@ -294,9 +270,6 @@ class TransactionPixController extends Controller
         );
     }
 
-    // =================================================
-    // 🔢 Random numeric generator
-    // =================================================
     private function randomNumeric(int $len): string
     {
         return collect(range(1, $len))
@@ -304,9 +277,6 @@ class TransactionPixController extends Controller
             ->implode('');
     }
 
-    // =================================================
-    // 🧠 CPF validator
-    // =================================================
     private function validateCpf($cpf): bool
     {
         if (preg_match('/(\d)\1{10}/', $cpf)) return false;
