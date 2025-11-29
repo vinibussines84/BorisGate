@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use App\Models\Transaction;
 use App\Enums\TransactionStatus;
 use App\Services\Lumnis\LumnisService;
@@ -167,6 +168,38 @@ class TransactionPixController extends Controller
                         'provider_raw' => $dataAPI,
                     ]),
                 ]);
+
+                // 🚀 Dispara webhook de criação de PIX para o cliente
+                if ($user->webhook_enabled && $user->webhook_in_url) {
+                    try {
+                        Http::timeout(10)->post($user->webhook_in_url, [
+                            'type'            => 'Pix Create',
+                            'event'           => 'created',
+                            'transaction_id'  => $tx->id,
+                            'external_id'     => $tx->external_reference, // ✅ incluído
+                            'user'            => $user->name,
+                            'amount'          => number_format($tx->amount, 2, '.', ''),
+                            'fee'             => number_format($tx->fee, 2, '.', ''),
+                            'currency'        => $tx->currency,
+                            'status'          => $tx->status,
+                            'txid'            => $tx->txid,
+                            'e2e'             => $tx->e2e_id,
+                            'direction'       => $tx->direction,
+                            'method'          => $tx->method,
+                            'created_at'      => $tx->created_at,
+                            'updated_at'      => $tx->updated_at,
+                            'paid_at'         => $tx->paid_at,
+                            'canceled_at'     => $tx->canceled_at,
+                            'provider_payload'=> $tx->provider_payload,
+                        ]);
+                    } catch (\Throwable $ex) {
+                        \Log::warning('⚠️ Failed to send Pix webhook', [
+                            'user_id' => $user->id,
+                            'url'     => $user->webhook_in_url,
+                            'error'   => $ex->getMessage(),
+                        ]);
+                    }
+                }
 
                 return [
                     'transaction_id' => $tx->id,
