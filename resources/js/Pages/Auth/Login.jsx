@@ -4,16 +4,28 @@ import { Head, Link, useForm } from "@inertiajs/react";
 import { ChevronLeft, Eye, EyeOff } from "lucide-react";
 import axios from "axios";
 
+/* ===========================================================
+   🔧 Configuração Global Axios
+   =========================================================== */
 axios.defaults.withCredentials = true;
+axios.defaults.baseURL = "https://equitpay.app"; // 👈 domínio principal
 axios.defaults.headers.common["X-Requested-With"] = "XMLHttpRequest";
 
 export default function Login() {
-  const { data, setData, post, processing, errors, reset, setError, clearErrors } =
-    useForm({
-      email: "",
-      password: "",
-      remember: false,
-    });
+  const {
+    data,
+    setData,
+    post,
+    processing,
+    errors,
+    reset,
+    setError,
+    clearErrors,
+  } = useForm({
+    email: "",
+    password: "",
+    remember: false,
+  });
 
   const [step, setStep] = useState(1);
   const [showPassword, setShowPassword] = useState(false);
@@ -22,16 +34,19 @@ export default function Login() {
   const emailRef = useRef(null);
   const passRef = useRef(null);
 
+  /* ✅ Obtém cookie CSRF ao montar */
   useEffect(() => {
     axios.get("/sanctum/csrf-cookie").catch(() => {});
   }, []);
 
+  /* Foco automático */
   useEffect(() => {
     const el = step === 1 ? emailRef.current : passRef.current;
     const t = setTimeout(() => el?.focus(), 60);
     return () => clearTimeout(t);
   }, [step]);
 
+  /* Detecta Caps Lock */
   useEffect(() => {
     if (step !== 2 || !passRef.current) return;
     const el = passRef.current;
@@ -52,6 +67,7 @@ export default function Login() {
   const canGoNext = /\S+@\S+\.\S+/.test(data.email);
   const canSubmit = (data.password || "").length > 0 && !processing;
 
+  /* Etapa 1 → E-mail */
   const next = (e) => {
     e.preventDefault();
     if (!canGoNext) return;
@@ -59,20 +75,25 @@ export default function Login() {
     setStep(2);
   };
 
+  /* Etapa 2 → Login */
   const submit = async (e) => {
     e.preventDefault();
     if (!canSubmit) return;
 
-    await axios.get("/sanctum/csrf-cookie");
+    try {
+      await axios.get("/sanctum/csrf-cookie"); // garante CSRF válido
 
-    post("/login", {
-      preserveScroll: true,
-      onError: (errs) => {
-        setStep(2);
-        if (errs?.email && !errs?.password) setError("password", errs.email);
-      },
-      onFinish: () => reset("password"),
-    });
+      post("/login", {
+        preserveScroll: true,
+        onError: (errs) => {
+          setStep(2);
+          if (errs?.email && !errs?.password) setError("password", errs.email);
+        },
+        onFinish: () => reset("password"),
+      });
+    } catch (error) {
+      console.error("Erro ao autenticar:", error);
+    }
   };
 
   return (
@@ -126,11 +147,11 @@ export default function Login() {
                   <ChevronLeft className="h-4 w-4" />
                   Alterar e-mail
                 </button>
-
                 <span className="truncate text-neutral-400/80">{data.email}</span>
               </div>
             )}
 
+            {/* FORMULÁRIOS */}
             {step === 1 ? (
               <form onSubmit={next} className="space-y-4">
                 <Field label="E-mail" error={errors.email}>
@@ -142,7 +163,6 @@ export default function Login() {
                       w-full rounded-2xl px-4 py-3 text-[15px]
                       bg-neutral-950 text-neutral-100 placeholder-neutral-500
                       ring-1 ring-inset ring-neutral-800 border border-transparent outline-none
-
                       focus:ring-[2px] focus:ring-[#02fb5c]
                     "
                     value={data.email}
@@ -179,14 +199,12 @@ export default function Login() {
                         w-full rounded-2xl px-4 py-3 pr-12 text-[15px]
                         bg-neutral-950 text-neutral-100 placeholder-neutral-500
                         ring-1 ring-inset ring-neutral-800 border border-transparent outline-none
-
                         focus:ring-[2px] focus:ring-[#02fb5c]
                       "
                       value={data.password}
                       onChange={(e) => setData("password", e.target.value)}
                       required
                     />
-
                     <button
                       type="button"
                       onClick={() => setShowPassword((v) => !v)}
@@ -195,7 +213,6 @@ export default function Login() {
                       {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
                     </button>
                   </div>
-
                   {capsOn && (
                     <p className="mt-2 text-xs text-neutral-400">Caps Lock está ativado.</p>
                   )}
@@ -212,7 +229,10 @@ export default function Login() {
                     Lembrar de mim
                   </label>
 
-                  <Link href="/forgot-password" className="text-xs text-neutral-400 hover:text-neutral-200">
+                  <Link
+                    href="/forgot-password"
+                    className="text-xs text-neutral-400 hover:text-neutral-200"
+                  >
                     Esqueci minha senha
                   </Link>
                 </div>
@@ -250,13 +270,7 @@ function Field({ label, error, children }) {
   );
 }
 
-function PrimaryButton({
-  text,
-  disabled,
-  type = "button",
-  variant = "solid",
-  loading = false,
-}) {
+function PrimaryButton({ text, disabled, type = "button", variant = "solid", loading = false }) {
   const base =
     "inline-flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-medium transition focus:outline-none";
 
