@@ -62,6 +62,12 @@ Route::get('/v1/transaction/status/{txid}', [TransactionPixController::class, 's
     ->middleware('throttle:60,1')
     ->name('transaction.pix.status');
 
+// ✅ Consultar status da transação por EXTERNAL_ID
+Route::get('/v1/transaction/status/external/{externalId}', [TransactionPixController::class, 'statusByExternal'])
+    ->where('externalId', '[A-Za-z0-9\-_]+')
+    ->middleware('throttle:60,1')
+    ->name('transaction.pix.status.external');
+
 // (Opcional antigo — buscar TXID direto)
 Route::get('/transaction/pix/{txid}', [TransactionPixController::class, 'showByTxid'])
     ->where('txid', '[A-Za-z0-9]+')

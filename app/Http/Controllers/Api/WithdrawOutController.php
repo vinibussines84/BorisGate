@@ -48,6 +48,7 @@ class WithdrawOutController extends Controller
             'description'       => ['nullable', 'string', 'max:255'],
             'details.name'      => ['required', 'string', 'max:100'],
             'details.document'  => ['required', 'string', 'max:20'],
+            'external_id'       => ['sometimes', 'string', 'max:64'], // ✅ Novo campo
         ]);
 
         // ⚙️ Verificação de permissão de saque
@@ -69,12 +70,23 @@ class WithdrawOutController extends Controller
             return response()->json(['success' => false, 'error' => 'Valor líquido inválido.'], 422);
         }
 
+        // 🧠 Define ou gera external_id único
+        $externalId = $data['external_id'] ?? 'WD_' . now()->timestamp . '_' . random_int(1000, 9999);
+
+        // 🚫 Previne duplicidade
+        if (Withdraw::where('user_id', $user->id)->where('external_id', $externalId)->exists()) {
+            return response()->json([
+                'success' => false,
+                'error'   => 'Duplicate external_id. Please provide a unique value.',
+            ], 409);
+        }
+
         // 🔖 Referência interna local
         $internalRef = 'withdraw_' . now()->timestamp . '_' . random_int(1000, 9999);
 
         try {
             // 1️⃣ Criação local e débito do saldo
-            $result = DB::transaction(function () use ($user, $gross, $net, $fee, $data, $internalRef) {
+            $result = DB::transaction(function () use ($user, $gross, $net, $fee, $data, $internalRef, $externalId) {
                 $u = User::where('id', $user->id)->lockForUpdate()->first();
 
                 if ($u->amount_available < $gross) {
@@ -98,6 +110,7 @@ class WithdrawOutController extends Controller
                     'pixkey_type'     => strtolower($data['key_type']),
                     'status'          => 'pending',
                     'provider'        => 'lumnis',
+                    'external_id'     => $externalId, // ✅ armazenado localmente
                     'idempotency_key' => $internalRef,
                 ];
 
@@ -130,7 +143,7 @@ class WithdrawOutController extends Controller
                     "name"     => $data['details']['name'],
                     "document" => $data['details']['document'],
                 ],
-                // ✅ O SEU SISTEMA DEFINE o postback automaticamente
+                "externalRef"  => $externalId, // ✅ Enviado também à Lumnis
                 "postback"     => route('webhooks.lumnis.withdraw'),
             ];
 
@@ -181,13 +194,14 @@ class WithdrawOutController extends Controller
                 $withdraw->save();
             });
 
-            // 🚀 DISPARA WEBHOOK PARA O CLIENTE (withdraw.created)
+            // 🚀 Dispara webhook de criação
             if ($user->webhook_enabled && $user->webhook_out_url) {
                 try {
                     Http::timeout(10)->post($user->webhook_out_url, [
                         'event' => 'withdraw.created',
                         'data'  => [
                             'id'            => $withdraw->id,
+                            'external_id'   => $externalId,
                             'amount'        => $gross,
                             'liquid_amount' => $net,
                             'pix_key'       => $withdraw->pixkey,
@@ -205,11 +219,13 @@ class WithdrawOutController extends Controller
                 }
             }
 
+            // ✅ Retorno final
             return response()->json([
                 'success' => true,
                 'message' => 'Saque solicitado com sucesso!',
                 'data' => [
                     'id'            => $withdraw->id,
+                    'external_id'   => $externalId, // ✅ Retornado
                     'amount'        => $gross,
                     'liquid_amount' => $net,
                     'pix_key'       => $withdraw->pixkey,

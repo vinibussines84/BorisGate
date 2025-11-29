@@ -11,10 +11,8 @@ use App\Services\Lumnis\LumnisService;
 
 class TransactionPixController extends Controller
 {
-    private const MAX_PIX_REAIS = 5000;
-
     /**
-     * Create a new PIX transaction
+     * 🧾 Create a new PIX transaction
      */
     public function store(Request $request, LumnisService $lumnis)
     {
@@ -41,17 +39,31 @@ class TransactionPixController extends Controller
 
         // 🧩 Basic validation
         $data = $request->validate([
-            'amount'   => ['required', 'numeric', 'min:0.01'],
-            'name'     => ['sometimes', 'string', 'max:100'],
-            'email'    => ['sometimes', 'email', 'max:120'],
-            'phone'    => ['sometimes', 'string', 'max:20'],
-            'document' => ['sometimes', 'string', 'max:20'],
+            'amount'       => ['required', 'numeric', 'min:0.01'],
+            'name'         => ['sometimes', 'string', 'max:100'],
+            'email'        => ['sometimes', 'email', 'max:120'],
+            'phone'        => ['sometimes', 'string', 'max:20'],
+            'document'     => ['sometimes', 'string', 'max:20'],
+            'external_id'  => ['required', 'string', 'max:64', 'regex:/^[A-Za-z0-9\-_]+$/'], // obrigatório
         ]);
 
         $amountReais = (float) $data['amount'];
         $amountCents = (int) round($amountReais * 100);
+        $externalId  = $data['external_id'];
 
-        // CPF validation
+        // 🚫 Bloqueia duplicados no mesmo user
+        $duplicate = Transaction::where('user_id', $user->id)
+            ->where('external_reference', '=', $externalId)
+            ->exists();
+
+        if ($duplicate) {
+            return response()->json([
+                'success' => false,
+                'error'   => "The external_id '{$externalId}' already exists for this user."
+            ], 409);
+        }
+
+        // 🔎 CPF validation
         $cpf = preg_replace('/\D/', '', ($data['document'] ?? $user->cpf_cnpj ?? ''));
 
         if (!$cpf || strlen($cpf) !== 11 || !$this->validateCpf($cpf)) {
@@ -62,7 +74,7 @@ class TransactionPixController extends Controller
             ], 422);
         }
 
-        // Phone validation
+        // ☎️ Phone validation
         $phone = preg_replace('/\D/', '', ($data['phone'] ?? $user->phone ?? ''));
 
         if (!$phone || strlen($phone) < 11 || strlen($phone) > 12) {
@@ -73,19 +85,15 @@ class TransactionPixController extends Controller
             ], 422);
         }
 
-        // Customer data
+        // 👤 Customer data
         $name  = $data['name']  ?? $user->name ?? $user->nome_completo ?? 'Client';
         $email = $data['email'] ?? $user->email ?? 'no-email@placeholder.com';
-
-        // Unique identifier
-        $externalId = $this->randomNumeric(18);
 
         try {
             $result = DB::transaction(function () use (
                 $user, $request, $amountReais, $amountCents, $cpf, $name, $email, $phone, $externalId, $lumnis
             ) {
-
-                // Create local transaction
+                // Cria transação local
                 $tx = Transaction::create([
                     'tenant_id'          => $user->tenant_id,
                     'user_id'            => $user->id,
@@ -103,11 +111,11 @@ class TransactionPixController extends Controller
                         'document' => $cpf,
                         'phone'    => $phone,
                     ]),
-                    'ip'                 => $request->ip(),
-                    'user_agent'         => $request->userAgent(),
+                    'ip'         => $request->ip(),
+                    'user_agent' => $request->userAgent(),
                 ]);
 
-                // Payload for Lumnis
+                // Payload para Lumnis
                 $payload = [
                     "amount"      => $amountCents,
                     "externalRef" => $externalId,
@@ -118,28 +126,23 @@ class TransactionPixController extends Controller
                         "phone"    => $phone,
                         "document" => $cpf,
                     ],
-                    "items" => [
-                        [
-                            "title"     => "PIX Payment",
-                            "unitPrice" => $amountCents,
-                            "quantity"  => 1,
-                            "tangible"  => false,
-                        ],
-                    ],
+                    "items" => [[
+                        "title"     => "PIX Payment",
+                        "unitPrice" => $amountCents,
+                        "quantity"  => 1,
+                        "tangible"  => false,
+                    ]],
                     "method"       => "PIX",
                     "installments" => 1,
                 ];
 
-                \Log::info("LUMNIS_PAYLOAD_SENT", $payload);
-
-                // Send to Lumnis API
+                // Envia à API da Lumnis
                 $response = $lumnis->createTransaction($payload);
 
                 if (!in_array($response["status"], [200, 201])) {
                     throw new \Exception("Lumnis error: " . json_encode($response["body"]));
                 }
 
-                // Normalize body to array
                 $dataAPI = is_array($response["body"])
                     ? $response["body"]
                     : json_decode($response["body"], true);
@@ -151,24 +154,23 @@ class TransactionPixController extends Controller
                     throw new \Exception("Invalid Lumnis response");
                 }
 
-                // Update local record
-                DB::table('transactions')
-                    ->where('id', $tx->id)
-                    ->update([
-                        'txid'                    => $transactionId,
-                        'provider_transaction_id' => $transactionId,
-                        'provider_payload'        => json_encode([
-                            'name'            => $name,
-                            'email'           => $email,
-                            'document'        => $cpf,
-                            'phone'           => $phone,
-                            'qr_code_text'    => $qrCodeText,
-                            'provider_raw'    => $dataAPI,
-                        ]),
-                    ]);
+                // Atualiza com dados do provedor
+                $tx->update([
+                    'txid'                    => $transactionId,
+                    'provider_transaction_id' => $transactionId,
+                    'provider_payload'        => json_encode([
+                        'name'         => $name,
+                        'email'        => $email,
+                        'document'     => $cpf,
+                        'phone'        => $phone,
+                        'qr_code_text' => $qrCodeText,
+                        'provider_raw' => $dataAPI,
+                    ]),
+                ]);
 
                 return [
                     'transaction_id' => $tx->id,
+                    'external_id'    => $externalId,
                     'status'         => $tx->status,
                     'amount'         => number_format($amountReais, 2, '.', ''),
                     'fee'            => number_format($tx->fee, 2, '.', ''),
@@ -185,8 +187,7 @@ class TransactionPixController extends Controller
         } catch (\Throwable $e) {
             \Log::error("PIX_CREATION_ERROR", [
                 'error' => $e->getMessage(),
-                'line'  => $e->getLine(),
-                'file'  => $e->getFile(),
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return response()->json([
@@ -197,100 +198,85 @@ class TransactionPixController extends Controller
     }
 
     /**
-     * 🔍 Check transaction status by TXID (Banco local)
-     * GET /api/v1/transaction/status/{txid}
+     * 🔍 Get transaction by txid
      */
     public function status(Request $request, string $txid)
+    {
+        return $this->findTransaction($request, 'txid', $txid);
+    }
+
+    /**
+     * 🔍 Get transaction by external_id
+     */
+    public function statusByExternal(Request $request, string $externalId)
+    {
+        return $this->findTransaction($request, 'external_reference', $externalId);
+    }
+
+    /**
+     * 🔧 Common finder
+     */
+    private function findTransaction(Request $request, string $field, string $value)
     {
         $auth   = $request->header('X-Auth-Key');
         $secret = $request->header('X-Secret-Key');
 
         if (!$auth || !$secret) {
-            return response()->json([
-                'success' => false,
-                'error'   => 'Missing authentication headers.'
-            ], 401);
+            return response()->json(['success' => false, 'error' => 'Missing authentication headers.'], 401);
         }
 
-        // Validate user
         $user = $this->resolveUser($auth, $secret);
 
         if (!$user) {
-            return response()->json([
-                'success' => false,
-                'error'   => 'Invalid credentials.'
-            ], 401);
+            return response()->json(['success' => false, 'error' => 'Invalid credentials.'], 401);
         }
 
-        // Locate local transaction
-        $transaction = Transaction::where('txid', $txid)
+        $transaction = Transaction::where($field, $value)
             ->where('user_id', $user->id)
             ->first();
 
         if (!$transaction) {
-            return response()->json([
-                'success' => false,
-                'error'   => 'Transaction not found.'
-            ], 404);
+            return response()->json(['success' => false, 'error' => 'Transaction not found.'], 404);
         }
 
         return response()->json([
             'success' => true,
             'data' => [
-                'id'         => $transaction->id,
-                'txid'       => $transaction->txid,
-                'amount'     => (float) $transaction->amount,
-                'fee'        => (float) $transaction->fee,
-                'status'     => $transaction->status,
-                'created_at' => $transaction->created_at,
-                'updated_at' => $transaction->updated_at,
-            ]
+                'id'            => $transaction->id,
+                'txid'          => $transaction->txid,
+                'external_id'   => $transaction->external_reference,
+                'amount'        => (float) $transaction->amount,
+                'fee'           => (float) $transaction->fee,
+                'status'        => $transaction->status,
+                'created_at'    => $transaction->created_at,
+                'updated_at'    => $transaction->updated_at,
+            ],
         ]);
     }
 
     private function resolveUser(string $auth, string $secret)
     {
         return \App\Models\User::where('authkey', $auth)
-                               ->where('secretkey', $secret)
-                               ->first();
+            ->where('secretkey', $secret)
+            ->first();
     }
 
     private function computeFee($user, float $amount): float
     {
-        if (!($user->tax_in_enabled ?? false)) {
-            return 0.0;
-        }
-
+        if (!($user->tax_in_enabled ?? false)) return 0.0;
         $fixed   = (float) ($user->tax_in_fixed ?? 0);
         $percent = (float) ($user->tax_in_percent ?? 0);
-
-        return round(
-            max(0, min($fixed + ($amount * $percent / 100), $amount)),
-            2
-        );
-    }
-
-    private function randomNumeric(int $len): string
-    {
-        return collect(range(1, $len))
-            ->map(fn() => random_int(0, 9))
-            ->implode('');
+        return round(max(0, min($fixed + ($amount * $percent / 100), $amount)), 2);
     }
 
     private function validateCpf($cpf): bool
     {
         if (preg_match('/(\d)\1{10}/', $cpf)) return false;
-
         for ($t = 9; $t < 11; $t++) {
-            for ($d = 0, $c = 0; $c < $t; $c++) {
-                $d += $cpf[$c] * (($t + 1) - $c);
-            }
+            for ($d = 0, $c = 0; $c < $t; $c++) $d += $cpf[$c] * (($t + 1) - $c);
             $d = ((10 * $d) % 11) % 10;
-            if ($cpf[$c] != $d) {
-                return false;
-            }
+            if ($cpf[$c] != $d) return false;
         }
-
         return true;
     }
 }

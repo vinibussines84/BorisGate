@@ -14,7 +14,6 @@ class LumnisWithdrawController extends Controller
     public function __invoke(Request $request)
     {
         try {
-
             $payload = $request->json()->all();
 
             // Status vem na raiz
@@ -51,9 +50,9 @@ class LumnisWithdrawController extends Controller
             $receipt = $payload['receipt'][0] ?? [];
 
             // Conversão de centavos → reais
-            $requestedReais = data_get($payload, 'requested') / 100; // 1000 → 10.00
-            $paidReais      = data_get($payload, 'paid') / 100;      // 1000 → 10.00
-            $operationAmount = data_get($payload, 'operation.amount') / 100;
+            $requestedReais   = data_get($payload, 'requested') / 100;
+            $paidReais        = data_get($payload, 'paid') / 100;
+            $operationAmount  = data_get($payload, 'operation.amount') / 100;
 
             // Dados do receipt
             $endtoend       = data_get($receipt, 'endtoend');
@@ -69,7 +68,7 @@ class LumnisWithdrawController extends Controller
 
                 $meta = (array) $withdraw->meta;
 
-                $meta['raw_provider_payload'] = $payload;  // mantemos tudo original
+                $meta['raw_provider_payload'] = $payload;
                 $meta['requested_reais']      = $requestedReais;
                 $meta['paid_reais']           = $paidReais;
                 $meta['operation_reais']      = $operationAmount;
@@ -100,45 +99,48 @@ class LumnisWithdrawController extends Controller
 
                     // Alteramos o payload enviado para o cliente para valores em reais
                     $payloadToClient = $payload;
-
                     $payloadToClient['requested'] = $requestedReais;
                     $payloadToClient['paid']      = $paidReais;
                     $payloadToClient['operation']['amount'] = $operationAmount;
 
-                    try {
+                    // ✅ Adiciona external_id ao webhook enviado
+                    $payloadToClient['external_id'] = $withdraw->external_id ?? null;
 
+                    try {
                         $response = Http::timeout(10)->post($user->webhook_out_url, [
                             'event' => 'withdraw.updated',
                             'data'  => $payloadToClient,
                         ]);
 
-                        Log::info('Webhook withdraw.updated enviado com sucesso', [
-                            'user_id' => $user->id,
-                            'url'     => $user->webhook_out_url,
-                            'status'  => $response->status(),
-                            'body'    => $response->body(),
+                        Log::info('✅ Webhook withdraw.updated enviado com sucesso', [
+                            'user_id'       => $user->id,
+                            'url'           => $user->webhook_out_url,
+                            'status'        => $response->status(),
+                            'body'          => $response->body(),
+                            'external_id'   => $withdraw->external_id,
+                            'provider_ref'  => $reference,
                         ]);
-
                     } catch (\Throwable $ex) {
-
                         Log::warning('⚠️ Falha ao enviar webhook withdraw.updated', [
                             'user_id' => $user->id,
                             'url'     => $user->webhook_out_url,
                             'error'   => $ex->getMessage(),
                         ]);
-
                     }
                 }
             }
 
+            // ✅ Retorno inclui external_id
             return response()->json([
-                'received'  => true,
-                'status'    => 'approved',
-                'reference' => $reference,
+                'received'     => true,
+                'status'       => 'approved',
+                'reference'    => $reference,
+                'external_id'  => $withdraw->external_id ?? null,
+                'withdraw_id'  => $withdraw->id,
+                'user_id'      => $withdraw->user_id,
             ]);
 
         } catch (\Throwable $e) {
-
             Log::error('❌ Erro no webhook Lumnis Withdraw', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
