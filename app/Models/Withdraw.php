@@ -42,6 +42,8 @@ class Withdraw extends Model
         'pixkey_type',
 
         'idempotency_key',
+        'external_id', // ✅ campo do pedido externo
+
         'pin_encrypted',
 
         'status',
@@ -63,6 +65,8 @@ class Withdraw extends Model
         'updated_at'    => 'datetime',
 
         'meta'          => 'array',
+
+        'external_id'   => 'string', // ✅ garante tipo correto
     ];
 
     protected $hidden = [
@@ -113,6 +117,12 @@ class Withdraw extends Model
     /* =======================================
      |  Accessors / Helpers
      =======================================*/
+
+    /** Acesso seguro ao external_id */
+    public function getExternalIdAttribute($value): ?string
+    {
+        return $value ?: data_get($this->meta, 'external_id');
+    }
 
     /** Origem deduzida */
     public function getOriginAttribute(): string
@@ -223,7 +233,8 @@ class Withdraw extends Model
         return $query->where(function ($q) use ($s) {
             $q->where('description', 'like', $s)
               ->orWhere('pixkey', 'like', $s)
-              ->orWhere('idempotency_key', 'like', $s);
+              ->orWhere('idempotency_key', 'like', $s)
+              ->orWhere('external_id', 'like', $s); // ✅ busca por external_id
         });
     }
 
