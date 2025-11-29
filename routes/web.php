@@ -22,7 +22,6 @@ use App\Http\Controllers\DadosContaController;
 use App\Http\Controllers\KycQuickCheckController;
 use App\Http\Controllers\CobrancaController;
 use App\Http\Controllers\ApproverLogController;
-use App\Http\Controllers\BalanceController;
 use App\Http\Controllers\WebhookController;
 use App\Http\Controllers\MetricsController;
 
@@ -49,12 +48,13 @@ use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken as Csrf;
 
 /*
 |--------------------------------------------------------------------------
-| 🌐 Troca de idioma (🇧🇷 / 🇨🇳)
+| 🌐 Troca de idioma
 |--------------------------------------------------------------------------
 */
 Route::post('/language/switch', function (Request $request) {
     $locale = $request->input('locale', 'pt');
-    $available = ['pt', 'zh']; // idiomas permitidos
+    $available = ['pt', 'zh'];
+
     if (!in_array($locale, $available)) {
         $locale = 'pt';
     }
@@ -64,8 +64,6 @@ Route::post('/language/switch', function (Request $request) {
 
     return back();
 })->name('language.switch')->middleware('web');
-
-// ---
 
 /*
 |--------------------------------------------------------------------------
@@ -78,11 +76,9 @@ Route::get('/', function () {
         : redirect()->route('login.page');
 })->name('home');
 
-// ---
-
 /*
 |--------------------------------------------------------------------------
-| 🔐 Autenticação (grupo WEB completo)
+| 🔐 Autenticação - guest
 |--------------------------------------------------------------------------
 */
 Route::middleware('guest')->group(function () {
@@ -98,14 +94,13 @@ Route::middleware('guest')->group(function () {
 
     Route::get('/register', [RegisteredUserController::class, 'create'])
         ->name('register.page');
+
     Route::post('/register', [RegisteredUserController::class, 'store'])
         ->name('register');
 
     Route::get('/forgot-password', fn () => Inertia::render('Auth/FForgotPassword'))
         ->name('password.request');
 });
-
-// ---
 
 /*
 |--------------------------------------------------------------------------
@@ -119,8 +114,6 @@ Route::get('/bloqueado', fn () =>
     ])
 )->name('usuario.bloqueado');
 
-// ---
-
 /*
 |--------------------------------------------------------------------------
 | 🔐 Logout
@@ -133,8 +126,6 @@ Route::post('/logout', function (Request $request) {
     return to_route('login.page');
 })->middleware('auth')->name('logout');
 
-// ---
-
 /*
 |--------------------------------------------------------------------------
 | 📌 KYC Quick Check
@@ -144,27 +135,20 @@ Route::post('/kyc/quick-check', [KycQuickCheckController::class, 'check'])
     ->middleware('throttle:10,1')
     ->name('kyc.quick-check');
 
-// ---
-
 /*
 |--------------------------------------------------------------------------
-| 🔒 Painel Autenticado - Rota Mínima 🔑
+| 🔒 Dashboard protegido
 |--------------------------------------------------------------------------
-| Rota do dashboard isolada apenas com 'auth' para evitar 404 no redirecionamento.
 */
 Route::middleware(['auth'])->group(function () {
-    Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
+    Route::get('/dashboard', [DashboardController::class, 'index'])
+        ->name('dashboard');
 });
-
-// ---
 
 /*
 |--------------------------------------------------------------------------
 | 🔒 Painel Autenticado - Rotas Restritivas
 |--------------------------------------------------------------------------
-| Middlewares: check.user.status, ensure.active, throttle:60,1
-| Todas as outras rotas do painel que exigem checagens rigorosas de status
-| permanecem neste grupo.
 */
 Route::middleware(['auth', 'check.user.status', 'ensure.active', 'throttle:60,1'])
     ->group(function () {
@@ -173,13 +157,15 @@ Route::middleware(['auth', 'check.user.status', 'ensure.active', 'throttle:60,1'
     Route::get('/notifications', [\App\Http\Controllers\NotificationController::class, 'index'])
         ->name('notifications.index');
 
-    // PIN Setup
+    // PIN
     Route::get('/setup/pin',  [PinController::class, 'edit'])->name('setup.pin');
     Route::post('/setup/pin', [PinController::class, 'store'])->name('setup.pin.store');
 
     // Dashboard API
-    Route::get('/api/balances', [DashboardController::class, 'balances'])->name('api.balances');
-    Route::get('/balance/available', [BalanceController::class, 'get'])->name('balance.available');
+    Route::get('/api/balances', [DashboardController::class, 'balances'])
+        ->name('api.balances');
+
+    // (REMOVIDO: /balance/available)
 
     // Páginas
     Route::get('/extrato', fn () => Inertia::render('Extrato/Index'))->name('extrato');
@@ -223,7 +209,7 @@ Route::middleware(['auth', 'check.user.status', 'ensure.active', 'throttle:60,1'
         'base_url' => rtrim(config('app.url'), '/') . '/api',
     ]))->name('api.docs');
 
-    // AproverLog
+    // ApproverLog
     Route::get('/aproverlog', [ApproverLogController::class, 'index'])->name('aproverlog.index');
     Route::post('/aproverlog/{id}/approve', [ApproverLogController::class, 'approve'])->name('aproverlog.approve');
     Route::post('/aproverlog/{id}/reject', [ApproverLogController::class, 'reject'])->name('aproverlog.reject');
@@ -240,8 +226,6 @@ Route::middleware(['auth', 'check.user.status', 'ensure.active', 'throttle:60,1'
     });
 });
 
-// ---
-
 /*
 |--------------------------------------------------------------------------
 | 👑 Admin
@@ -252,8 +236,6 @@ Route::middleware(['auth', 'check.user.status', 'ensure.active', 'admin', 'throt
         Route::get('/admin', [AdminDashboardController::class, 'index'])->name('admin.index');
         Route::get('/admin/usuarios', [UsersController::class, 'index'])->name('admin.users.index');
     });
-
-// ---
 
 /*
 |--------------------------------------------------------------------------
@@ -266,8 +248,6 @@ Route::prefix('api')->group(function () {
         ->middleware('throttle:30,1')
         ->name('api.transaction.pix.store');
 });
-
-// ---
 
 /*
 |--------------------------------------------------------------------------
@@ -295,11 +275,9 @@ Route::prefix('api')
         Route::get('/metrics/paid-feed', [MetricsController::class, 'paidFeed'])->name('api.metrics.paid-feed');
     });
 
-// ---
-
 /*
 |--------------------------------------------------------------------------
-| 🚨 Fallback Final
+| 🚨 Fallback
 |--------------------------------------------------------------------------
 */
 Route::fallback(function (Request $request) {
