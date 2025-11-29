@@ -49,6 +49,26 @@ use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken as Csrf;
 
 /*
 |--------------------------------------------------------------------------
+| 🌐 Troca de idioma (🇧🇷 / 🇨🇳)
+|--------------------------------------------------------------------------
+*/
+Route::post('/language/switch', function (Request $request) {
+    $locale = $request->input('locale', 'pt');
+    $available = ['pt', 'zh']; // idiomas permitidos
+    if (!in_array($locale, $available)) {
+        $locale = 'pt';
+    }
+
+    session(['locale' => $locale]);
+    app()->setLocale($locale);
+
+    return back();
+})->name('language.switch')->middleware('web');
+
+// ---
+
+/*
+|--------------------------------------------------------------------------
 | Redirecionamento inicial
 |--------------------------------------------------------------------------
 */
@@ -58,6 +78,7 @@ Route::get('/', function () {
         : redirect()->route('login.page');
 })->name('home');
 
+// ---
 
 /*
 |--------------------------------------------------------------------------
@@ -70,25 +91,21 @@ Route::middleware('guest')->group(function () {
         ->name('login.page');
 
     Route::post('/login', function (LoginRequest $request) {
-
         $request->authenticate();
         $request->session()->regenerate();
-
-        // suporte perfeito para Inertia SSR e SPA
         return to_route('dashboard', [], 303);
-
-    })->middleware(['web', 'throttle:login'])
-      ->name('login');
+    })->middleware(['web', 'throttle:login'])->name('login');
 
     Route::get('/register', [RegisteredUserController::class, 'create'])
         ->name('register.page');
-
     Route::post('/register', [RegisteredUserController::class, 'store'])
         ->name('register');
 
     Route::get('/forgot-password', fn () => Inertia::render('Auth/FForgotPassword'))
         ->name('password.request');
 });
+
+// ---
 
 /*
 |--------------------------------------------------------------------------
@@ -102,6 +119,7 @@ Route::get('/bloqueado', fn () =>
     ])
 )->name('usuario.bloqueado');
 
+// ---
 
 /*
 |--------------------------------------------------------------------------
@@ -115,6 +133,7 @@ Route::post('/logout', function (Request $request) {
     return to_route('login.page');
 })->middleware('auth')->name('logout');
 
+// ---
 
 /*
 |--------------------------------------------------------------------------
@@ -125,18 +144,32 @@ Route::post('/kyc/quick-check', [KycQuickCheckController::class, 'check'])
     ->middleware('throttle:10,1')
     ->name('kyc.quick-check');
 
+// ---
 
 /*
 |--------------------------------------------------------------------------
-| 🔒 Painel autenticado
+| 🔒 Painel Autenticado - Rota Mínima 🔑
 |--------------------------------------------------------------------------
+| Rota do dashboard isolada apenas com 'auth' para evitar 404 no redirecionamento.
+*/
+Route::middleware(['auth'])->group(function () {
+    Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
+});
+
+// ---
+
+/*
+|--------------------------------------------------------------------------
+| 🔒 Painel Autenticado - Rotas Restritivas
+|--------------------------------------------------------------------------
+| Middlewares: check.user.status, ensure.active, throttle:60,1
+| Todas as outras rotas do painel que exigem checagens rigorosas de status
+| permanecem neste grupo.
 */
 Route::middleware(['auth', 'check.user.status', 'ensure.active', 'throttle:60,1'])
     ->group(function () {
 
-    Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
-
-    // 🔔 Notificações (ADICIONADO)
+    // 🔔 Notificações
     Route::get('/notifications', [\App\Http\Controllers\NotificationController::class, 'index'])
         ->name('notifications.index');
 
@@ -144,15 +177,11 @@ Route::middleware(['auth', 'check.user.status', 'ensure.active', 'throttle:60,1'
     Route::get('/setup/pin',  [PinController::class, 'edit'])->name('setup.pin');
     Route::post('/setup/pin', [PinController::class, 'store'])->name('setup.pin.store');
 
-    // Dashboard API (web)
-    Route::get('/api/balances', [DashboardController::class, 'balances'])
-        ->name('api.balances');
+    // Dashboard API
+    Route::get('/api/balances', [DashboardController::class, 'balances'])->name('api.balances');
+    Route::get('/balance/available', [BalanceController::class, 'get'])->name('balance.available');
 
-    // Pluggou
-    Route::get('/balance/available', [BalanceController::class, 'get'])
-        ->name('balance.available');
-
-    // Páginas simples
+    // Páginas
     Route::get('/extrato', fn () => Inertia::render('Extrato/Index'))->name('extrato');
     Route::get('/transferencia', fn () => Inertia::render('Transferencia/Index'))->name('transferencia');
     Route::get('/pagamentos', fn () => Inertia::render('Pagamentos'))->name('pagamentos');
@@ -174,8 +203,7 @@ Route::middleware(['auth', 'check.user.status', 'ensure.active', 'throttle:60,1'
     Route::post('/saques/{withdraw}/cancelar', [WithdrawController::class, 'cancel'])->name('saques.cancel');
 
     // Limites PIX
-    Route::get('/pix/limites', [PixLimitesController::class, 'index'])
-        ->name('pix.limites');
+    Route::get('/pix/limites', [PixLimitesController::class, 'index'])->name('pix.limites');
 
     // Perfil e senha
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
@@ -200,24 +228,19 @@ Route::middleware(['auth', 'check.user.status', 'ensure.active', 'throttle:60,1'
     Route::post('/aproverlog/{id}/approve', [ApproverLogController::class, 'approve'])->name('aproverlog.approve');
     Route::post('/aproverlog/{id}/reject', [ApproverLogController::class, 'reject'])->name('aproverlog.reject');
 
-    /*
-    |--------------------------------------------------------------------------
-    | Webhooks
-    |--------------------------------------------------------------------------
-    */
+    // Webhooks
     Route::prefix('webhooks')->group(function () {
         Route::get('/', [WebhookController::class, 'index'])->name('webhooks.index');
         Route::post('/store', [WebhookController::class, 'store'])->name('webhooks.store');
         Route::get('/logs', [WebhookController::class, 'logs'])->name('webhooks.logs');
-
         Route::post('/resend/{id}', [WebhookController::class, 'resend'])
             ->name('webhooks.resend')
             ->withoutMiddleware([Csrf::class]);
-
         Route::delete('/{type}', [WebhookController::class, 'destroy'])->name('webhooks.destroy');
     });
 });
 
+// ---
 
 /*
 |--------------------------------------------------------------------------
@@ -230,6 +253,7 @@ Route::middleware(['auth', 'check.user.status', 'ensure.active', 'admin', 'throt
         Route::get('/admin/usuarios', [UsersController::class, 'index'])->name('admin.users.index');
     });
 
+// ---
 
 /*
 |--------------------------------------------------------------------------
@@ -243,40 +267,35 @@ Route::prefix('api')->group(function () {
         ->name('api.transaction.pix.store');
 });
 
+// ---
 
 /*
 |--------------------------------------------------------------------------
-| 🧩 API internas autenticadas (React SPA)
+| 🧩 API internas autenticadas
 |--------------------------------------------------------------------------
 */
 Route::prefix('api')
     ->middleware(['web', 'auth', 'check.user.status', 'ensure.active'])
     ->group(function () {
+        Route::get('/me/transactions', [SessionTransactionsController::class, 'index'])->name('api.me.transactions');
+        Route::get('/me/summary', MeSummaryController::class)->name('api.me.summary');
+        Route::get('/session/transactions', [SessionTransactionsController::class, 'index'])->name('api.session.transactions');
+        Route::get('/dashboard/daily-flow', [DashboardFlowController::class, 'dailyFlow'])->name('api.dashboard.daily-flow');
+        Route::get('/dashboard/indicators', [DashboardIndicatorsController::class, 'index'])->name('api.dashboard.indicators');
+        Route::get('/list/pix', [ListPixController::class, 'index'])->name('api.list.pix');
+        Route::get('/withdraws', [WithdrawController::class, 'apiIndex'])->name('api.withdraws.index');
+        Route::post('/withdraws', [WithdrawController::class, 'apiStore'])->name('api.withdraws.store');
+        Route::post('/withdraws/{withdraw}/approve', [WithdrawController::class, 'apiApprove'])->name('api.withdraws.approve');
+        Route::post('/withdraws/{withdraw}/cancel', [WithdrawController::class, 'apiCancel'])->name('api.withdraws.cancel');
+        Route::get('/charges/summary', [CobrancaController::class, 'summary'])->name('api.charges.summary');
+        Route::get('/charges', [CobrancaController::class, 'list'])->name('api.charges.index');
+        Route::get('/charges/{cobranca}', [CobrancaController::class, 'show'])->name('api.charges.show');
+        Route::get('/metrics/month', [MetricsController::class, 'month'])->name('api.metrics.month');
+        Route::put('/metrics/goal', [MetricsController::class, 'updateGoal'])->name('api.metrics.goal');
+        Route::get('/metrics/paid-feed', [MetricsController::class, 'paidFeed'])->name('api.metrics.paid-feed');
+    });
 
-    Route::get('/me/transactions', [SessionTransactionsController::class, 'index'])->name('api.me.transactions');
-    Route::get('/me/summary', MeSummaryController::class)->name('api.me.summary');
-
-    Route::get('/session/transactions', [SessionTransactionsController::class, 'index'])->name('api.session.transactions');
-
-    Route::get('/dashboard/daily-flow', [DashboardFlowController::class, 'dailyFlow'])->name('api.dashboard.daily-flow');
-    Route::get('/dashboard/indicators', [DashboardIndicatorsController::class, 'index'])->name('api.dashboard.indicators');
-
-    Route::get('/list/pix', [ListPixController::class, 'index'])->name('api.list.pix');
-
-    Route::get('/withdraws', [WithdrawController::class, 'apiIndex'])->name('api.withdraws.index');
-    Route::post('/withdraws', [WithdrawController::class, 'apiStore'])->name('api.withdraws.store');
-    Route::post('/withdraws/{withdraw}/approve', [WithdrawController::class, 'apiApprove'])->name('api.withdraws.approve');
-    Route::post('/withdraws/{withdraw}/cancel', [WithdrawController::class, 'apiCancel'])->name('api.withdraws.cancel');
-
-    Route::get('/charges/summary', [CobrancaController::class, 'summary'])->name('api.charges.summary');
-    Route::get('/charges', [CobrancaController::class, 'list'])->name('api.charges.index');
-    Route::get('/charges/{cobranca}', [CobrancaController::class, 'show'])->name('api.charges.show');
-
-    Route::get('/metrics/month', [MetricsController::class, 'month'])->name('api.metrics.month');
-    Route::put('/metrics/goal', [MetricsController::class, 'updateGoal'])->name('api.metrics.goal');
-    Route::get('/metrics/paid-feed', [MetricsController::class, 'paidFeed'])->name('api.metrics.paid-feed');
-});
-
+// ---
 
 /*
 |--------------------------------------------------------------------------

@@ -47,14 +47,18 @@ class LumnisWebhookController extends Controller
 
             // ✅ Apenas quando o status for APPROVED
             if ($status === 'APPROVED') {
-                $tx->status  = TransactionStatus::PAGA->value;
-                $tx->paid_at = now();
+                $tx->status          = TransactionStatus::PAGA->value;
+                $tx->paid_at         = now();
+                $tx->e2e_id          = data_get($data, 'endtoend');        // ← salva E2E ID
+                $tx->payer_name      = data_get($data, 'payer_name');      // opcional
+                $tx->payer_document  = data_get($data, 'payer_document');  // opcional
                 $tx->save();
 
                 return response()->json([
                     'received' => true,
                     'updated'  => true,
                     'status'   => 'paga',
+                    'e2e_id'   => $tx->e2e_id,
                 ]);
             }
 
@@ -69,6 +73,7 @@ class LumnisWebhookController extends Controller
             Log::error('❌ Erro no processamento do Webhook Lumnis', [
                 'message' => $e->getMessage(),
                 'trace'   => $e->getTraceAsString(),
+                'payload' => $request->getContent(),
             ]);
 
             return response()->json(['error' => 'internal_error'], 500);

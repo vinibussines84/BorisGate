@@ -13,6 +13,7 @@ use App\Http\Middleware\EnsureAdmin;
 use App\Http\Middleware\EnsureUserActive;
 use App\Http\Middleware\ApiHeaderAuth;
 use App\Http\Middleware\CheckUserStatus;
+use App\Http\Middleware\SetLocale; // ✅ Novo middleware de idioma
 
 // Telescope
 use Laravel\Telescope\Http\Middleware\Authorize as TelescopeAuthorize;
@@ -55,6 +56,9 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->web(append: [
             HandleInertiaRequests::class,
             AddLinkHeadersForPreloadedAssets::class,
+
+            // ✅ Adicionado: mantém o idioma salvo na sessão ativo em todas as páginas
+            SetLocale::class,
         ]);
 
         /**
