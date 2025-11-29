@@ -17,7 +17,7 @@ class LumnisWithdrawController extends Controller
 
             $payload = $request->json()->all();
 
-            // 📌 Agora o provider NÃO usa "data", tudo é enviado na raiz do JSON
+            // Status vem na raiz
             $status    = strtolower(data_get($payload, 'status'));
             $reference = data_get($payload, 'id');
 
@@ -28,7 +28,7 @@ class LumnisWithdrawController extends Controller
                 ]);
             }
 
-            // 📌 Provider envia status "APPROVED"
+            // Provider retorna "APPROVED"
             if (!in_array($status, ['approved', 'paid'])) {
                 return response()->json([
                     'ignored' => true,
@@ -47,9 +47,15 @@ class LumnisWithdrawController extends Controller
                 return response()->json(['error' => 'withdraw_not_found'], 404);
             }
 
-            // 📌 Receipt real do provider (sempre índice 0)
+            // RECEIPT
             $receipt = $payload['receipt'][0] ?? [];
 
+            // Conversão de centavos → reais
+            $requestedReais = data_get($payload, 'requested') / 100; // 1000 → 10.00
+            $paidReais      = data_get($payload, 'paid') / 100;      // 1000 → 10.00
+            $operationAmount = data_get($payload, 'operation.amount') / 100;
+
+            // Dados do receipt
             $endtoend       = data_get($receipt, 'endtoend');
             $identifier     = data_get($receipt, 'identifier');
             $receiverName   = data_get($receipt, 'receiver_name');
@@ -58,11 +64,15 @@ class LumnisWithdrawController extends Controller
             $refusedReason  = data_get($receipt, 'refused_reason');
             $paidAt         = now()->toIso8601String();
 
-            // 🚀 Atualiza o saque como pago
+            // 🔥 Atualiza o saque como pago
             if ($withdraw->status !== 'paid') {
 
                 $meta = (array) $withdraw->meta;
-                $meta['raw_provider_payload'] = $payload;
+
+                $meta['raw_provider_payload'] = $payload;  // mantemos tudo original
+                $meta['requested_reais']      = $requestedReais;
+                $meta['paid_reais']           = $paidReais;
+                $meta['operation_reais']      = $operationAmount;
                 $meta['endtoend']             = $endtoend;
                 $meta['identifier']           = $identifier;
                 $meta['receiver_name']        = $receiverName;
@@ -71,27 +81,35 @@ class LumnisWithdrawController extends Controller
                 $meta['refused_reason']       = $refusedReason;
                 $meta['paid_at']              = $paidAt;
 
+                // Atualiza saque com valores em reais
                 $withdraw->update([
                     'status'       => 'paid',
                     'processed_at' => now(),
+                    'amount'       => $requestedReais,
                     'meta'         => $meta,
                 ]);
 
-                // 🔥 Dispara webhook para o cliente
                 $user = User::find($withdraw->user_id);
 
                 if ($user && $user->webhook_enabled && $user->webhook_out_url) {
 
-                    // Remove APENAS o campo operation.postback
+                    // Remove o campo operation.postback
                     if (isset($payload['operation']['postback'])) {
                         unset($payload['operation']['postback']);
                     }
+
+                    // Alteramos o payload enviado para o cliente para valores em reais
+                    $payloadToClient = $payload;
+
+                    $payloadToClient['requested'] = $requestedReais;
+                    $payloadToClient['paid']      = $paidReais;
+                    $payloadToClient['operation']['amount'] = $operationAmount;
 
                     try {
 
                         $response = Http::timeout(10)->post($user->webhook_out_url, [
                             'event' => 'withdraw.updated',
-                            'data'  => $payload, // 🔥 Dispara EXACTAMENTE o que o provider enviou
+                            'data'  => $payloadToClient,
                         ]);
 
                         Log::info('Webhook withdraw.updated enviado com sucesso', [
