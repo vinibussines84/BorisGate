@@ -221,12 +221,12 @@ const exampleCurlCreate = `curl -X POST ${createEndpoint} \\
   -H "X-Auth-Key: SEU_AUTH_KEY" \\
   -H "X-Secret-Key: SEU_SECRET_KEY" \\
   -d '{
-    "amount": 29.90,
-    "name": "João da Silva",
-    "email": "joao.silva@example.com",
-    "document": "12345678900",
-    "phone": "11999999999"
-  }'`;
+	"amount": 29.94,
+	"name": "Fernado Martins",
+	"email": "martins@gmail.com",
+	"document": "88424561104",
+	"phone": "11932698304"
+}'`;
 
 const fieldsCreate = [
   ["amount", "number", ">= 0.01", "Valor do pagamento em reais (R$)."],
@@ -243,7 +243,7 @@ const errorsCreate = [
 ];
 
 
- /* ------- Criar Saque (Withdraw Out) ------- */
+/* ------- Criar Saque (Withdraw Out) ------- */
 const exampleRequestWithdraw = useMemo(
   () => `POST ${withdrawEndpoint}
 Content-Type: application/json
@@ -251,27 +251,30 @@ X-Auth-Key: <sua_auth_key>
 X-Secret-Key: <sua_secret_key>
 
 {
-  "amount": 20000,
-  "key": "17ce9060-b29d-4ab5-89cd-20550ce6e7ac",
-  "key_type": "EVP",
+  "amount": 500, 
+  "key": "josekas@icloud.com",
+  "key_type": "EMAIL", // Tipos aceitos: EMAIL, CPF, CNPJ, PHONE, EVP
   "description": "Saque solicitado via API",
   "details": {
-    "name": "João Martins",
-    "document": "88424563354"
+    "name": "Jose Kassio",
+    "document": "12334554366"
   }
-}`, [withdrawEndpoint]);
+}`, 
+  [withdrawEndpoint]
+);
 
 const exampleResponseWithdraw = `{
   "success": true,
   "message": "Saque solicitado com sucesso!",
   "data": {
     "id": 74,
-    "amount": 20000,
-    "liquid_amount": 19900,
-    "pix_key": "17ce9060-b29d-4ab5-89cd-20550ce6e7ac",
-    "pix_key_type": "evp",
+    "amount": 500,
+    "liquid_amount": 485,
+    "pix_key": "josekas@icloud.com",
+    "pix_key_type": "EMAIL",
     "status": "pending",
-    "reference": "38508223304568832"
+    "reference": "38508223304568832",
+    "created_at": "2025-01-11T14:32:10Z"
   }
 }`;
 
@@ -292,7 +295,7 @@ const exampleCurlWithdraw = `curl -X POST ${withdrawEndpoint} \\
 
 const fieldsWithdraw = [
   ["amount", "number", ">= 0.01", "Valor do saque em centavos (ex: 20000 = R$200,00)."],
-  ["key", "string", "1..200", "Chave Pix de destino (e-mail, CPF, CNPJ, telefone ou EVP)."],
+  ["key", "string", "1..200", "Chave Pix de destino (EMAIL, CPF, CNPJ, PHONE ou EVP)."],
   ["key_type", "string", "EMAIL | CPF | CNPJ | PHONE | EVP", "Tipo da chave Pix utilizada."],
   ["description", "string", "opcional", "Descrição ou observação do saque."],
   ["details.name", "string", "1..100", "Nome do titular da conta de destino."],
@@ -306,6 +309,7 @@ const errorsWithdraw = [
   ["502", "Falha no provedor ao criar o saque."],
   ["INSUFFICIENT_FUNDS", "Tente novamente em 5 minutos ou contate o suporte."],
 ];
+
 
 
   /* ------- Accordions state (endpoints) ------- */

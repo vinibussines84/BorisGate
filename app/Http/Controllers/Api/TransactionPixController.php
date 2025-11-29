@@ -15,21 +15,28 @@ class TransactionPixController extends Controller
 
     public function store(Request $request, LumnisService $lumnis)
     {
-        // 🔒 Autenticação via headers
+        // 🔒 Headers obrigatórios
         $auth   = $request->header('X-Auth-Key');
         $secret = $request->header('X-Secret-Key');
 
         if (!$auth || !$secret) {
-            return response()->json(['success' => false, 'error' => 'Headers ausentes'], 401);
+            return response()->json([
+                'success' => false,
+                'error'   => 'Headers ausentes'
+            ], 401);
         }
 
+        // 🔑 Resolução do usuário
         $user = $this->resolveUser($auth, $secret);
 
         if (!$user) {
-            return response()->json(['success' => false, 'error' => 'Credenciais inválidas'], 401);
+            return response()->json([
+                'success' => false,
+                'error'   => 'Credenciais inválidas'
+            ], 401);
         }
 
-        // 🧩 Validação
+        // 🧩 Validação básica
         $data = $request->validate([
             'amount'   => ['required', 'numeric', 'min:0.01'],
             'name'     => ['sometimes', 'string', 'max:100'],
@@ -41,29 +48,50 @@ class TransactionPixController extends Controller
         $amountReais = (float) $data['amount'];
         $amountCents = (int) round($amountReais * 100);
 
-        // CPF
+        // ======================
+        // 📌 CPF (VALIDAÇÃO REAL)
+        // ======================
         $cpf = preg_replace('/\D/', '', ($data['document'] ?? $user->cpf_cnpj ?? ''));
 
-        if (!$cpf || strlen($cpf) < 11) {
-            return response()->json(['success' => false, 'error' => 'CPF inválido ou ausente'], 422);
+        if (!$cpf || strlen($cpf) !== 11 || !$this->validateCpf($cpf)) {
+            return response()->json([
+                'success' => false,
+                'field'   => 'document',
+                'error'   => 'CPF inválido. Informe um documento válido.'
+            ], 422);
         }
 
+        // =======================
+        // 📌 TELEFONE (VALIDAÇÃO)
+        // =======================
+        $phone = preg_replace('/\D/', '', ($data['phone'] ?? $user->phone ?? ''));
+
+        if (!$phone || strlen($phone) < 11 || strlen($phone) > 12) {
+            return response()->json([
+                'success' => false,
+                'field'   => 'phone',
+                'error'   => 'Telefone inválido. Use DDD + número. Ex: 11999999999'
+            ], 422);
+        }
+
+        // =======================
         // Dados do cliente
-        $name  = $data['name'] ?? $user->name ?? $user->nome_completo ?? 'Cliente';
+        // =======================
+        $name  = $data['name']  ?? $user->name ?? $user->nome_completo ?? 'Cliente';
         $email = $data['email'] ?? $user->email ?? 'sem-email@teste.com';
 
-        // Lumnis exige 11 dígitos
-        $phone = preg_replace('/\D/', '', ($data['phone'] ?? $user->phone ?? '11999999999'));
-        if (strlen($phone) < 11) {
-            $phone = "11999999999"; // fallback seguro
-        }
-
+        // =======================
+        // Identificador único
+        // =======================
         $externalId = $this->randomNumeric(18);
 
         try {
-            $result = DB::transaction(function () use ($user, $request, $amountReais, $amountCents, $cpf, $name, $email, $phone, $externalId, $lumnis) {
 
-                // Criação da transação local
+            $result = DB::transaction(function () use (
+                $user, $request, $amountReais, $amountCents, $cpf, $name, $email, $phone, $externalId, $lumnis
+            ) {
+
+                // 📌 Criação local da transação
                 $tx = Transaction::create([
                     'tenant_id'          => $user->tenant_id,
                     'user_id'            => $user->id,
@@ -85,7 +113,9 @@ class TransactionPixController extends Controller
                     'user_agent'         => $request->userAgent(),
                 ]);
 
-                // 🌐 Payload PARA a Lumnis (CÓDIGO CORRETO!)
+                // ======================
+                // 📦 Payload para Lumnis
+                // ======================
                 $payload = [
                     "amount"      => $amountCents,
                     "externalRef" => $externalId,
@@ -116,10 +146,11 @@ class TransactionPixController extends Controller
                     "installments" => 1,
                 ];
 
-                // LOG DO PAYLOAD FINAL PARA PRODUÇÃO
                 \Log::info("LUMNIS_PAYLOAD_ENVIO", $payload);
 
-                // Chamada API Lumnis
+                // ======================================
+                // 🌍 ENVIO PARA A LUMNIS (CHAMADA REAL)
+                // ======================================
                 $response = $lumnis->createTransaction($payload);
 
                 if (!in_array($response["status"], [200, 201])) {
@@ -135,7 +166,7 @@ class TransactionPixController extends Controller
                     throw new \Exception("Retorno inválido da Lumnis");
                 }
 
-                // Atualizar transação
+                // 📌 Atualizar transação local
                 DB::table('transactions')
                     ->where('id', $tx->id)
                     ->update([
@@ -168,7 +199,6 @@ class TransactionPixController extends Controller
 
         } catch (\Throwable $e) {
 
-            // Logar erro real
             \Log::error("ERRO_PIX_PRODUCAO", [
                 'error' => $e->getMessage(),
                 'line'  => $e->getLine(),
@@ -177,16 +207,24 @@ class TransactionPixController extends Controller
 
             return response()->json([
                 'success' => false,
-                'error'   => 'ERRO_PIX_500',
+                'error'   => 'ERRO_PIX_500'
             ], 500);
         }
     }
 
+    // =================================================
+    // 🔍 Validação Usuário
+    // =================================================
     private function resolveUser(string $auth, string $secret)
     {
-        return \App\Models\User::where('authkey', $auth)->where('secretkey', $secret)->first();
+        return \App\Models\User::where('authkey', $auth)
+                               ->where('secretkey', $secret)
+                               ->first();
     }
 
+    // =================================================
+    // 💸 Cálculo de Taxa
+    // =================================================
     private function computeFee($user, float $amount): float
     {
         if (!($user->tax_in_enabled ?? false)) {
@@ -196,11 +234,39 @@ class TransactionPixController extends Controller
         $fixed   = (float) ($user->tax_in_fixed ?? 0);
         $percent = (float) ($user->tax_in_percent ?? 0);
 
-        return round(max(0, min($fixed + ($amount * $percent / 100), $amount)), 2);
+        return round(
+            max(0, min($fixed + ($amount * $percent / 100), $amount)),
+            2
+        );
     }
 
+    // =================================================
+    // 🔢 Número Aleatório
+    // =================================================
     private function randomNumeric(int $len): string
     {
-        return collect(range(1, $len))->map(fn() => random_int(0, 9))->implode('');
+        return collect(range(1, $len))
+            ->map(fn() => random_int(0, 9))
+            ->implode('');
+    }
+
+    // =================================================
+    // 🧠 VALIDADOR DE CPF (BANCO / RECEITA FEDERAL)
+    // =================================================
+    private function validateCpf($cpf): bool
+    {
+        if (preg_match('/(\d)\1{10}/', $cpf)) return false;
+
+        for ($t = 9; $t < 11; $t++) {
+            for ($d = 0, $c = 0; $c < $t; $c++) {
+                $d += $cpf[$c] * (($t + 1) - $c);
+            }
+            $d = ((10 * $d) % 11) % 10;
+            if ($cpf[$c] != $d) {
+                return false;
+            }
+        }
+
+        return true;
     }
 }
