@@ -68,12 +68,12 @@ class WithdrawOutController extends Controller
             return response()->json(['success' => false, 'error' => 'Valor líquido inválido.'], 422);
         }
 
-        // 🔖 Referência local
-        $externalId = 'withdraw_' . now()->timestamp . '_' . random_int(1000, 9999);
+        // 🔖 Referência interna local
+        $internalRef = 'withdraw_' . now()->timestamp . '_' . random_int(1000, 9999);
 
         try {
-            // 1️⃣ Criação e débito local
-            $result = DB::transaction(function () use ($user, $gross, $net, $fee, $data, $externalId) {
+            // 1️⃣ Criação local e débito do saldo
+            $result = DB::transaction(function () use ($user, $gross, $net, $fee, $data, $internalRef) {
                 $u = User::where('id', $user->id)->lockForUpdate()->first();
 
                 if ($u->amount_available < $gross) {
@@ -97,14 +97,14 @@ class WithdrawOutController extends Controller
                     'pixkey_type'     => strtolower($data['key_type']),
                     'status'          => 'pending',
                     'provider'        => 'lumnis',
-                    'idempotency_key' => $externalId,
+                    'idempotency_key' => $internalRef,
                 ];
 
                 if (Schema::hasColumn('withdraws', 'meta')) {
                     $payload['meta'] = [
-                        'internal_reference' => $externalId,
-                        'tax_fixed'   => $u->tax_out_fixed,
-                        'tax_percent' => $u->tax_out_percent,
+                        'internal_reference' => $internalRef,
+                        'tax_fixed'          => $u->tax_out_fixed,
+                        'tax_percent'        => $u->tax_out_percent,
                     ];
                 }
 
@@ -119,9 +119,9 @@ class WithdrawOutController extends Controller
             /** @var Withdraw $withdraw */
             $withdraw = $result['withdraw'];
 
-            // 2️⃣ Body Lumnis
+            // 2️⃣ Payload da Lumnis
             $payload = [
-                "amount"       => (int) round($net * 100),
+                "amount"       => (int) round($net * 100), // em centavos
                 "key"          => $data['key'],
                 "key_type"     => strtoupper($data['key_type']),
                 "description"  => $data['description'] ?? 'Saque via API',
@@ -129,9 +129,11 @@ class WithdrawOutController extends Controller
                     "name"     => $data['details']['name'],
                     "document" => $data['details']['document'],
                 ],
+                // ✅ O SEU SISTEMA DEFINE o postback automaticamente
+                "postback"     => route('webhooks.lumnis.withdraw'),
             ];
 
-            // 3️⃣ Chamada API
+            // 3️⃣ Chamada para API da Lumnis
             $resp = $this->lumnis->createWithdrawal($payload);
 
             // 🧩 Verificação de erro Lumnis
