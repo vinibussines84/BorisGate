@@ -48,7 +48,7 @@ class WithdrawOutController extends Controller
             'description'       => ['nullable', 'string', 'max:255'],
             'details.name'      => ['required', 'string', 'max:100'],
             'details.document'  => ['required', 'string', 'max:20'],
-            'external_id'       => ['sometimes', 'string', 'max:64'], // ✅ Novo campo
+            'external_id'       => ['sometimes', 'string', 'max:64'], 
         ]);
 
         // ⚙️ Verificação de permissão de saque
@@ -110,7 +110,7 @@ class WithdrawOutController extends Controller
                     'pixkey_type'     => strtolower($data['key_type']),
                     'status'          => 'pending',
                     'provider'        => 'lumnis',
-                    'external_id'     => $externalId, // ✅ armazenado localmente
+                    'external_id'     => $externalId, 
                     'idempotency_key' => $internalRef,
                 ];
 
@@ -133,9 +133,9 @@ class WithdrawOutController extends Controller
             /** @var Withdraw $withdraw */
             $withdraw = $result['withdraw'];
 
-            // 2️⃣ Payload da Lumnis
+            // 2️⃣ Payload da Lumnis (CORRIGIDO — sem externalRef)
             $payload = [
-                "amount"       => (int) round($net * 100), // em centavos
+                "amount"       => (int) round($net * 100),
                 "key"          => $data['key'],
                 "key_type"     => strtoupper($data['key_type']),
                 "description"  => $data['description'] ?? 'Saque via API',
@@ -143,7 +143,6 @@ class WithdrawOutController extends Controller
                     "name"     => $data['details']['name'],
                     "document" => $data['details']['document'],
                 ],
-                "externalRef"  => $externalId, // ✅ Enviado também à Lumnis
                 "postback"     => route('webhooks.lumnis.withdraw'),
             ];
 
@@ -156,7 +155,6 @@ class WithdrawOutController extends Controller
                 $content = $body['content'] ?? [];
                 $errorName = $content['name'] ?? null;
 
-                // ⚠️ Caso seja saldo insuficiente no provedor
                 if ($errorName === 'INSUFFICIENT_FUNDS') {
                     DB::transaction(function () use ($user, $gross) {
                         $u = User::where('id', $user->id)->lockForUpdate()->first();
@@ -194,7 +192,7 @@ class WithdrawOutController extends Controller
                 $withdraw->save();
             });
 
-            // 🚀 Dispara webhook de criação
+            // 🚀 Dispara webhook
             if ($user->webhook_enabled && $user->webhook_out_url) {
                 try {
                     Http::timeout(10)->post($user->webhook_out_url, [
@@ -219,13 +217,13 @@ class WithdrawOutController extends Controller
                 }
             }
 
-            // ✅ Retorno final
+            // 🎉 Sucesso total
             return response()->json([
                 'success' => true,
                 'message' => 'Saque solicitado com sucesso!',
                 'data' => [
                     'id'            => $withdraw->id,
-                    'external_id'   => $externalId, // ✅ Retornado
+                    'external_id'   => $externalId,
                     'amount'        => $gross,
                     'liquid_amount' => $net,
                     'pix_key'       => $withdraw->pixkey,

@@ -13,7 +13,9 @@ class LumnisWebhookController extends Controller
     public function __invoke(Request $request)
     {
         try {
-            // 🔹 Tenta ler o JSON corretamente (mesmo se vier raw)
+            /** ==========================================================
+             *  1) Normaliza payload (raw + JSON)
+             *  ========================================================== */
             $data = $request->json()->all();
             if (empty($data)) {
                 $data = json_decode($request->getContent(), true) ?? [];
@@ -21,40 +23,47 @@ class LumnisWebhookController extends Controller
 
             Log::info('📩 Webhook Lumnis recebido', $data);
 
-            // 🔹 Captura referências de diferentes formatos possíveis
-            $externalRef = trim((string) (
+            /** ==========================================================
+             *  2) Captura referências permitidas
+             *  ========================================================== */
+            $externalRef = trim((string)(
                 data_get($data, 'external_ref')
                 ?? data_get($data, 'externalRef')
                 ?? data_get($data, 'external_reference')
             ));
 
-            $txid = trim((string) (
+            $txid = trim((string)(
                 data_get($data, 'id')
                 ?? data_get($data, 'transaction_id')
+                ?? data_get($data, 'txid')
             ));
 
-            $status = strtoupper((string) data_get($data, 'status', ''));
+            $status = strtoupper((string)data_get($data, 'status'));
 
             if (!$externalRef && !$txid) {
                 return response()->json(['error' => 'Missing external_ref or txid'], 422);
             }
 
-            // 🔍 Busca por external_reference ou txid
+            /** ==========================================================
+             *  3) Busca transação de forma segura
+             *  ========================================================== */
             $tx = Transaction::query()
-                ->where('external_reference', $externalRef)
+                ->when($externalRef, fn($q) => $q->where('external_reference', $externalRef))
                 ->when(!$externalRef && $txid, fn($q) => $q->where('txid', $txid))
-                ->orWhere('txid', $txid)
                 ->first();
 
             if (!$tx) {
-                Log::warning('⚠️ Transação não encontrada para webhook', [
+                Log::warning('⚠️ Transação não encontrada', [
                     'external_ref' => $externalRef,
-                    'txid' => $txid,
+                    'txid'         => $txid,
                 ]);
+
                 return response()->json(['error' => 'Transaction not found'], 404);
             }
 
-            // 🚫 Evita reprocessar transações já pagas
+            /** ==========================================================
+             *  4) Idempotência — ignora se já paga
+             *  ========================================================== */
             if ($tx->isPaga()) {
                 return response()->json([
                     'received' => true,
@@ -63,32 +72,52 @@ class LumnisWebhookController extends Controller
                 ]);
             }
 
-            // ✅ Atualiza apenas quando aprovado/pago
-            if (in_array($status, ['APPROVED', 'PAID', 'CONFIRMED'])) {
-                $tx->status          = TransactionStatus::PAGA->value;
-                $tx->paid_at         = now();
-                $tx->e2e_id          = data_get($data, 'endtoend') ?? $tx->e2e_id;
-                $tx->payer_name      = data_get($data, 'payer_name') ?? $tx->payer_name;
-                $tx->payer_document  = data_get($data, 'payer_document') ?? $tx->payer_document;
-                $tx->provider_payload = json_encode($data);
-                $tx->save();
+            /** ==========================================================
+             *  5) Mapeia os dados enviados pela Lumnis
+             *  ========================================================== */
+            $payerName     = data_get($data, 'payer_name');
+            $payerDocument = data_get($data, 'payer_document');
+            $endToEnd      = data_get($data, 'endtoend');
+            $providerId    = data_get($data, 'identifier') ?? data_get($data, 'id');
 
-                Log::info('✅ Transação atualizada com sucesso via webhook', [
-                    'id' => $tx->id,
-                    'external_reference' => $tx->external_reference,
-                    'status' => $tx->status,
+            /** ==========================================================
+             *  6) Atualiza somente quando o status for aprovado
+             *  ========================================================== */
+            if (in_array($status, ['APPROVED', 'PAID', 'CONFIRMED'])) {
+
+                $tx->update([
+                    'status'                 => TransactionStatus::PAGA->value,
+                    'paid_at'                => now(),
+                    'e2e_id'                 => $endToEnd ?: $tx->e2e_id,
+                    'payer_name'             => $payerName ?: $tx->payer_name,
+                    'payer_document'         => $payerDocument ?: $tx->payer_document,
+                    'provider_transaction_id'=> $providerId,
+                    'provider_payload'       => $data, // salva JSON puro
+                ]);
+
+                Log::info('✅ Transação atualizada com sucesso!', [
+                    'transaction_id' => $tx->id,
+                    'status'         => $tx->status,
+                    'external_ref'   => $tx->external_reference,
+                    'txid'           => $tx->txid,
                 ]);
 
                 return response()->json([
-                    'received' => true,
-                    'updated'  => true,
-                    'status'   => 'paga',
-                    'e2e_id'   => $tx->e2e_id,
+                    'received'  => true,
+                    'updated'   => true,
+                    'status'    => 'paga',
+                    'e2e_id'    => $tx->e2e_id,
+                    'payer'     => [
+                        'name'     => $tx->payer_name,
+                        'document' => $tx->payer_document,
+                    ],
                 ]);
             }
 
-            // 🔸 Outros status apenas são logados e ignorados
-            Log::info('ℹ️ Webhook recebido com status não aprovado', [
+            /** ==========================================================
+             *  7) Demais status apenas são logados
+             *  ========================================================== */
+            Log::info('ℹ️ Webhook recebido com status não final', [
                 'status' => $status,
                 'external_ref' => $externalRef,
             ]);
@@ -98,9 +127,11 @@ class LumnisWebhookController extends Controller
                 'ignored'  => true,
                 'reason'   => 'status_not_approved',
             ]);
+
         } catch (\Throwable $e) {
-            Log::error('❌ Erro no processamento do Webhook Lumnis', [
-                'message' => $e->getMessage(),
+
+            Log::error('❌ ERRO AO PROCESSAR WEBHOOK LUMNIS', [
+                'error'   => $e->getMessage(),
                 'trace'   => $e->getTraceAsString(),
                 'payload' => $request->getContent(),
             ]);
