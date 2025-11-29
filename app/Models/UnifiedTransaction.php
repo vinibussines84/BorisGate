@@ -10,13 +10,15 @@ class UnifiedTransaction extends Model
 {
     protected $table = 'transactions'; // apenas para o Eloquent não reclamar
 
+    protected $guarded = [];
     public $timestamps = false;
+    public $incrementing = false;
 
     protected static function booted()
     {
         static::addGlobalScope('unified', function (Builder $query) {
 
-            // TABELA DE ENTRADAS
+            // ENTRADAS
             $transactions = DB::table('transactions')
                 ->selectRaw("
                     id,
@@ -38,7 +40,7 @@ class UnifiedTransaction extends Model
                     description
                 ");
 
-            // TABELA DE SAÍDAS (WITHDRAWS)
+            // SAÍDAS
             $withdraws = DB::table('withdraws')
                 ->selectRaw("
                     id,
@@ -60,11 +62,23 @@ class UnifiedTransaction extends Model
                     description
                 ");
 
-            // ⚡ UNE as duas tabelas aqui
+            // 🔥 Unificação final
             $query->fromSub(
                 $transactions->unionAll($withdraws),
                 'unified_transactions'
             );
         });
+    }
+
+    /** Relacionamento necessário no Filament */
+    public function user()
+    {
+        return $this->belongsTo(\App\Models\User::class);
+    }
+
+    /** Impede gravação em tabela virtual */
+    public function save(array $options = [])
+    {
+        return false;
     }
 }
