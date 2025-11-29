@@ -1,4 +1,5 @@
-import React from "react";
+// resources/js/Components/ExtractTable.jsx
+import React, { useMemo, useEffect } from "react";
 import {
   FileText,
   ArrowUpRight,
@@ -46,7 +47,7 @@ const mapStatus = (s) => {
   return normalized.toUpperCase();
 };
 
-const StatusPill = ({ status }) => {
+const StatusPill = React.memo(({ status }) => {
   const s = String(status || "").toUpperCase();
 
   const map = {
@@ -87,12 +88,13 @@ const StatusPill = ({ status }) => {
       {cfg.label}
     </span>
   );
-};
+});
+StatusPill.displayName = "StatusPill";
 
 /* =====================================================================================
    ORIGIN PILL
 ===================================================================================== */
-const OriginPill = ({ type }) => {
+const OriginPill = React.memo(({ type }) => {
   const credit = type === "PIX";
   return (
     <span
@@ -106,7 +108,14 @@ const OriginPill = ({ type }) => {
       {credit ? "Credit (PIX)" : "Debit (Withdrawal)"}
     </span>
   );
-};
+});
+OriginPill.displayName = "OriginPill";
+
+/* =====================================================================================
+   CACHE SYSTEM
+===================================================================================== */
+const CACHE_KEY = "extract_table_cache_v1";
+const CACHE_TTL = 30 * 1000; // 30 seconds
 
 /* =====================================================================================
    MAIN COMPONENT — ExtractTable
@@ -119,10 +128,58 @@ export default function ExtractTable({
   perPage = 10,
   totalItems = 0,
   loading = false,
+  fetchTransactions, // optional callback to refresh from API
 }) {
-  const totalPages = Math.max(1, Math.ceil(totalItems / perPage));
+  const totalPages = useMemo(
+    () => Math.max(1, Math.ceil(totalItems / perPage)),
+    [totalItems, perPage]
+  );
+
   const canPrev = page > 1;
   const canNext = page < totalPages;
+
+  /* === Cache management === */
+  useEffect(() => {
+    // store cache when loaded and not empty
+    if (!loading && transactions.length > 0) {
+      localStorage.setItem(
+        CACHE_KEY,
+        JSON.stringify({
+          transactions,
+          page,
+          totalItems,
+          timestamp: Date.now(),
+        })
+      );
+    }
+  }, [transactions, loading, page, totalItems]);
+
+  useEffect(() => {
+    // auto-refresh cache when expired
+    const cache = JSON.parse(localStorage.getItem(CACHE_KEY));
+    if (!cache) return;
+    const expired = Date.now() - cache.timestamp > CACHE_TTL;
+    if (expired && typeof fetchTransactions === "function") {
+      fetchTransactions(page);
+    }
+  }, [page, fetchTransactions]);
+
+  /* === Load from cache if available === */
+  const cached = useMemo(() => {
+    const c = localStorage.getItem(CACHE_KEY);
+    if (!c) return null;
+    try {
+      const json = JSON.parse(c);
+      const valid = Date.now() - json.timestamp < CACHE_TTL;
+      return valid ? json : null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const activeTransactions = cached?.transactions?.length
+    ? cached.transactions
+    : transactions;
 
   return (
     <div className="bg-[#0b0b0b]/95 border border-white/10 rounded-3xl p-6 backdrop-blur-sm min-h-[520px] flex flex-col justify-between transition-all duration-300">
@@ -135,7 +192,7 @@ export default function ExtractTable({
           <span className="text-[11px] text-gray-400">
             {loading
               ? "Loading..."
-              : `${transactions.length} results on this page (${totalItems} total)`}
+              : `${activeTransactions.length} results on this page (${totalItems} total)`}
           </span>
         </div>
 
@@ -163,14 +220,14 @@ export default function ExtractTable({
                     </td>
                   </tr>
                 ))
-              ) : transactions.length === 0 ? (
+              ) : activeTransactions.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="py-12 text-center text-gray-400">
                     No transactions found.
                   </td>
                 </tr>
               ) : (
-                transactions.map((t) => (
+                activeTransactions.map((t) => (
                   <tr
                     key={t.id}
                     className="border-b border-white/5 hover:bg-[#141414]/60 cursor-pointer transition-colors"

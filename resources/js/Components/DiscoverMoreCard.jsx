@@ -1,5 +1,5 @@
 // resources/js/Components/DiscoverMoreCard.jsx
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import {
   ArrowUpRight,
   ArrowDownRight,
@@ -9,7 +9,7 @@ import {
   Zap,
 } from "lucide-react";
 
-/* Utils */
+/* =============== Utils =============== */
 const toNumber = (v) => {
   if (typeof v === "number") return v;
   if (typeof v === "string") {
@@ -29,7 +29,7 @@ const BRL = (v) => {
   });
 };
 
-/* Tile (fixed dark theme) */
+/* =============== KPI Tile =============== */
 function KpiTile({
   icon: Icon,
   label,
@@ -43,8 +43,7 @@ function KpiTile({
       className={[
         "relative isolate rounded-2xl overflow-hidden",
         "border border-neutral-800 bg-neutral-950",
-        "ring-1 ring-inset ring-neutral-900",
-        "shadow-sm",
+        "ring-1 ring-inset ring-neutral-900 shadow-sm",
         "p-4 sm:p-5",
         className,
       ].join(" ")}
@@ -69,6 +68,11 @@ function KpiTile({
   );
 }
 
+/* =============== Cache constants =============== */
+const CACHE_KEY = "discover_metrics_cache_v1";
+const CACHE_TTL = 1000 * 60 * 60; // 1 hour
+
+/* =============== Component =============== */
 export default function DiscoverMoreCard() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -79,27 +83,50 @@ export default function DiscoverMoreCard() {
       ? window.route(name)
       : fallback;
 
-  const fetchMonth = async () => {
+  /* =============== Fetch with cache =============== */
+  const fetchMonth = useCallback(async () => {
     setLoading(true);
     setErr(null);
+
     try {
+      // Check cache first
+      const cache = JSON.parse(localStorage.getItem(CACHE_KEY));
+      if (cache && Date.now() - cache.timestamp < CACHE_TTL) {
+        setData(cache.data);
+        setLoading(false);
+        return;
+      }
+
+      // Fetch fresh data
       const url = routeOr("api.metrics.month", "/api/metrics/month");
       const res = await fetch(url, { headers: { Accept: "application/json" } });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
       const json = await res.json();
       const d = json?.data ?? {};
       setData(d);
+
+      // Store cache
+      localStorage.setItem(
+        CACHE_KEY,
+        JSON.stringify({ data: d, timestamp: Date.now() })
+      );
     } catch (e) {
       setErr(e?.message || "Failed to load metrics.");
     } finally {
       setLoading(false);
     }
-  };
-
-  useEffect(() => {
-    fetchMonth();
   }, []);
 
+  /* =============== Auto fetch on mount + focus =============== */
+  useEffect(() => {
+    fetchMonth();
+    const handleFocus = () => fetchMonth();
+    window.addEventListener("focus", handleFocus);
+    return () => window.removeEventListener("focus", handleFocus);
+  }, [fetchMonth]);
+
+  /* =============== Derived values =============== */
   const incomingMonth = toNumber(data?.entradaMes) || 0;
   const outgoingMonth = toNumber(data?.saidaMes) || 0;
   const pending = Number.isFinite(toNumber(data?.pendentes))
@@ -117,6 +144,7 @@ export default function DiscoverMoreCard() {
   const outgoingFmt = BRL(outgoingMonth);
   const pixVolumeFmt = BRL(pixVolume);
 
+  /* =============== Render =============== */
   return (
     <section className="w-full mx-auto max-w-5xl">
       {/* Header */}
@@ -136,14 +164,21 @@ export default function DiscoverMoreCard() {
         </span>
       </div>
 
-      {err && <div className="mb-3 text-sm text-red-300">{err}</div>}
+      {err && (
+        <div className="mb-3 text-sm text-red-300 border border-red-800/50 rounded-lg p-2 bg-red-950/30">
+          {err}
+        </div>
+      )}
 
       {/* Loader */}
       {loading ? (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <div className="h-20 rounded-2xl overflow-hidden border border-neutral-800 ring-1 ring-inset ring-neutral-900 bg-neutral-900 animate-pulse" />
-          <div className="h-20 rounded-2xl overflow-hidden border border-neutral-800 ring-1 ring-inset ring-neutral-900 bg-neutral-900 animate-pulse" />
-          <div className="h-20 rounded-2xl overflow-hidden border border-neutral-800 ring-1 ring-inset ring-neutral-900 bg-neutral-900 animate-pulse" />
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div
+              key={i}
+              className="h-20 rounded-2xl overflow-hidden border border-neutral-800 ring-1 ring-inset ring-neutral-900 bg-neutral-900 animate-pulse"
+            />
+          ))}
         </div>
       ) : !data ? (
         <div className="text-center text-neutral-400 text-sm py-4">

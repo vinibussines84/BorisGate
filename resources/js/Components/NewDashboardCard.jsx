@@ -1,20 +1,18 @@
 // resources/js/Components/NewDashboardCard.jsx
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { Eye, EyeOff, Lock, ShieldAlert, RefreshCw } from "lucide-react";
 
-/* --- Animated top line (same as PaymentAccountCard, emerald tone) --- */
+/* --- Animated emerald progress line --- */
 function CardProgress({ visible }) {
   if (!visible) return null;
-
   return (
     <>
       <style>{`
         @keyframes ndcCardProgress {
-          0%   { transform: translateX(-80%); opacity: .3; }
+          0% { transform: translateX(-80%); opacity: .3; }
           100% { transform: translateX(180%); opacity: .7; }
         }
       `}</style>
-
       <div className="absolute inset-x-0 top-0 z-30 h-[2px] overflow-hidden">
         <div
           className="h-full w-[45%] bg-gradient-to-r from-transparent via-emerald-500/60 to-transparent animate-[ndcCardProgress_1.6s_linear_infinite]"
@@ -25,25 +23,33 @@ function CardProgress({ visible }) {
   );
 }
 
+/* ===== Helpers ===== */
+const BRL = (v = 0) =>
+  Number(v).toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+    minimumFractionDigits: 2,
+  });
+
+const CACHE_KEY = "new_dashboard_balances_v1";
+const CACHE_TTL = 60000; // 60 seconds
+
 /* =============================
-   Main Card (same color style)
+   Main Card
 ============================= */
 export default function NewDashboardCard({ minHeight = 80, initialBalances = {} }) {
   const [showBalance, setShowBalance] = useState(true);
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [retainedBalance, setRetainedBalance] = useState(Number(initialBalances.amount_retained ?? 0));
-  const [securityBlock, setSecurityBlock] = useState(Number(initialBalances.blocked_amount ?? 0));
+  const [retainedBalance, setRetainedBalance] = useState(
+    Number(initialBalances.amount_retained ?? 0)
+  );
+  const [securityBlock, setSecurityBlock] = useState(
+    Number(initialBalances.blocked_amount ?? 0)
+  );
   const [error, setError] = useState(null);
 
-  /* ======= Helpers ======= */
-  const BRL = (v = 0) =>
-    Number(v).toLocaleString("pt-BR", {
-      style: "currency",
-      currency: "BRL",
-      minimumFractionDigits: 2,
-    });
-
+  /* ===== Value Display Component ===== */
   const Value = ({ v, dim = false }) => (
     <span
       className={[
@@ -58,35 +64,70 @@ export default function NewDashboardCard({ minHeight = 80, initialBalances = {} 
     </span>
   );
 
-  /* ======= Fetch ======= */
-  const loadBalances = async ({ initial = false } = {}) => {
-    try {
-      if (initial) setLoading(true);
-      else setIsRefreshing(true);
+  /* ===== Fetch with cache ===== */
+  const loadBalances = useCallback(
+    async ({ initial = false } = {}) => {
+      try {
+        if (initial) setLoading(true);
+        else setIsRefreshing(true);
+        setError(null);
 
-      setError(null);
-      const res = await fetch("/api/balances", { headers: { Accept: "application/json" } });
-      const json = await res.json();
+        // Try reading cache first
+        const cache = JSON.parse(localStorage.getItem(CACHE_KEY));
+        if (cache && Date.now() - cache.timestamp < CACHE_TTL && initial) {
+          setRetainedBalance(cache.retainedBalance);
+          setSecurityBlock(cache.securityBlock);
+          setLoading(false);
+          return;
+        }
 
-      if (!res.ok || !json?.success) throw new Error(json?.message || "Error fetching balances.");
+        // Fetch API
+        const res = await fetch("/api/balances", {
+          headers: { Accept: "application/json" },
+        });
+        const json = await res.json();
 
-      const data = json.data || {};
-      setRetainedBalance(Number(data.amount_retained ?? 0));
-      setSecurityBlock(Number(data.blocked_amount ?? 0));
-    } catch (err) {
-      setError(err?.message || "Failed to load balances.");
-    } finally {
-      setLoading(false);
-      setIsRefreshing(false);
-    }
-  };
+        if (!res.ok || !json?.success)
+          throw new Error(json?.message || "Error fetching balances.");
 
-  /* ======= Auto refresh ======= */
+        const data = json.data || {};
+        const newRetained = Number(data.amount_retained ?? 0);
+        const newBlocked = Number(data.blocked_amount ?? 0);
+
+        setRetainedBalance(newRetained);
+        setSecurityBlock(newBlocked);
+
+        // Save cache
+        localStorage.setItem(
+          CACHE_KEY,
+          JSON.stringify({
+            retainedBalance: newRetained,
+            securityBlock: newBlocked,
+            timestamp: Date.now(),
+          })
+        );
+      } catch (err) {
+        setError(err?.message || "Failed to load balances.");
+      } finally {
+        setLoading(false);
+        setIsRefreshing(false);
+      }
+    },
+    []
+  );
+
+  /* ===== Auto load and refresh ===== */
   useEffect(() => {
     loadBalances({ initial: true });
     const interval = setInterval(() => loadBalances({ initial: false }), 30000);
-    return () => clearInterval(interval);
-  }, []);
+    const handleFocus = () => loadBalances({ initial: false });
+
+    window.addEventListener("focus", handleFocus);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("focus", handleFocus);
+    };
+  }, [loadBalances]);
 
   /* =============================
      Render
@@ -125,7 +166,10 @@ export default function NewDashboardCard({ minHeight = 80, initialBalances = {} 
             title="Refresh"
             aria-busy={isRefreshing}
           >
-            <RefreshCw size={15} className={isRefreshing ? "animate-spin text-emerald-400" : ""} />
+            <RefreshCw
+              size={15}
+              className={isRefreshing ? "animate-spin text-emerald-400" : ""}
+            />
           </button>
 
           {/* Show / Hide */}
@@ -150,7 +194,6 @@ export default function NewDashboardCard({ minHeight = 80, initialBalances = {} 
 
       {/* Body */}
       <div className="relative z-10 flex-1 px-5 py-3 space-y-3">
-
         {/* Retained Balance */}
         <div className="group rounded-xl border border-neutral-800 bg-neutral-900/40 hover:bg-neutral-800/40 transition-all duration-200 px-3 py-3">
           <div className="flex items-start justify-between">

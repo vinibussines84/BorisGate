@@ -1,3 +1,4 @@
+// resources/js/Components/SidebarCard.jsx
 import React, {
   useState,
   useEffect,
@@ -70,7 +71,8 @@ const statusMap = {
   },
 };
 
-const DetailLine = ({ label, value }) => (
+/* Small Components */
+const DetailLine = React.memo(({ label, value }) => (
   <div className="flex flex-col gap-1 py-2 border-b border-zinc-800/60 last:border-none">
     <span className="text-[11px] uppercase tracking-wide text-zinc-500">
       {label}
@@ -79,7 +81,7 @@ const DetailLine = ({ label, value }) => (
       {value || "—"}
     </span>
   </div>
-);
+));
 
 const Skeleton = ({ className = "" }) => (
   <div className={`animate-pulse rounded-xl bg-zinc-800/50 ${className}`} />
@@ -172,6 +174,10 @@ export default function SidebarCard() {
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
   const calendarContainerRef = useRef(null);
 
+  const CACHE_KEY = "paid_feed_cache_v1";
+  const CACHE_TTL = 60 * 1000; // 1 minute
+
+  /* Close calendar when clicking outside */
   useEffect(() => {
     const handleClickOutside = (e) => {
       if (
@@ -186,54 +192,72 @@ export default function SidebarCard() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [isCalendarOpen]);
 
-  useEffect(() => {
-    const load = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const res = await fetch("/api/metrics/paid-feed?limit=30", {
-          headers: {
-            Accept: "application/json",
-          },
-          credentials: "include",
-        });
+  /* Load transactions with cache */
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
 
-        const text = await res.text();
-        let json = {};
-        try {
-          json = JSON.parse(text);
-        } catch {
-          throw new Error(
-            "The server response is not valid JSON.\n" +
-              "Check authentication or whether the API returned an HTML error."
-          );
-        }
-
-        if (!res.ok) {
-          throw new Error(json?.message || "Failed to load transactions.");
-        }
-
-        setItems(Array.isArray(json?.data) ? json.data : []);
-      } catch (e) {
-        console.error("Error fetching /api/metrics/paid-feed:", e);
-        setError(e?.message || "Failed to connect to server.");
-      } finally {
+    try {
+      const cache = JSON.parse(localStorage.getItem(CACHE_KEY));
+      if (cache && Date.now() - cache.timestamp < CACHE_TTL) {
+        setItems(cache.data || []);
         setLoading(false);
+        return;
       }
-    };
+
+      const res = await fetch("/api/metrics/paid-feed?limit=30", {
+        headers: { Accept: "application/json" },
+        credentials: "include",
+      });
+
+      const text = await res.text();
+      let json = {};
+      try {
+        json = JSON.parse(text);
+      } catch {
+        throw new Error(
+          "The server response is not valid JSON.\nCheck authentication or if API returned an HTML error."
+        );
+      }
+
+      if (!res.ok) throw new Error(json?.message || "Failed to load transactions.");
+
+      const arr = Array.isArray(json?.data) ? json.data : [];
+      setItems(arr);
+
+      localStorage.setItem(
+        CACHE_KEY,
+        JSON.stringify({ data: arr, timestamp: Date.now() })
+      );
+    } catch (e) {
+      console.error("Error fetching /api/metrics/paid-feed:", e);
+      setError(e?.message || "Failed to connect to server.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
     load();
-  }, []);
+    const handleFocus = () => load();
+    window.addEventListener("focus", handleFocus);
+    return () => window.removeEventListener("focus", handleFocus);
+  }, [load]);
 
-  const sortedItems = useMemo(() => {
-    return [...items].sort(
-      (a, b) =>
-        new Date(b.paidAt || b.createdAt) - new Date(a.paidAt || a.createdAt)
-    );
-  }, [items]);
+  /* Sort and select handlers */
+  const sortedItems = useMemo(
+    () =>
+      [...items].sort(
+        (a, b) =>
+          new Date(b.paidAt || b.createdAt) - new Date(a.paidAt || a.createdAt)
+      ),
+    [items]
+  );
 
-  const handleSelect = useCallback((it) => {
-    setSelectedItem((prev) => (prev?.id === it.id ? null : it));
-  }, []);
+  const handleSelect = useCallback(
+    (it) => setSelectedItem((prev) => (prev?.id === it.id ? null : it)),
+    []
+  );
 
   return (
     <div className="relative flex flex-col h-[720px] rounded-2xl border border-zinc-800/80 bg-gradient-to-br from-zinc-950/90 via-zinc-900/90 to-zinc-950/80 shadow-[0_0_30px_-8px_rgba(16,185,129,0.3)] overflow-hidden backdrop-blur-lg">

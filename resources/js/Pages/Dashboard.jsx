@@ -1,16 +1,17 @@
 // resources/js/Pages/Dashboard.jsx
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, Suspense, lazy, memo } from "react";
 import { Head, router } from "@inertiajs/react";
-
 import AuthenticatedLayout from "../Layouts/AuthenticatedLayout";
-import PaymentAccountCard from "../Components/PaymentAccountCard";
-import NewDashboardCard from "../Components/NewDashboardCard";
-import DiscoverMoreCard from "../Components/DiscoverMoreCard";
-import SidebarCard from "../Components/SidebarCard";
-import SidebarBannerCard from "../Components/SidebarBannerCard";
+
+/* ========= Lazy imports (carrega sob demanda) ========= */
+const PaymentAccountCard = lazy(() => import("../Components/PaymentAccountCard"));
+const NewDashboardCard = lazy(() => import("../Components/NewDashboardCard"));
+const DiscoverMoreCard = lazy(() => import("../Components/DiscoverMoreCard"));
+const SidebarCard = lazy(() => import("../Components/SidebarCard"));
+const SidebarBannerCard = lazy(() => import("../Components/SidebarBannerCard"));
 
 /* ===============================================================
-   Error Boundary
+   Error Boundary — protege cada widget
 =============================================================== */
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -27,7 +28,7 @@ class ErrorBoundary extends React.Component {
     if (this.state.hasError) {
       return (
         <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200">
-          Algo deu errado ao carregar este bloco.
+          Something went wrong while loading this block.
         </div>
       );
     }
@@ -36,20 +37,15 @@ class ErrorBoundary extends React.Component {
 }
 
 /* ===============================================================
-   CardWithOverlay
+   Overlay Loader para qualquer Card
 =============================================================== */
-function CardWithOverlay({ loading, minHeight = 220, children }) {
+const CardWithOverlay = memo(function CardWithOverlay({ loading, minHeight = 220, children }) {
   return (
-    <div
-      className="relative rounded-2xl overflow-hidden block"
-      style={{ minHeight, minWidth: 0 }}
-    >
-      {!loading && (
-        <div className="opacity-100 transition-opacity duration-200">{children}</div>
-      )}
+    <div className="relative rounded-2xl overflow-hidden block" style={{ minHeight, minWidth: 0 }}>
+      {!loading && <div className="opacity-100 transition-opacity duration-200">{children}</div>}
       {loading && (
         <div className="absolute inset-0 z-10">
-          <div className="absolute inset-0 rounded-2xl bg-black/40 lg:backdrop-blur-sm backdrop-blur-none" />
+          <div className="absolute inset-0 rounded-2xl bg-black/40 lg:backdrop-blur-sm" />
           <div className="absolute inset-0 p-5 flex flex-col gap-3">
             <div className="h-5 w-40 rounded-md bg-white/10 animate-pulse" />
             <div className="h-8 w-56 rounded-md bg-white/15 animate-pulse" />
@@ -64,19 +60,19 @@ function CardWithOverlay({ loading, minHeight = 220, children }) {
       )}
     </div>
   );
-}
+});
 
 /* ===============================================================
-   Dashboard Principal (SEM GRÁFICO)
+   DASHBOARD PRINCIPAL — otimizado
 =============================================================== */
 export default function Dashboard() {
   const [isLoading, setIsLoading] = useState(false);
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
 
   useEffect(() => {
-    const timer = setTimeout(() => setHasLoadedOnce(true), 80);
+    const timer = setTimeout(() => setHasLoadedOnce(true), 100);
     const onStart = () => setIsLoading(true);
-    const onFinish = () => setTimeout(() => setIsLoading(false), 60);
+    const onFinish = () => setTimeout(() => setIsLoading(false), 80);
 
     const unStart = router.on("start", onStart);
     const unFinish = router.on("finish", onFinish);
@@ -102,15 +98,17 @@ export default function Dashboard() {
         <div className="py-6 px-4 sm:px-6 lg:px-8">
           <div className="w-full max-w-6xl flex flex-col lg:flex-row gap-6">
 
-            {/* ================== COLUNA ESQUERDA ================== */}
+            {/* ================== LEFT COLUMN ================== */}
             <div className="flex-1 space-y-6">
 
-              {/* === CARDS INICIAIS === */}
+              {/* === ACCOUNT + RESTRICTIONS === */}
               <div className="flex flex-col md:flex-row gap-6">
                 <div className="flex-1">
                   <ErrorBoundary>
                     <CardWithOverlay loading={isLoading} minHeight={260}>
-                      <PaymentAccountCard minHeight={260} />
+                      <Suspense fallback={<CardWithOverlay loading minHeight={260} />}>
+                        <PaymentAccountCard minHeight={260} />
+                      </Suspense>
                     </CardWithOverlay>
                   </ErrorBoundary>
                 </div>
@@ -118,7 +116,9 @@ export default function Dashboard() {
                 <div className="flex-1">
                   <ErrorBoundary>
                     <CardWithOverlay loading={isLoading} minHeight={260}>
-                      <NewDashboardCard minHeight={260} />
+                      <Suspense fallback={<CardWithOverlay loading minHeight={260} />}>
+                        <NewDashboardCard minHeight={260} />
+                      </Suspense>
                     </CardWithOverlay>
                   </ErrorBoundary>
                 </div>
@@ -127,43 +127,41 @@ export default function Dashboard() {
               {/* === DISCOVER MORE === */}
               <ErrorBoundary>
                 <CardWithOverlay loading={isLoading} minHeight={200}>
-                  <DiscoverMoreCard />
+                  <Suspense fallback={<CardWithOverlay loading minHeight={200} />}>
+                    <DiscoverMoreCard />
+                  </Suspense>
+                </CardWithOverlay>
+              </ErrorBoundary>
+            </div>
+
+            {/* ================== RIGHT COLUMN ================== */}
+            <div className="w-full lg:w-[360px] mt-6 lg:mt-0">
+              <ErrorBoundary>
+                <CardWithOverlay loading={!showSidebar || isLoading} minHeight={420}>
+                  <Suspense fallback={<CardWithOverlay loading minHeight={420} />}>
+                    {showSidebar && <SidebarCard />}
+                  </Suspense>
                 </CardWithOverlay>
               </ErrorBoundary>
 
-              {/* === (GRÁFICO REMOVIDO) === */}
-              {/* Nada aqui */}
-            </div>
-
-            {/* ================== COLUNA DIREITA ================== */}
-            <div className="w-full lg:w-[360px] mt-6 lg:mt-0">
-              {showSidebar ? (
-                <ErrorBoundary>
-                  <CardWithOverlay loading={isLoading} minHeight={420}>
-                    <SidebarCard />
-                  </CardWithOverlay>
-                </ErrorBoundary>
-              ) : (
-                <CardWithOverlay loading={true} minHeight={420} />
-              )}
-
               <div className="mt-4">
                 <ErrorBoundary>
-                  <SidebarBannerCard
-                    src="/images/young-business-woman-standing-suit-office.jpg"
-                    title="Suporte"
-                    message="Olá! Preciso de ajuda com minha conta."
-                    minHeight={110}
-                    darken={0.35}
-                    gradientFrom="rgba(0,0,0,0.70)"
-                    gradientVia="rgba(0,0,0,0.40)"
-                    gradientTo="rgba(16,185,129,0.22)"
-                    focusX={90}
-                    focusY={30}
-                  />
+                  <Suspense fallback={<CardWithOverlay loading minHeight={110} />}>
+                    <SidebarBannerCard
+                      src="/images/young-business-woman-standing-suit-office.jpg"
+                      title="Support"
+                      message="Hi! I need help with my account."
+                      minHeight={110}
+                      darken={0.35}
+                      gradientFrom="rgba(0,0,0,0.70)"
+                      gradientVia="rgba(0,0,0,0.40)"
+                      gradientTo="rgba(16,185,129,0.22)"
+                      focusX={90}
+                      focusY={30}
+                    />
+                  </Suspense>
                 </ErrorBoundary>
               </div>
-
             </div>
           </div>
         </div>

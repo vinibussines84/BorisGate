@@ -1,13 +1,33 @@
-import React, { useEffect, useState, useCallback } from "react";
+// resources/js/Pages/Extrato/Index.jsx
+import React, {
+  useEffect,
+  useState,
+  useCallback,
+  Suspense,
+  lazy,
+  useRef,
+} from "react";
 import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout";
 import { Head } from "@inertiajs/react";
 import axios from "axios";
-import ExtratoHeader from "@/Components/ExtratoHeader";
-import ExtratoTable from "@/Components/ExtratoTable";
-import TransactionDetailModal from "@/Components/TransactionDetailModal";
+
+/* === Lazy load dos componentes pesados === */
+const ExtratoHeader = lazy(() => import("@/Components/ExtratoHeader"));
+const ExtratoTable = lazy(() => import("@/Components/ExtratoTable"));
+const TransactionDetailModal = lazy(() =>
+  import("@/Components/TransactionDetailModal")
+);
+
+/* === Skeleton básico para placeholders === */
+const SkeletonBlock = ({ height = 200 }) => (
+  <div
+    className="rounded-2xl border border-white/10 bg-[#0b0b0b]/80 animate-pulse shadow-inner"
+    style={{ height }}
+  />
+);
 
 /* =====================================================================================
-   COMPONENTE PRINCIPAL — Extrato Page
+   COMPONENTE PRINCIPAL — Extrato Page (otimizado)
 ===================================================================================== */
 export default function Extrato() {
   const [saldo, setSaldo] = useState(0);
@@ -23,57 +43,103 @@ export default function Extrato() {
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   const perPage = 10;
+  const CACHE_KEY = "extrato_cache_v1";
+  const debounceRef = useRef(null);
 
   /* =====================================================================================
-     FETCH DATA
+     FETCH DATA (com cache leve)
   ====================================================================================== */
-  const fetchExtrato = useCallback(async () => {
-    setLoadingTable(true);
+  const fetchExtrato = useCallback(
+    async (useCache = false) => {
+      setLoadingTable(true);
 
-    try {
-      const query = new URLSearchParams({
-        page,
-        perPage,
-        status: statusFilter !== "all" ? statusFilter : "",
-        search: searchTerm || "",
-      }).toString();
-
-      // executa as duas requisições em paralelo
-      const [resBalance, resTx] = await Promise.all([
-        axios.get("/api/balances"),
-        axios.get(`/api/list/pix?${query}`),
-      ]);
-
-      const b = resBalance?.data?.data || {};
-      setSaldo(Number(b.amount_available ?? 0));
-
-      const list = resTx?.data?.transactions || [];
-      setTransactions(list);
-      setTotalItems(resTx?.data?.total ?? 0);
-
-      // somatório de entradas/saídas (somente pagos/aprovados)
-      let entradasTotal = 0;
-      let saidasTotal = 0;
-
-      for (const t of list) {
-        const status = (t.status || "").toLowerCase();
-        if (["paga", "paid", "approved"].includes(status)) {
-          if (t.credit) entradasTotal += Number(t.amount);
-          else saidasTotal += Number(t.amount);
+      if (useCache) {
+        const cached = sessionStorage.getItem(CACHE_KEY);
+        if (cached) {
+          try {
+            const { saldo, entradas, saidas, transactions, totalItems, ts } =
+              JSON.parse(cached);
+            if (Date.now() - ts < 60000) {
+              // cache válido por 1 min
+              setSaldo(saldo);
+              setEntradas(entradas);
+              setSaidas(saidas);
+              setTransactions(transactions);
+              setTotalItems(totalItems);
+              setLoadingTable(false);
+              return;
+            }
+          } catch {
+            sessionStorage.removeItem(CACHE_KEY);
+          }
         }
       }
 
-      setEntradas(entradasTotal);
-      setSaidas(saidasTotal);
-    } catch (err) {
-      console.error("Erro ao buscar extrato:", err);
-    } finally {
-      setLoadingTable(false);
-    }
-  }, [page, statusFilter, searchTerm]);
+      try {
+        const query = new URLSearchParams({
+          page,
+          perPage,
+          status: statusFilter !== "all" ? statusFilter : "",
+          search: searchTerm || "",
+        }).toString();
 
+        const [resBalance, resTx] = await Promise.all([
+          axios.get("/api/balances"),
+          axios.get(`/api/list/pix?${query}`),
+        ]);
+
+        const b = resBalance?.data?.data || {};
+        const saldoAtual = Number(b.amount_available ?? 0);
+        setSaldo(saldoAtual);
+
+        const list = resTx?.data?.transactions || [];
+        setTransactions(list);
+        setTotalItems(resTx?.data?.total ?? 0);
+
+        let entradasTotal = 0;
+        let saidasTotal = 0;
+
+        for (const t of list) {
+          const status = (t.status || "").toLowerCase();
+          if (["paga", "paid", "approved"].includes(status)) {
+            if (t.credit) entradasTotal += Number(t.amount);
+            else saidasTotal += Number(t.amount);
+          }
+        }
+
+        setEntradas(entradasTotal);
+        setSaidas(saidasTotal);
+
+        // salva no cache
+        sessionStorage.setItem(
+          CACHE_KEY,
+          JSON.stringify({
+            saldo: saldoAtual,
+            entradas: entradasTotal,
+            saidas: saidasTotal,
+            transactions: list,
+            totalItems: resTx?.data?.total ?? 0,
+            ts: Date.now(),
+          })
+        );
+      } catch (err) {
+        console.error("❌ Erro ao buscar extrato:", err);
+      } finally {
+        setLoadingTable(false);
+      }
+    },
+    [page, statusFilter, searchTerm]
+  );
+
+  /* =====================================================================================
+     DEBOUNCE — evita requisições a cada digitação
+  ====================================================================================== */
   useEffect(() => {
-    fetchExtrato();
+    clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      fetchExtrato();
+    }, 400);
+    return () => clearTimeout(debounceRef.current);
   }, [fetchExtrato]);
 
   /* =====================================================================================
@@ -86,8 +152,7 @@ export default function Extrato() {
 
   const closeModal = () => {
     setIsModalOpen(false);
-    // pequeno delay para não causar shift ao esconder modal
-    setTimeout(() => setSelectedTransaction(null), 200);
+    setTimeout(() => setSelectedTransaction(null), 150);
   };
 
   /* =====================================================================================
@@ -97,11 +162,10 @@ export default function Extrato() {
     <AuthenticatedLayout>
       <Head title="Extrato" />
 
-      {/* Container principal fixo e estável */}
       <div className="min-h-screen bg-[#0B0B0B] py-10 px-4 sm:px-6 lg:px-8 text-gray-100">
         <div className="max-w-6xl mx-auto space-y-8">
           {/* HEADER */}
-          <div className="min-h-[180px]">
+          <Suspense fallback={<SkeletonBlock height={160} />}>
             <ExtratoHeader
               saldo={saldo}
               entradas={entradas}
@@ -110,40 +174,47 @@ export default function Extrato() {
               setStatusFilter={setStatusFilter}
               searchTerm={searchTerm}
               setSearchTerm={setSearchTerm}
-              refresh={fetchExtrato}
+              refresh={() => fetchExtrato(false)}
             />
-          </div>
+          </Suspense>
 
           {/* TABLE */}
-          <div className="min-h-[520px] transition-opacity duration-300" style={{ opacity: loadingTable ? 0.7 : 1 }}>
-            <ExtratoTable
-              transactions={transactions}
-              onView={openModal}
-              page={page}
-              setPage={setPage}
-              totalItems={totalItems}
-              perPage={perPage}
-              loading={loadingTable}
-            />
+          <div
+            className="min-h-[520px] transition-opacity duration-300"
+            style={{ opacity: loadingTable ? 0.7 : 1 }}
+          >
+            <Suspense fallback={<SkeletonBlock height={520} />}>
+              <ExtratoTable
+                transactions={transactions}
+                onView={openModal}
+                page={page}
+                setPage={setPage}
+                totalItems={totalItems}
+                perPage={perPage}
+                loading={loadingTable}
+              />
+            </Suspense>
           </div>
         </div>
       </div>
 
-      {/* MODAL DETALHE — mantido montado, visibilidade controlada */}
-      <div className={`${isModalOpen ? "block" : "hidden"}`}>
-        <TransactionDetailModal
-          transaction={selectedTransaction}
-          details={selectedTransaction}
-          isOpen={isModalOpen}
-          onClose={closeModal}
-          formatCurrency={(v) =>
-            (Number(v) || 0).toLocaleString("pt-BR", {
-              style: "currency",
-              currency: "BRL",
-            })
-          }
-        />
-      </div>
+      {/* MODAL DETALHE */}
+      <Suspense fallback={null}>
+        {selectedTransaction && (
+          <TransactionDetailModal
+            transaction={selectedTransaction}
+            details={selectedTransaction}
+            isOpen={isModalOpen}
+            onClose={closeModal}
+            formatCurrency={(v) =>
+              (Number(v) || 0).toLocaleString("pt-BR", {
+                style: "currency",
+                currency: "BRL",
+              })
+            }
+          />
+        )}
+      </Suspense>
     </AuthenticatedLayout>
   );
 }
