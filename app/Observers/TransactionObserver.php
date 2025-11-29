@@ -5,7 +5,7 @@ namespace App\Observers;
 use App\Enums\TransactionStatus;
 use App\Models\Transaction;
 use App\Models\WebhookLog;
-use App\Models\Notification; // << ADICIONADO
+use App\Models\Notification;
 use App\Services\WalletService;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
@@ -77,23 +77,24 @@ class TransactionObserver
         }
 
         $payload = [
-            'type'            => $event === 'created' ? 'Pix Create' : 'Pix Update',
-            'event'           => $event,
-            'transaction_id'  => $t->id,
-            'user'            => $user->name,
-            'amount'          => $t->amount,
-            'fee'             => $t->fee,
-            'currency'        => $t->currency,
-            'status'          => $t->status,
-            'txid'            => $t->txid,
-            'e2e'             => $t->e2e_id,
-            'direction'       => $t->direction,
-            'method'          => $t->method,
-            'created_at'      => $t->created_at,
-            'updated_at'      => $t->updated_at,
-            'paid_at'         => $t->paid_at,
-            'canceled_at'     => $t->canceled_at,
-            'provider_payload'=> $cleanPayload,
+            'type'             => $event === 'created' ? 'Pix Create' : 'Pix Update',
+            'event'            => $event,
+            'transaction_id'   => $t->id,
+            'external_id'      => $t->external_reference ?? null, // ✅ incluído também nos updates
+            'user'             => $user->name,
+            'amount'           => $t->amount,
+            'fee'              => $t->fee,
+            'currency'         => $t->currency,
+            'status'           => $t->status,
+            'txid'             => $t->txid,
+            'e2e'              => $t->e2e_id,
+            'direction'        => $t->direction,
+            'method'           => $t->method,
+            'created_at'       => $t->created_at,
+            'updated_at'       => $t->updated_at,
+            'paid_at'          => $t->paid_at,
+            'canceled_at'      => $t->canceled_at,
+            'provider_payload' => $cleanPayload,
         ];
 
         try {
@@ -110,7 +111,6 @@ class TransactionObserver
                 'response_code'  => $response->status(),
                 'response_body'  => $response->body(),
             ]);
-
         } catch (\Throwable $e) {
             WebhookLog::create([
                 'user_id'        => $user->id,
@@ -142,6 +142,10 @@ class TransactionObserver
         $this->applyTimestamps($t, $old, $new);
     }
 
+    /**
+     * 🚫 Removido o envio de webhook duplicado ao criar transação.
+     * Mantém apenas lógica de notificação e carteira.
+     */
     public function created(Transaction $t): void
     {
         $new = $this->asEnum($t->status) ?? TransactionStatus::PENDENTE;
@@ -171,7 +175,8 @@ class TransactionObserver
             }
         }
 
-        $this->sendWebhook($t, 'created');
+        // ❌ Webhook removido daqui
+        // $this->sendWebhook($t, 'created');
     }
 
     public function updated(Transaction $t): void
@@ -216,6 +221,7 @@ class TransactionObserver
             ]);
         }
 
+        // ✅ Webhook só no updated (ex: quando status muda para PAGA)
         $this->sendWebhook($t, 'updated');
     }
 }
