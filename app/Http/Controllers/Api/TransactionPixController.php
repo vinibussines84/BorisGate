@@ -7,13 +7,15 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use App\Models\Transaction;
+use App\Models\Withdraw;
 use App\Enums\TransactionStatus;
 use App\Services\Lumnis\LumnisService;
+use App\Models\User;
 
 class TransactionPixController extends Controller
 {
     /**
-     * 🧾 Create a new PIX transaction
+     * 🧾 Create a new PIX transaction (CASH IN)
      */
     public function store(Request $request, LumnisService $lumnis)
     {
@@ -48,11 +50,11 @@ class TransactionPixController extends Controller
             'external_id'  => ['required', 'string', 'max:64', 'regex:/^[A-Za-z0-9\-_]+$/'],
         ]);
 
-        $amountReais = (float) $data['amount'];
-        $amountCents = (int) round($amountReais * 100);
-        $externalId  = $data['external_id'];
+        $amountReais  = (float) $data['amount'];
+        $amountCents  = (int) round($amountReais * 100);
+        $externalId   = $data['external_id'];
 
-        // 🚫 Bloqueia duplicados
+        // 🚫 Duplicate check
         $duplicate = Transaction::where('user_id', $user->id)
             ->where('external_reference', '=', $externalId)
             ->exists();
@@ -64,7 +66,7 @@ class TransactionPixController extends Controller
             ], 409);
         }
 
-        // 🔎 CPF validation
+        // CPF validation
         $cpf = preg_replace('/\D/', '', ($data['document'] ?? $user->cpf_cnpj ?? ''));
 
         if (!$cpf || strlen($cpf) !== 11 || !$this->validateCpf($cpf)) {
@@ -75,7 +77,7 @@ class TransactionPixController extends Controller
             ], 422);
         }
 
-        // ☎️ Phone validation
+        // Phone validation
         $phone = preg_replace('/\D/', '', ($data['phone'] ?? $user->phone ?? ''));
 
         if (!$phone || strlen($phone) < 11 || strlen($phone) > 12) {
@@ -86,7 +88,7 @@ class TransactionPixController extends Controller
             ], 422);
         }
 
-        // 👤 Customer data
+        // Customer info
         $name  = $data['name']  ?? $user->name ?? $user->nome_completo ?? 'Client';
         $email = $data['email'] ?? $user->email ?? 'no-email@placeholder.com';
 
@@ -94,7 +96,7 @@ class TransactionPixController extends Controller
             $result = DB::transaction(function () use (
                 $user, $request, $amountReais, $amountCents, $cpf, $name, $email, $phone, $externalId, $lumnis
             ) {
-                // Cria transação local
+                // Create local transaction
                 $tx = Transaction::create([
                     'tenant_id'          => $user->tenant_id,
                     'user_id'            => $user->id,
@@ -106,17 +108,17 @@ class TransactionPixController extends Controller
                     'amount'             => $amountReais,
                     'fee'                => $this->computeFee($user, $amountReais),
                     'external_reference' => $externalId,
-                    'provider_payload'   => json_encode([
+                    'provider_payload'   => [
                         'name'     => $name,
                         'email'    => $email,
                         'document' => $cpf,
                         'phone'    => $phone,
-                    ]),
+                    ],
                     'ip'         => $request->ip(),
                     'user_agent' => $request->userAgent(),
                 ]);
 
-                // Payload para Lumnis
+                // Payload for Lumnis
                 $payload = [
                     "amount"      => $amountCents,
                     "externalRef" => $externalId,
@@ -137,7 +139,7 @@ class TransactionPixController extends Controller
                     "installments" => 1,
                 ];
 
-                // Envia à API da Lumnis
+                // Call to Lumnis
                 $response = $lumnis->createTransaction($payload);
 
                 if (!in_array($response["status"], [200, 201])) {
@@ -155,21 +157,21 @@ class TransactionPixController extends Controller
                     throw new \Exception("Invalid Lumnis response");
                 }
 
-                // Atualiza com dados do provedor
+                // Update local transaction
                 $tx->update([
                     'txid'                    => $transactionId,
                     'provider_transaction_id' => $transactionId,
-                    'provider_payload'        => json_encode([
+                    'provider_payload'        => [
                         'name'         => $name,
                         'email'        => $email,
                         'document'     => $cpf,
                         'phone'        => $phone,
                         'qr_code_text' => $qrCodeText,
                         'provider_raw' => $dataAPI,
-                    ]),
+                    ],
                 ]);
 
-                // ✅ Envia webhook APENAS após a criação com sucesso (com QR code)
+                // Send webhook to client
                 if ($user->webhook_enabled && $user->webhook_in_url) {
                     try {
                         Http::timeout(10)->post($user->webhook_in_url, [
@@ -230,17 +232,10 @@ class TransactionPixController extends Controller
         }
     }
 
-    public function status(Request $request, string $txid)
-    {
-        return $this->findTransaction($request, 'txid', $txid);
-    }
-
+    /**
+     * 🟦 CONSULTA POR EXTERNAL ID → PIX-IN + PIX-OUT (Saque)
+     */
     public function statusByExternal(Request $request, string $externalId)
-    {
-        return $this->findTransaction($request, 'external_reference', $externalId);
-    }
-
-    private function findTransaction(Request $request, string $field, string $value)
     {
         $auth   = $request->header('X-Auth-Key');
         $secret = $request->header('X-Secret-Key');
@@ -250,37 +245,85 @@ class TransactionPixController extends Controller
         }
 
         $user = $this->resolveUser($auth, $secret);
-
         if (!$user) {
             return response()->json(['success' => false, 'error' => 'Invalid credentials.'], 401);
         }
 
-        $transaction = Transaction::where($field, $value)
+        /**
+         * 1️⃣ Procurar PIX-IN (Transaction)
+         */
+        $tx = Transaction::where('external_reference', $externalId)
             ->where('user_id', $user->id)
             ->first();
 
-        if (!$transaction) {
-            return response()->json(['success' => false, 'error' => 'Transaction not found.'], 404);
+        if ($tx) {
+            return response()->json([
+                'success' => true,
+                'type'    => 'pix_in',
+                'data' => [
+                    'id'             => $tx->id,
+                    'external_id'    => $tx->external_reference,
+                    'status'         => $tx->status,
+                    'amount'         => (float) $tx->amount,
+                    'fee'            => (float) $tx->fee,
+                    'txid'           => $tx->txid,
+                    'e2e_id'         => $tx->e2e_id,
+                    'payer_name'     => $tx->payer_name,
+                    'payer_document' => $tx->payer_document,
+                    'created_at'     => $tx->created_at,
+                    'updated_at'     => $tx->updated_at,
+                ]
+            ]);
+        }
+
+        /**
+         * 2️⃣ Procurar SAQUE (Withdraw)
+         */
+        $withdraw = Withdraw::where('external_id', $externalId)
+            ->where('user_id', $user->id)
+            ->first();
+
+        if ($withdraw) {
+            $meta = is_array($withdraw->meta) ? $withdraw->meta : [];
+
+            return response()->json([
+                'success' => true,
+                'type'    => 'pix_out',
+                'data' => [
+                    'id'             => $withdraw->id,
+                    'external_id'    => $withdraw->external_id,
+                    'status'         => $withdraw->status,
+                    'amount'         => (float) $withdraw->amount,
+                    'gross_amount'   => (float) $withdraw->gross_amount,
+                    'fee_amount'     => (float) $withdraw->fee_amount,
+                    'pix_key'        => $withdraw->pixkey,
+                    'pix_key_type'   => $withdraw->pixkey_type,
+                    'provider_ref'   => $withdraw->provider_reference,
+
+                    // Dados do webhook
+                    'endtoend'       => $meta['endtoend'] ?? null,
+                    'identifier'     => $meta['identifier'] ?? null,
+                    'receiver_name'  => $meta['receiver_name'] ?? null,
+                    'receiver_bank'  => $meta['receiver_bank'] ?? null,
+                    'receiver_isbp'  => $meta['receiver_bank_ispb'] ?? null,
+                    'paid_at'        => $meta['paid_at'] ?? $withdraw->processed_at,
+                    'provider_payload' => $meta['raw_provider_payload'] ?? null,
+
+                    'created_at' => $withdraw->created_at,
+                    'updated_at' => $withdraw->updated_at,
+                ]
+            ]);
         }
 
         return response()->json([
-            'success' => true,
-            'data' => [
-                'id'            => $transaction->id,
-                'txid'          => $transaction->txid,
-                'external_id'   => $transaction->external_reference,
-                'amount'        => (float) $transaction->amount,
-                'fee'           => (float) $transaction->fee,
-                'status'        => $transaction->status,
-                'created_at'    => $transaction->created_at,
-                'updated_at'    => $transaction->updated_at,
-            ],
-        ]);
+            'success' => false,
+            'error'   => 'No transaction or withdraw found for this external_id.',
+        ], 404);
     }
 
     private function resolveUser(string $auth, string $secret)
     {
-        return \App\Models\User::where('authkey', $auth)
+        return User::where('authkey', $auth)
             ->where('secretkey', $secret)
             ->first();
     }
