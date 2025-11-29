@@ -45,14 +45,14 @@ class TransactionPixController extends Controller
             'email'        => ['sometimes', 'email', 'max:120'],
             'phone'        => ['sometimes', 'string', 'max:20'],
             'document'     => ['sometimes', 'string', 'max:20'],
-            'external_id'  => ['required', 'string', 'max:64', 'regex:/^[A-Za-z0-9\-_]+$/'], // obrigatório
+            'external_id'  => ['required', 'string', 'max:64', 'regex:/^[A-Za-z0-9\-_]+$/'],
         ]);
 
         $amountReais = (float) $data['amount'];
         $amountCents = (int) round($amountReais * 100);
         $externalId  = $data['external_id'];
 
-        // 🚫 Bloqueia duplicados no mesmo user
+        // 🚫 Bloqueia duplicados
         $duplicate = Transaction::where('user_id', $user->id)
             ->where('external_reference', '=', $externalId)
             ->exists();
@@ -169,14 +169,14 @@ class TransactionPixController extends Controller
                     ]),
                 ]);
 
-                // 🚀 Dispara webhook de criação de PIX para o cliente
+                // ✅ Envia webhook APENAS após a criação com sucesso (com QR code)
                 if ($user->webhook_enabled && $user->webhook_in_url) {
                     try {
                         Http::timeout(10)->post($user->webhook_in_url, [
                             'type'            => 'Pix Create',
                             'event'           => 'created',
                             'transaction_id'  => $tx->id,
-                            'external_id'     => $tx->external_reference, // ✅ incluído
+                            'external_id'     => $tx->external_reference,
                             'user'            => $user->name,
                             'amount'          => number_format($tx->amount, 2, '.', ''),
                             'fee'             => number_format($tx->fee, 2, '.', ''),
@@ -230,25 +230,16 @@ class TransactionPixController extends Controller
         }
     }
 
-    /**
-     * 🔍 Get transaction by txid
-     */
     public function status(Request $request, string $txid)
     {
         return $this->findTransaction($request, 'txid', $txid);
     }
 
-    /**
-     * 🔍 Get transaction by external_id
-     */
     public function statusByExternal(Request $request, string $externalId)
     {
         return $this->findTransaction($request, 'external_reference', $externalId);
     }
 
-    /**
-     * 🔧 Common finder
-     */
     private function findTransaction(Request $request, string $field, string $value)
     {
         $auth   = $request->header('X-Auth-Key');
