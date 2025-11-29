@@ -317,7 +317,7 @@ X-Secret-Key: <sua_secret_key>
           <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
             <InfoPanel id="intro-api"       title="API RESTful"        icon={Server}      tone="green">
               <p className="text-sm text-zinc-300 leading-relaxed">
-                A TrustGate expõe uma API <strong>RESTful</strong> com verbos HTTP padronizados, respostas em
+                A EquitPay expõe uma API <strong>RESTful</strong> com verbos HTTP padronizados, respostas em
                 <strong> JSON</strong> e códigos <strong>HTTP</strong> consistentes. Utilize <strong>HTTPS</strong> sempre —
                 conexões não seguras são rejeitadas.
               </p>

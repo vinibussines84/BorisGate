@@ -125,7 +125,7 @@ export default function WithdrawReceipt({
             : "grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm"
         }
       >
-        <InfoRow label="Pagador" value={data?.payer || "TrustGate"} />
+        <InfoRow label="Pagador" value={data?.payer || "EquitPay"} />
         <InfoRow label="Recebedor" value={data?.receiver || "—"} />
         <InfoRow label="Chave Pix" value={data?.pixKey || "—"} />
         <InfoRow label="Tipo de chave" value={data?.pixType || "—"} />

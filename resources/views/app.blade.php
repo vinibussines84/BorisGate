@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
 
     <meta name="app-name" content="{{ config('app.name', 'Trust Gate') }}">
-    <title inertia>{{ config('app.name', 'TrustGate') }}</title>
+    <title inertia>{{ config('app.name', 'EquitPay') }}</title>
     <meta name="csrf-token" content="{{ csrf_token() }}" />
 
     <script>

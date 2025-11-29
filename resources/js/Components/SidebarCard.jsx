@@ -117,7 +117,7 @@ const FeedItem = React.memo(function FeedItem({ it, selected, onSelect }) {
           {/* nome */}
           <div className="min-w-0 flex-1">
             <p className="truncate font-medium text-[15px] text-zinc-100">
-              {it.kind === "SAQUE" ? "Saque" : "TrustGate"}
+              {it.kind === "SAQUE" ? "Saque" : "EquitPay"}
             </p>
             <p className="text-[12px] text-zinc-500 truncate mt-0.5">
               {`E2E: ${it.e2e || "—"}`}

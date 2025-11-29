@@ -12,7 +12,7 @@ import { resolvePageComponent } from "laravel-vite-plugin/inertia-helpers";
 const appName =
   document.querySelector('meta[name="app-name"]')?.content ||
   import.meta.env.VITE_APP_NAME ||
-  "TrustGate";
+  "EquitPay";
 
 // ------------------------------------------------------------
 // 🚀 Inicialização da Aplicação Inertia

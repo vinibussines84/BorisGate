@@ -32,7 +32,7 @@ class PluggouWithdrawService
 
         $headers = [
             'X-Public-Key' => $this->publicKey,
-            'User-Agent'   => 'TrustGate/1.0 (Laravel WithdrawService)',
+            'User-Agent'   => 'EquitPay/1.0 (Laravel WithdrawService)',
         ];
 
         if (!empty($this->secretKey)) {

@@ -88,7 +88,7 @@ return [
     |
     */
 
-    'cookie' => env('SESSION_COOKIE', Str::slug(env('APP_NAME', 'TrustGate')).'_session'),
+    'cookie' => env('SESSION_COOKIE', Str::slug(env('APP_NAME', 'EquitPay')).'_session'),
 
     /*
     |--------------------------------------------------------------------------
