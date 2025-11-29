@@ -41,7 +41,12 @@ function inputClass(hasError = false) {
 /* ===========================
    Status Badge
 =========================== */
-function StatusBadge({ state, okText = "OK", errText = "Erro", hintText = "Aguardando" }) {
+function StatusBadge({
+  state,
+  okText = "OK",
+  errText = "Error",
+  hintText = "Waiting",
+}) {
   if (state === "ok") {
     return (
       <span className="inline-flex items-center gap-1.5 rounded-full border border-[#02fb5c]/40 bg-[#02fb5c]/10 px-2 py-0.5 text-[11px] text-[#02fb5c]">
@@ -66,7 +71,13 @@ function StatusBadge({ state, okText = "OK", errText = "Erro", hintText = "Aguar
 /* ===========================
    Primary Button
 =========================== */
-function PrimaryButton({ text, disabled, type = "button", variant = "solid", loading = false }) {
+function PrimaryButton({
+  text,
+  disabled,
+  type = "button",
+  variant = "solid",
+  loading = false,
+}) {
   const base =
     "inline-flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-medium transition focus:outline-none";
 
@@ -80,7 +91,11 @@ function PrimaryButton({ text, disabled, type = "button", variant = "solid", loa
       : "bg-[#02fb5c] text-neutral-900 hover:bg-[#00e756]";
 
   return (
-    <button type={type} disabled={disabled || loading} className={`${base} ${styles}`}>
+    <button
+      type={type}
+      disabled={disabled || loading}
+      className={`${base} ${styles}`}
+    >
       {loading && (
         <span className="h-4 w-4 animate-spin rounded-full border-2 border-neutral-800/20 border-t-neutral-800" />
       )}
@@ -126,14 +141,14 @@ export default function Register() {
   const [showPass, setShowPass] = useState(false);
   const [showPass2, setShowPass2] = useState(false);
 
-  /* Auto-foco */
+  /* Autofocus */
   useEffect(() => {
     const el = step === 1 ? firstRef.current : secondRef.current;
     const t = setTimeout(() => el?.focus(), 60);
     return () => clearTimeout(t);
   }, [step]);
 
-  /* Ajustar step baseado nos erros */
+  /* Step selection based on errors */
   useEffect(() => {
     const mapStep = {
       nome_completo: 1,
@@ -152,7 +167,7 @@ export default function Register() {
     }
   }, [errors]);
 
-  /* Cálculo do progresso */
+  /* Progress */
   const progressPct = Math.round((step / totalSteps) * 100);
 
   const next = (e) => {
@@ -182,9 +197,9 @@ export default function Register() {
 
   return (
     <>
-      <Head title="Registrar" />
+      <Head title="Register" />
 
-      {/* Fundo com glow verde vindo de baixo */}
+      {/* Background */}
       <div
         className={[
           "min-h-screen flex items-center justify-center text-neutral-200 bg-neutral-950 relative",
@@ -198,15 +213,15 @@ export default function Register() {
             <span className="inline-flex h-8 w-8 items-center justify-center rounded-2xl ring-1 ring-inset ring-neutral-800 bg-neutral-900/70 backdrop-blur-sm">
               <Lock size={16} className="text-neutral-300" />
             </span>
-            <span className="text-neutral-300">Área segura</span>
+            <span className="text-neutral-300">Secure area</span>
           </div>
 
           <h1 className="text-[30px] sm:text-[36px] leading-tight font-semibold text-neutral-50">
-            Criar conta
+            Create your account
           </h1>
 
           <p className="mt-2 text-sm text-neutral-400">
-            Conclua os 2 passos para finalizar seu cadastro.
+            Complete the 2 steps to finish your registration.
           </p>
 
           {/* Card */}
@@ -217,12 +232,12 @@ export default function Register() {
               "shadow-[0_30px_80px_-30px_rgba(0,0,0,.8)]",
             ].join(" ")}
           >
-            {/* Erros do servidor */}
+            {/* Server Errors */}
             {hasServerErrors && (
               <div className="mb-4 rounded-2xl border border-rose-600/30 bg-rose-600/10 p-3 text-sm text-rose-200">
                 <div className="mb-1 font-medium flex items-center gap-2">
                   <XCircle size={16} />
-                  Corrija os seguintes campos:
+                  Please correct the following fields:
                 </div>
                 <ul className="list-disc pl-6 space-y-1">
                   {serverErrors.map((msg, idx) => (
@@ -232,11 +247,11 @@ export default function Register() {
               </div>
             )}
 
-            {/* Barra de progresso */}
+            {/* Progress bar */}
             <div className="mb-4">
               <div className="flex items-center justify-between text-xs text-neutral-400 mb-2">
                 <span>
-                  Passo {step} de {totalSteps}
+                  Step {step} of {totalSteps}
                 </span>
                 <span>{progressPct}%</span>
               </div>
@@ -249,21 +264,21 @@ export default function Register() {
               </div>
 
               <div className="mt-2 flex justify-between text-[11px] text-neutral-400/80">
-                <span>Informações Pessoais</span>
-                <span>Dados de Acesso</span>
+                <span>Personal Info</span>
+                <span>Access Data</span>
               </div>
             </div>
 
             {/* STEP 1 */}
             {step === 1 && (
               <form onSubmit={next} className="space-y-4">
-                {/* Nome */}
+                {/* Full Name */}
                 <div>
                   <div className="mb-1.5 flex items-center justify-between">
-                    <label className="text-sm text-neutral-300">Nome completo</label>
+                    <label className="text-sm text-neutral-300">Full name</label>
                     <StatusBadge
                       state={data.nome_completo ? "ok" : "idle"}
-                      hintText="Nome e Sobrenome"
+                      hintText="First and Last name"
                     />
                   </div>
 
@@ -273,14 +288,14 @@ export default function Register() {
                     value={data.nome_completo}
                     onChange={(e) => setData("nome_completo", e.target.value)}
                     className={inputClass(!!errors.nome_completo)}
-                    placeholder="Ex.: João da Silva"
+                    placeholder="Ex.: John Doe"
                   />
                 </div>
 
-                {/* Data */}
+                {/* Birthdate */}
                 <div>
                   <div className="mb-1.5 flex items-center justify-between">
-                    <label className="text-sm text-neutral-300">Data de nascimento</label>
+                    <label className="text-sm text-neutral-300">Birthdate</label>
                     <StatusBadge state={data.data_nascimento ? "ok" : "idle"} />
                   </div>
 
@@ -296,7 +311,7 @@ export default function Register() {
                 <div>
                   <div className="mb-1.5 flex items-center justify-between">
                     <label className="text-sm text-neutral-300">CPF</label>
-                    <StatusBadge state={data.cpf ? "ok" : "idle"} hintText="Obrigatório" />
+                    <StatusBadge state={data.cpf ? "ok" : "idle"} hintText="Required" />
                   </div>
 
                   <input
@@ -304,19 +319,21 @@ export default function Register() {
                     inputMode="numeric"
                     placeholder="000.000.000-00"
                     value={formatCpfMask(data.cpf)}
-                    onChange={(e) => setData("cpf", onlyDigits(e.target.value).slice(0, 11))}
+                    onChange={(e) =>
+                      setData("cpf", onlyDigits(e.target.value).slice(0, 11))
+                    }
                     className={inputClass(!!errors.cpf || !!errors.cpf_cnpj)}
                   />
                 </div>
 
-                <PrimaryButton type="submit" text="Continuar" variant="outline" />
+                <PrimaryButton type="submit" text="Next" variant="outline" />
 
                 <div className="mt-1.5 flex justify-end">
                   <Link
                     href="/login"
                     className="inline-flex items-center rounded-lg px-2.5 py-1 text-[11px] font-medium text-neutral-300 border border-white/10 hover:text-white hover:bg-white/5 transition"
                   >
-                    Entrar
+                    Sign In
                   </Link>
                 </div>
               </form>
@@ -333,11 +350,11 @@ export default function Register() {
                     className="inline-flex items-center gap-1 text-neutral-400 hover:text-neutral-200"
                   >
                     <ChevronLeft className="h-4 w-4" />
-                    Voltar
+                    Back
                   </button>
 
                   <span className="truncate text-neutral-400/80">
-                    {data.nome_completo || "Novo usuário"}
+                    {data.nome_completo || "New user"}
                   </span>
                 </div>
 
@@ -351,12 +368,12 @@ export default function Register() {
                     value={data.email}
                     onChange={(e) => setData("email", e.target.value)}
                     className={inputClass(!!errors.email)}
-                    placeholder="seuemail@exemplo.com"
+                    placeholder="you@example.com"
                   />
                 </Field>
 
-                {/* Senha */}
-                <Field label="Senha" error={errors.password}>
+                {/* Password */}
+                <Field label="Password" error={errors.password}>
                   <div className="relative">
                     <input
                       ref={passRef}
@@ -371,13 +388,17 @@ export default function Register() {
                       onClick={() => setShowPass((v) => !v)}
                       className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-200"
                     >
-                      {showPass ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                      {showPass ? (
+                        <EyeOff className="h-5 w-5" />
+                      ) : (
+                        <Eye className="h-5 w-5" />
+                      )}
                     </button>
                   </div>
                 </Field>
 
-                {/* Confirmar senha */}
-                <Field label="Confirmar senha" error={errors.password_confirmation}>
+                {/* Confirm Password */}
+                <Field label="Confirm password" error={errors.password_confirmation}>
                   <div className="relative">
                     <input
                       type={showPass2 ? "text" : "password"}
@@ -391,7 +412,11 @@ export default function Register() {
                       onClick={() => setShowPass2((v) => !v)}
                       className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-200"
                     >
-                      {showPass2 ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                      {showPass2 ? (
+                        <EyeOff className="h-5 w-5" />
+                      ) : (
+                        <Eye className="h-5 w-5" />
+                      )}
                     </button>
                   </div>
                 </Field>
@@ -399,13 +424,13 @@ export default function Register() {
                 <div className="flex items-center gap-2">
                   <ChevronRight className="h-4 w-4 text-neutral-400" />
                   <span className="text-xs text-neutral-400">
-                    Ao criar sua conta, você concorda com nossos termos.
+                    By creating your account, you agree to our terms.
                   </span>
                 </div>
 
                 <PrimaryButton
                   type="submit"
-                  text={processing ? "Enviando..." : "Criar conta"}
+                  text={processing ? "Sending..." : "Create account"}
                   variant="solid"
                   loading={processing}
                 />
@@ -413,12 +438,16 @@ export default function Register() {
             )}
           </div>
 
-          {/* Rodapé */}
+          {/* Footer */}
           <p className="mt-6 text-xs text-neutral-400 text-center">
-            Ao continuar, você concorda com nossa{" "}
-            <a href="#" className="underline underline-offset-2 hover:text-neutral-200">
-              Política de Privacidade
-            </a>.
+            By continuing, you agree to our{" "}
+            <a
+              href="#"
+              className="underline underline-offset-2 hover:text-neutral-200"
+            >
+              Privacy Policy
+            </a>
+            .
           </p>
         </div>
       </div>

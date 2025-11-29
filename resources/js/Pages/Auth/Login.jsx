@@ -5,7 +5,7 @@ import { ChevronLeft, Eye, EyeOff } from "lucide-react";
 import axios from "axios";
 
 /* ===========================================================
-   🔧 Configuração Global Axios
+   🔧 Global Axios Configuration
    =========================================================== */
 axios.defaults.withCredentials = true;
 axios.defaults.baseURL = "https://equitpay.app";
@@ -34,19 +34,19 @@ export default function Login() {
   const emailRef = useRef(null);
   const passRef = useRef(null);
 
-  /* ✅ Obtém cookie CSRF ao montar */
+  /* ✅ Get CSRF Cookie on mount */
   useEffect(() => {
     axios.get("/sanctum/csrf-cookie").catch(() => {});
   }, []);
 
-  /* Foco automático */
+  /* Autofocus on step change */
   useEffect(() => {
     const el = step === 1 ? emailRef.current : passRef.current;
     const t = setTimeout(() => el?.focus(), 60);
     return () => clearTimeout(t);
   }, [step]);
 
-  /* Detecta Caps Lock */
+  /* Detect Caps Lock */
   useEffect(() => {
     if (step !== 2 || !passRef.current) return;
     const el = passRef.current;
@@ -67,7 +67,7 @@ export default function Login() {
   const canGoNext = /\S+@\S+\.\S+/.test(data.email);
   const canSubmit = (data.password || "").length > 0 && !processing;
 
-  /* Etapa 1 → E-mail */
+  /* Step 1 → Email */
   const next = (e) => {
     e.preventDefault();
     if (!canGoNext) return;
@@ -75,13 +75,13 @@ export default function Login() {
     setStep(2);
   };
 
-  /* Etapa 2 → Login */
+  /* Step 2 → Submit Login */
   const submit = async (e) => {
     e.preventDefault();
     if (!canSubmit) return;
 
     try {
-      await axios.get("/sanctum/csrf-cookie"); // garante CSRF válido
+      await axios.get("/sanctum/csrf-cookie");
 
       post("/login", {
         preserveScroll: true,
@@ -92,13 +92,13 @@ export default function Login() {
         onFinish: () => reset("password"),
       });
     } catch (error) {
-      console.error("Erro ao autenticar:", error);
+      console.error("Authentication error:", error);
     }
   };
 
   return (
     <>
-      <Head title="Entrar" />
+      <Head title="Sign In" />
 
       <div
         className={[
@@ -108,31 +108,31 @@ export default function Login() {
           "before:[background:radial-gradient(70%_70%_at_50%_100%,rgba(2,251,92,0.15),transparent_75%)]",
         ].join(" ")}
       >
-        {/* 🔥 IMAGEM DE FUNDO */}
+        {/* 🔥 Background Image */}
         <img
           src="/images/line.png"
           alt="Line background"
           className="absolute inset-0 w-full h-full object-cover opacity-20 mix-blend-lighten pointer-events-none select-none"
         />
 
-        {/* CONTEÚDO */}
+        {/* CONTENT */}
         <div className="flex flex-col justify-center px-6 sm:px-10 py-10 w-full max-w-[480px] relative z-10">
           <div className="mb-4 inline-flex items-center gap-2 text-sm text-neutral-400">
             <img
               src="/images/equitpay.png"
-              alt="EquityPay"
+              alt="EquitPay"
               className="h-10 md:h-12 w-auto opacity-90 grayscale-[35%] contrast-110"
             />
             <span className="px-1.5 text-neutral-600 select-none">•</span>
-            <span className="text-neutral-300">Área segura</span>
+            <span className="text-neutral-300">Secure area</span>
           </div>
 
           <h1 className="text-[30px] sm:text-[36px] leading-tight font-semibold text-neutral-50">
-            Acesse sua conta
+            Access your account
           </h1>
 
           <p className="mt-2 text-sm text-neutral-400">
-            Primeiro informe seu e-mail, depois sua senha.
+            First enter your email, then your password.
           </p>
 
           <div
@@ -153,20 +153,20 @@ export default function Login() {
                   className="inline-flex items-center gap-1 text-neutral-400 hover:text-neutral-200"
                 >
                   <ChevronLeft className="h-4 w-4" />
-                  Alterar e-mail
+                  Change email
                 </button>
                 <span className="truncate text-neutral-400/80">{data.email}</span>
               </div>
             )}
 
-            {/* FORMULÁRIOS */}
+            {/* FORMS */}
             {step === 1 ? (
               <form onSubmit={next} className="space-y-4">
-                <Field label="E-mail" error={errors.email}>
+                <Field label="Email" error={errors.email}>
                   <input
                     ref={emailRef}
                     type="email"
-                    placeholder="seuemail@exemplo.com"
+                    placeholder="you@example.com"
                     className="
                       w-full rounded-2xl px-4 py-3 text-[15px]
                       bg-neutral-950 text-neutral-100 placeholder-neutral-500
@@ -182,7 +182,7 @@ export default function Login() {
                 <PrimaryButton
                   type="submit"
                   disabled={!canGoNext}
-                  text="Continuar"
+                  text="Continue"
                   variant="outline"
                 />
 
@@ -191,13 +191,13 @@ export default function Login() {
                     href="/register"
                     className="inline-flex items-center rounded-lg px-2.5 py-1 text-[11px] font-medium text-neutral-300 border border-white/10 hover:text-white hover:bg-white/5 transition"
                   >
-                    Registrar
+                    Register
                   </Link>
                 </div>
               </form>
             ) : (
               <form onSubmit={submit} className="space-y-5">
-                <Field label="Senha" error={errors.password || errors.message}>
+                <Field label="Password" error={errors.password || errors.message}>
                   <div className="relative">
                     <input
                       ref={passRef}
@@ -222,7 +222,7 @@ export default function Login() {
                     </button>
                   </div>
                   {capsOn && (
-                    <p className="mt-2 text-xs text-neutral-400">Caps Lock está ativado.</p>
+                    <p className="mt-2 text-xs text-neutral-400">Caps Lock is on.</p>
                   )}
                 </Field>
 
@@ -234,21 +234,21 @@ export default function Login() {
                       checked={data.remember}
                       onChange={(e) => setData("remember", e.target.checked)}
                     />
-                    Lembrar de mim
+                    Remember me
                   </label>
 
                   <Link
                     href="/forgot-password"
                     className="text-xs text-neutral-400 hover:text-neutral-200"
                   >
-                    Esqueci minha senha
+                    Forgot password
                   </Link>
                 </div>
 
                 <PrimaryButton
                   type="submit"
                   disabled={!canSubmit}
-                  text="Entrar"
+                  text="Sign In"
                   variant="solid"
                   loading={processing}
                 />
@@ -257,7 +257,7 @@ export default function Login() {
           </div>
 
           <p className="mt-6 text-xs text-neutral-400">
-            Ao acessar a conta, você concorda com os nossos termos de uso.
+            By signing in, you agree to our terms of use.
           </p>
         </div>
       </div>
@@ -266,7 +266,7 @@ export default function Login() {
 }
 
 /* ===========================================================
-   SUBCOMPONENTES
+   SUBCOMPONENTS
 =========================================================== */
 function Field({ label, error, children }) {
   return (
