@@ -2,7 +2,8 @@
 
 namespace App\Filament\Widgets;
 
-use App\Models\UnifiedTransaction;
+use App\Enums\TransactionStatus;
+use App\Models\Transaction;
 use Filament\Tables;
 use Filament\Tables\Table;
 use Filament\Widgets\TableWidget as BaseWidget;
@@ -18,8 +19,9 @@ class UltimasTransacoesWidget extends BaseWidget
         return $table
             ->poll($this->getPollingInterval())
             ->query(
-                UnifiedTransaction::query()
-                    ->where('status', 'paid')
+                Transaction::query()
+                    ->with('user')
+                    ->where('status', TransactionStatus::PAGA)
                     ->latest('paid_at')
                     ->limit(8)
             )
@@ -37,9 +39,7 @@ class UltimasTransacoesWidget extends BaseWidget
                 Tables\Columns\TextColumn::make('direction')
                     ->label('Tipo')
                     ->formatStateUsing(fn ($state) => $state === 'in' ? 'Entrada' : 'Saída')
-                    ->icon(fn ($state) => $state === 'in'
-                        ? 'heroicon-m-arrow-down-circle'
-                        : 'heroicon-m-arrow-up-circle')
+                    ->icon(fn ($state) => $state === 'in' ? 'heroicon-m-arrow-down-circle' : 'heroicon-m-arrow-up-circle')
                     ->iconPosition('before')
                     ->color(fn ($state) => $state === 'in' ? 'success' : 'danger'),
 
@@ -62,7 +62,7 @@ class UltimasTransacoesWidget extends BaseWidget
                             $fixa = (float) ($user->tax_in_fixed ?? 0);
                             $percent = (float) ($user->tax_in_percent ?? 0);
                             $taxa = $fixa + ($valor * ($percent / 100));
-                        } else {
+                        } elseif ($record->direction === 'out') {
                             $fixa = (float) ($user->tax_out_fixed ?? 0);
                             $percent = (float) ($user->tax_out_percent ?? 0);
                             $taxa = $fixa + ($valor * ($percent / 100));
@@ -73,16 +73,18 @@ class UltimasTransacoesWidget extends BaseWidget
                     ->color('gray'),
 
                 Tables\Columns\TextColumn::make('txid')
-                    ->label('TXID / PixKey')
+                    ->label('TXID')
                     ->limit(18)
                     ->tooltip(fn ($record) => $record->txid ?? 'N/A')
-                    ->copyable(),
+                    ->copyable()
+                    ->copyMessage('TXID copiado'),
 
                 Tables\Columns\TextColumn::make('e2e_id')
                     ->label('E2E ID')
                     ->limit(20)
                     ->tooltip(fn ($record) => $record->e2e_id ?? 'N/A')
-                    ->copyable(),
+                    ->copyable()
+                    ->copyMessage('E2E copiado'),
 
                 Tables\Columns\TextColumn::make('status')
                     ->label('Status')
