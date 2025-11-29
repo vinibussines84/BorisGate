@@ -8,7 +8,7 @@ import axios from "axios";
    🔧 Configuração Global Axios
    =========================================================== */
 axios.defaults.withCredentials = true;
-axios.defaults.baseURL = "https://equitpay.app"; // 👈 domínio principal
+axios.defaults.baseURL = "https://equitpay.app";
 axios.defaults.headers.common["X-Requested-With"] = "XMLHttpRequest";
 
 export default function Login() {
@@ -108,7 +108,15 @@ export default function Login() {
           "before:[background:radial-gradient(70%_70%_at_50%_100%,rgba(2,251,92,0.15),transparent_75%)]",
         ].join(" ")}
       >
-        <div className="flex flex-col justify-center px-6 sm:px-10 py-10 w-full max-w-[480px]">
+        {/* 🔥 IMAGEM DE FUNDO */}
+        <img
+          src="/images/line.png"
+          alt="Line background"
+          className="absolute inset-0 w-full h-full object-cover opacity-20 mix-blend-lighten pointer-events-none select-none"
+        />
+
+        {/* CONTEÚDO */}
+        <div className="flex flex-col justify-center px-6 sm:px-10 py-10 w-full max-w-[480px] relative z-10">
           <div className="mb-4 inline-flex items-center gap-2 text-sm text-neutral-400">
             <img
               src="/images/equitpay.png"
