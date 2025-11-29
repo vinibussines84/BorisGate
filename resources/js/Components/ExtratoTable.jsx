@@ -148,6 +148,7 @@ export default function ExtratoTable({
                 <th className="py-2.5 px-4">Tipo</th>
                 <th className="py-2.5 px-4 text-right">Valor</th>
                 <th className="py-2.5 px-4">Status</th>
+                <th className="py-2.5 px-4">E2E</th>
                 <th className="py-2.5 px-4">Data</th>
                 <th className="py-2.5 px-4 text-center">Ação</th>
               </tr>
@@ -157,14 +158,14 @@ export default function ExtratoTable({
               {loading ? (
                 [...Array(perPage)].map((_, i) => (
                   <tr key={i} className="border-b border-white/5 animate-pulse">
-                    <td colSpan={6} className="py-4 text-center text-gray-600">
+                    <td colSpan={7} className="py-4 text-center text-gray-600">
                       &nbsp;
                     </td>
                   </tr>
                 ))
               ) : transactions.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-12 text-center text-gray-400">
+                  <td colSpan={7} className="py-12 text-center text-gray-400">
                     Nenhuma transação encontrada.
                   </td>
                 </tr>
@@ -178,18 +179,28 @@ export default function ExtratoTable({
                     <td className="py-2.5 px-4 font-mono text-xs text-gray-300">
                       #{t.id}
                     </td>
+
                     <td className="py-2.5 px-4">
                       <OriginPill type={t.credit ? "PIX" : "SAQUE"} />
                     </td>
+
                     <td className="py-2.5 px-4 text-right font-semibold tabular-nums text-gray-200">
                       {formatCurrency(t.amount)}
                     </td>
+
                     <td className="py-2.5 px-4">
                       <StatusPill status={mapStatus(t.status)} />
                     </td>
+
+                    {/* NOVA COLUNA E2E — agora compatível com e2e, e2e_id e endtoend */}
+                    <td className="py-2.5 px-4 font-mono text-xs text-gray-400">
+                      {t.e2e ?? t.e2e_id ?? t.endtoend ?? "—"}
+                    </td>
+
                     <td className="py-2.5 px-4 text-gray-400">
                       {fmtDate(t.paidAt || t.createdAt)}
                     </td>
+
                     <td className="py-2.5 px-4 text-center">
                       <button
                         onClick={(e) => {
