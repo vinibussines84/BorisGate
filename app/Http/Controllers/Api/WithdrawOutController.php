@@ -8,6 +8,7 @@ use App\Models\Withdraw;
 use App\Services\Lumnis\LumnisCashoutService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
 use Illuminate\Support\Facades\Schema;
@@ -144,7 +145,6 @@ class WithdrawOutController extends Controller
 
                 // ⚠️ Caso seja saldo insuficiente no provedor
                 if ($errorName === 'INSUFFICIENT_FUNDS') {
-                    // rollback de saldo
                     DB::transaction(function () use ($user, $gross) {
                         $u = User::where('id', $user->id)->lockForUpdate()->first();
                         $u->amount_available += $gross;
@@ -159,7 +159,9 @@ class WithdrawOutController extends Controller
                     ], 422);
                 }
 
-                $msg = is_array($resp['message']) ? implode('; ', $resp['message']) : ($resp['message'] ?? 'Erro Lumnis Cashout');
+                $msg = is_array($resp['message'])
+                    ? implode('; ', $resp['message'])
+                    : ($resp['message'] ?? 'Erro Lumnis Cashout');
                 throw new \Exception($msg);
             }
 
@@ -178,6 +180,30 @@ class WithdrawOutController extends Controller
                 }
                 $withdraw->save();
             });
+
+            // 🚀 DISPARA WEBHOOK PARA O CLIENTE (withdraw.created)
+            if ($user->webhook_enabled && $user->webhook_out_url) {
+                try {
+                    Http::timeout(10)->post($user->webhook_out_url, [
+                        'event' => 'withdraw.created',
+                        'data'  => [
+                            'id'            => $withdraw->id,
+                            'amount'        => $gross,
+                            'liquid_amount' => $net,
+                            'pix_key'       => $withdraw->pixkey,
+                            'pix_key_type'  => $withdraw->pixkey_type,
+                            'status'        => $status,
+                            'reference'     => $identifier,
+                        ],
+                    ]);
+                } catch (\Throwable $ex) {
+                    Log::warning('⚠️ Falha ao enviar webhook de criação de saque', [
+                        'user_id' => $user->id,
+                        'url'     => $user->webhook_out_url,
+                        'error'   => $ex->getMessage(),
+                    ]);
+                }
+            }
 
             return response()->json([
                 'success' => true,
@@ -198,7 +224,6 @@ class WithdrawOutController extends Controller
                 'message' => $e->getMessage(),
             ]);
 
-            // rollback geral
             DB::transaction(function () use ($user, $gross) {
                 $u = User::where('id', $user->id)->lockForUpdate()->first();
                 $u->amount_available += $gross;
