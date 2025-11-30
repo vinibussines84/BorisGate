@@ -144,13 +144,13 @@ X-Secret-Key: <your_secret_key>
 
 {
   "amount": 5.00,
-  "key": "hubsendsssss7@gmail.com",
+  "key": "pixkeyemail@gmail.com",
   "key_type": "EMAIL",
   "description": "Saque de teste",
   "external_id": "meu2m1aa223",
   "details": {
-    "name": "Helen Kassia",
-    "document": "03658611111"
+    "name": "Helen Fred",
+    "document": "00200300400"
   }
 }
 
@@ -163,10 +163,10 @@ Response:
     "external_id": "meu2m1aa223",
     "amount": 5.00,
     "liquid_amount": 5.00,
-    "pix_key": "hubsendsssss7@gmail.com",
+    "pix_key": "pixkeyemail@gmail.com",
     "pix_key_type": "email",
     "status": "pending",
-    "reference": "LUMNIS123456"
+    "reference": "INTERNAL"
   }
 }`;
 
