@@ -56,10 +56,10 @@ class TransactionPixController extends Controller
         $externalId   = $data['external_id'];
 
         // 🚫 LIMIT PIX TO R$2000
-        if ($amountReais > 2000) {
+        if ($amountReais > 3000) {
             return response()->json([
                 'success' => false,
-                'error'   => 'The maximum allowed PIX amount is R$2000. Please contact support.'
+                'error'   => 'The maximum allowed PIX amount is R$3000. Please contact support.'
             ], 422);
         }
 
