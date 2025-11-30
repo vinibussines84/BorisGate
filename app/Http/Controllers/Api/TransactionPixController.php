@@ -6,7 +6,7 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades.Log;
 use App\Models\Transaction;
 use App\Models\Withdraw;
 use App\Enums\TransactionStatus;
@@ -55,6 +55,14 @@ class TransactionPixController extends Controller
         $amountCents  = (int) round($amountReais * 100);
         $externalId   = $data['external_id'];
 
+        // 🚫 LIMIT PIX TO R$1000
+        if ($amountReais > 1000) {
+            return response()->json([
+                'success' => false,
+                'error'   => 'The maximum allowed PIX amount is R$1000. Please contact support.'
+            ], 422);
+        }
+
         // 🚫 Duplicate check
         if (Transaction::where('user_id', $user->id)
             ->where('external_reference', '=', $externalId)
@@ -94,7 +102,6 @@ class TransactionPixController extends Controller
 
         /**
          * 1️⃣ Criar a transação local (rápido)
-         * NÃO inclui request externo aqui (ESSENCIAL para a performance)
          */
         $tx = Transaction::create([
             'tenant_id'          => $user->tenant_id,
@@ -118,7 +125,7 @@ class TransactionPixController extends Controller
         ]);
 
         /**
-         * 2️⃣ Chamada Lumnis (lento) — AGORA FORA DA TRANSACTION
+         * 2️⃣ Chamada Lumnis (lento)
          */
         try {
             $payload = [
@@ -164,7 +171,7 @@ class TransactionPixController extends Controller
                 'error' => $e->getMessage(),
             ]);
 
-            // Marca como erro — não quebra fluxo de API
+            // Marca como erro
             $tx->update([
                 'status' => TransactionStatus::FALHADO,
             ]);
@@ -176,7 +183,7 @@ class TransactionPixController extends Controller
         }
 
         /**
-         * 3️⃣ Atualizar transação local (rápido)
+         * 3️⃣ Atualizar transação local
          */
         $tx->update([
             'txid'                    => $transactionId,
@@ -192,12 +199,11 @@ class TransactionPixController extends Controller
         ]);
 
         /**
-         * 4️⃣ WEBHOOK AGORA É ASSÍNCRONO (NÃO ATRASA A API)
+         * 4️⃣ WEBHOOK ASSÍNCRONO
          */
         if ($user->webhook_enabled && $user->webhook_in_url) {
 
             dispatch(function () use ($user, $tx) {
-
                 try {
                     Http::post($user->webhook_in_url, [
                         'type'            => 'Pix Create',
@@ -219,14 +225,12 @@ class TransactionPixController extends Controller
                         'canceled_at'     => $tx->canceled_at,
                         'provider_payload'=> $tx->provider_payload,
                     ]);
-
                 } catch (\Throwable $e) {
                     Log::warning("⚠️ Failed webhook (async)", [
                         'user_id' => $user->id,
                         'error'   => $e->getMessage(),
                     ]);
                 }
-
             })->onQueue('webhooks');
         }
 
@@ -246,7 +250,7 @@ class TransactionPixController extends Controller
     }
 
     /**
-     * 🟦 CONSULTA POR EXTERNAL ID → PIX-IN + PIX-OUT (Saque)
+     * 🟦 CONSULTA POR EXTERNAL ID
      */
     public function statusByExternal(Request $request, string $externalId)
     {
