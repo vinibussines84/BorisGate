@@ -94,11 +94,7 @@ class PodPayWithdrawWebhookController extends Controller
                     ]);
                 });
 
-                // 🔥 Enviar webhook OUT formatado
-                $this->notifyClient($user, $withdraw, [
-                    'status' => 'FAILED',
-                    'reason' => $description ?: $historyMsg,
-                ]);
+                $this->notifyClient($user, $withdraw, 'FAILED', $reference, $payload);
 
                 Log::error('❌ Saque PodPay marcado como FAILED', [
                     'withdraw_id' => $withdraw->id,
@@ -131,12 +127,7 @@ class PodPayWithdrawWebhookController extends Controller
                     'e2e'         => $e2e,
                 ]);
 
-                // 🔥 Enviar webhook OUT formatado (igual Lumnis)
-                $this->notifyClient($user, $withdraw, [
-                    'status'  => 'APPROVED',
-                    'e2e'     => $e2e,
-                    'paid_at' => now()->toIso8601String(),
-                ]);
+                $this->notifyClient($user, $withdraw, 'APPROVED', $reference, $payload);
 
                 return response()->json(['success' => true, 'status' => 'paid']);
             }
@@ -166,46 +157,54 @@ class PodPayWithdrawWebhookController extends Controller
     }
 
     /**
-     * 📤 Enviar webhook OUT ao cliente (FORMATO LUMNIS)
+     * 📤 Enviar webhook OUT ao cliente (MESMO FORMATO LUMNIS)
      */
-    private function notifyClient(?User $user, Withdraw $withdraw, array $extra = [])
+    private function notifyClient(?User $user, Withdraw $withdraw, string $status, string $reference, array $raw)
     {
         if (!$user?->webhook_enabled || !$user?->webhook_out_url) {
             return;
         }
 
-        $event = strtolower($extra['status'] ?? '') === 'failed'
-            ? 'withdraw.failed'
-            : 'withdraw.paid';
+        $statusFormatted = strtoupper($status);
+        $e2e = $withdraw->meta['e2e'] ?? null;
 
         $payload = [
-            'id'             => $withdraw->provider_reference,
-            'status'         => $extra['status'] ?? strtoupper($withdraw->status),
-            'requested'      => (int) round($withdraw->gross_amount * 100),
-            'paid'           => (int) round($withdraw->amount * 100),
+            'id'        => $reference,
+            'status'    => $statusFormatted,
+            'requested' => (float) $withdraw->gross_amount,
+            'paid'      => (float) $withdraw->amount,
+            'operation' => [
+                'amount'      => (float) $withdraw->gross_amount,
+                'key'         => $withdraw->pixkey,
+                'key_type'    => strtoupper($withdraw->pixkey_type),
+                'description' => 'Withdraw',
+                'details'     => [
+                    'name'      => $user->name,
+                    'document'  => $user->cpf_cnpj ?? '00000000000',
+                ],
+            ],
             'receipt' => [[
-                'identifier'       => $withdraw->provider_reference,
-                'endtoend'         => $withdraw->meta['e2e'] ?? null,
+                'status'           => $statusFormatted,
+                'endtoend'         => $e2e,
+                'identifier'       => $reference,
                 'receiver_name'    => $withdraw->meta['receiver_name'] ?? $user->name,
                 'receiver_bank'    => $withdraw->meta['receiver_bank'] ?? 'PODPAY',
                 'receiver_bank_ispb'=> $withdraw->meta['receiver_ispb'] ?? '90400888',
-                'refused_reason'   => $extra['reason'] ?? null,
+                'refused_reason'   => $statusFormatted === 'APPROVED'
+                    ? 'Withdraw Successfull'
+                    : ($raw['data']['description'] ?? null),
             ]],
-            'external_id'    => $withdraw->external_id,
-            'receiver_name'  => $withdraw->meta['receiver_name'] ?? $user->name,
-            'receiver_bank'  => $withdraw->meta['receiver_bank'] ?? 'PODPAY',
-            'receiver_ispb'  => $withdraw->meta['receiver_ispb'] ?? '90400888',
-            'paid_at'        => $extra['paid_at'] ?? $withdraw->meta['paid_at'] ?? null,
+            'external_id' => $withdraw->external_id,
         ];
 
         try {
             Http::timeout(10)->post($user->webhook_out_url, [
-                'event' => $event,
+                'event' => 'withdraw.updated',
                 'data'  => $payload,
             ]);
 
             Log::info('📤 Webhook OUT enviado ao cliente', [
-                'event'       => $event,
+                'event'       => 'withdraw.updated',
                 'withdraw_id' => $withdraw->id,
                 'user_id'     => $user->id,
             ]);
