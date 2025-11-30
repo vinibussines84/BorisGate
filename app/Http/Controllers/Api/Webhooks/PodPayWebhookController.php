@@ -36,7 +36,7 @@ class PodPayWebhookController extends Controller
             }
 
             /* ============================================================
-             * 2️⃣ Localiza transação (com lock para evitar corrida)
+             * 2️⃣ Localiza transação (lock para evitar concorrência)
              * ============================================================ */
             $tx = Transaction::query()
                 ->when($externalRef, fn($q) => $q->where('external_reference', $externalRef))
@@ -47,9 +47,8 @@ class PodPayWebhookController extends Controller
             if (!$tx) {
                 Log::warning("⚠️ TX não encontrada (PodPay)", [
                     'externalRef' => $externalRef,
-                    'txid'        => $txid
+                    'txid'        => $txid,
                 ]);
-
                 return response()->json(['error' => 'Transaction not found'], 404);
             }
 
@@ -65,8 +64,9 @@ class PodPayWebhookController extends Controller
              * 4️⃣ Extrai informações úteis
              * ============================================================ */
             $endToEnd = data_get($data, 'pix.end2EndId');
-            $amount   = (float) data_get($data, 'paidAmount', data_get($data, 'amount', 0));
-            $paidAt   = data_get($data, 'paidAt');
+            $paidCents = (int) data_get($data, 'paidAmount', 0);
+            $amountReais = round($paidCents / 100, 2);
+            $paidAt = data_get($data, 'paidAt');
 
             /* ============================================================
              * 5️⃣ Ignora status intermediários
@@ -84,27 +84,27 @@ class PodPayWebhookController extends Controller
              * 6️⃣ Status final: pago ou falhou
              * ============================================================ */
             if (in_array($status, ['PAID', 'APPROVED', 'CONFIRMED'])) {
-
                 $cleanPayload = [
                     "id"            => data_get($data, 'id'),
                     "type"          => data_get($data, 'type', 'transaction'),
                     "paymentMethod" => data_get($data, 'paymentMethod'),
                     "status"        => data_get($data, 'status'),
-                    "paidAt"        => data_get($data, 'paidAt'),
-                    "paidAmount"    => data_get($data, 'paidAmount'),
+                    "paidAt"        => $paidAt,
+                    "paidAmount"    => $paidCents,
+                    "paidReais"     => $amountReais, // ✅ convertido
                     "pix" => [
                         "qrcode"    => data_get($data, 'pix.qrcode'),
-                        "end2EndId" => data_get($data, 'pix.end2EndId'),
-                    ]
+                        "end2EndId" => $endToEnd,
+                    ],
                 ];
 
-                DB::transaction(function () use ($tx, $txid, $endToEnd, $cleanPayload, $amount, $paidAt) {
+                DB::transaction(function () use ($tx, $txid, $endToEnd, $cleanPayload, $amountReais, $paidAt) {
                     $tx->update([
                         'status'                 => TransactionStatus::PAGA->value,
                         'paid_at'                => $paidAt ? now() : now(),
                         'e2e_id'                 => $endToEnd ?: $tx->e2e_id,
                         'provider_transaction_id'=> $txid,
-                        'amount'                 => $amount ?: $tx->amount,
+                        'amount'                 => $amountReais ?: $tx->amount, // ✅ corrigido
                         'provider_payload'       => $cleanPayload,
                     ]);
                 });
@@ -112,6 +112,7 @@ class PodPayWebhookController extends Controller
                 Log::info("✅ PodPay: transação confirmada como PAGA", [
                     'transaction_id' => $tx->id,
                     'externalRef'    => $tx->external_reference,
+                    'valor_reais'    => $amountReais,
                 ]);
 
                 if ($tx->user?->webhook_enabled && $tx->user?->webhook_in_url) {
