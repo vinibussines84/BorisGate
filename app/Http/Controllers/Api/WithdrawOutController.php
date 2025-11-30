@@ -22,9 +22,9 @@ class WithdrawOutController extends Controller
 
     public function store(Request $request)
     {
-        /** -----------------------------------------------------------------
-         *  🔐 Autenticação por Headers
-         * ----------------------------------------------------------------- */
+        /** ---------------------------------------------------------
+         *  🔐 Autenticação via headers
+         * --------------------------------------------------------- */
         $authKey   = $request->header('X-Auth-Key');
         $secretKey = $request->header('X-Secret-Key');
 
@@ -43,9 +43,9 @@ class WithdrawOutController extends Controller
             return response()->json(['success' => false, 'error' => 'Credenciais inválidas.'], 401);
         }
 
-        /** -----------------------------------------------------------------
-         *  🧾 Validação básica
-         * ----------------------------------------------------------------- */
+        /** ---------------------------------------------------------
+         *  🧾 Validação
+         * --------------------------------------------------------- */
         $data = $request->validate([
             'amount'            => ['required', 'numeric', 'min:0.01'],
             'key'               => ['required', 'string'],
@@ -56,19 +56,19 @@ class WithdrawOutController extends Controller
             'external_id'       => ['sometimes', 'string', 'max:64'],
         ]);
 
-        /** -----------------------------------------------------------------
-         *  🔎 Validação REAL da chave Pix
-         * ----------------------------------------------------------------- */
+        /** ---------------------------------------------------------
+         *  🔎 Validação da chave PIX
+         * --------------------------------------------------------- */
         if (!KeyValidator::validate($data['key'], $data['key_type'])) {
             return response()->json([
                 'success' => false,
-                'error'   => 'Chave Pix inválida para o tipo informado.',
+                'error'   => 'Chave Pix inválida para o tipo informado.'
             ], 422);
         }
 
-        /** -----------------------------------------------------------------
-         *  ⚙️ Verifica permissão do usuário
-         * ----------------------------------------------------------------- */
+        /** ---------------------------------------------------------
+         *  ⚙ Permissão
+         * --------------------------------------------------------- */
         if (!$user->tax_out_enabled) {
             return response()->json([
                 'success' => false,
@@ -76,46 +76,40 @@ class WithdrawOutController extends Controller
             ], 403);
         }
 
-        /** -----------------------------------------------------------------
+        /** ---------------------------------------------------------
          *  💰 Cálculo de taxas
-         * ----------------------------------------------------------------- */
-        $gross = (float) $data['amount'];     // valor solicitado
+         * --------------------------------------------------------- */
+        $gross = (float) $data['amount'];
         $fixed = (float) ($user->tax_out_fixed ?? 0);
         $percent = (float) ($user->tax_out_percent ?? 0);
         $fee = round($fixed + ($gross * $percent / 100), 2);
         $net = round($gross - $fee, 2);
 
         if ($net <= 0) {
-            return response()->json([
-                'success' => false,
-                'error' => 'Valor líquido inválido.',
-            ], 422);
+            return response()->json(['success' => false, 'error' => 'Valor líquido inválido.'], 422);
         }
 
-        /** -----------------------------------------------------------------
-         *  🔢 External ID único
-         * ----------------------------------------------------------------- */
-        $externalId = $data['external_id']
-            ?? 'WD_' . now()->timestamp . '_' . random_int(1000, 9999);
+        /** ---------------------------------------------------------
+         *  🔢 External ID
+         * --------------------------------------------------------- */
+        $externalId = $data['external_id'] ??
+            'WD_' . now()->timestamp . '_' . random_int(1000, 9999);
 
         if (Withdraw::where('user_id', $user->id)->where('external_id', $externalId)->exists()) {
             return response()->json([
                 'success' => false,
-                'error'   => 'Duplicate external_id. Use um valor único.',
+                'error'   => 'Duplicate external_id. Forneça um valor único.',
             ], 409);
         }
 
         $internalRef = 'withdraw_' . now()->timestamp . '_' . random_int(1000, 9999);
 
-        /** *****************************************************************
-         *  🧾 PROCESSO PRINCIPAL
-         ****************************************************************** */
+        /** ---------------------------------------------------------
+         *  🧾 1️⃣ Criação local + débito em transação
+         * --------------------------------------------------------- */
         try {
 
-            /** -----------------------------------------------------------------
-             *  1️⃣ Criação local + débito
-             * ----------------------------------------------------------------- */
-            $result = DB::transaction(function () use ($user, $gross, $net, $fee, $data, $internalRef, $externalId) {
+            $result = DB::transaction(function () use ($user, $gross, $net, $fee, $data, $externalId, $internalRef) {
 
                 $u = User::where('id', $user->id)->lockForUpdate()->first();
 
@@ -161,9 +155,9 @@ class WithdrawOutController extends Controller
 
             $withdraw = $result['withdraw'];
 
-            /** -----------------------------------------------------------------
+            /** ---------------------------------------------------------
              *  2️⃣ Payload enviado para Lumnis
-             * ----------------------------------------------------------------- */
+             * --------------------------------------------------------- */
             $payload = [
                 "amount"      => (int) round($net * 100),
                 "key"         => $data['key'],
@@ -176,14 +170,11 @@ class WithdrawOutController extends Controller
                 "postback" => route('webhooks.lumnis.withdraw'),
             ];
 
-            /** -----------------------------------------------------------------
-             *  3️⃣ Chamada real da API Lumnis
-             * ----------------------------------------------------------------- */
+            /** ---------------------------------------------------------
+             *  3️⃣ Chamada real para Lumnis
+             * --------------------------------------------------------- */
             $resp = $this->lumnis->createWithdrawal($payload);
 
-            /** -----------------------------------------------------------------
-             *  🔥 Se Lumnis voltou erro → estornar saldo
-             * ----------------------------------------------------------------- */
             if (!$resp['success']) {
                 $this->refund($user, $gross, $withdraw, $resp);
                 return response()->json([
@@ -193,9 +184,9 @@ class WithdrawOutController extends Controller
                 ], 502);
             }
 
-            /** -----------------------------------------------------------------
-             *  4️⃣ Identificador correto (receipt.identifier)
-             * ----------------------------------------------------------------- */
+            /** ---------------------------------------------------------
+             *  4️⃣ IDENTIFICADOR REAL (receipt.identifier)
+             * --------------------------------------------------------- */
             $providerReference =
                 data_get($resp, 'data.data.0.receipt.0.identifier') ??
                 data_get($resp, 'data.data.0.identifier') ??
@@ -203,9 +194,9 @@ class WithdrawOutController extends Controller
 
             $status = strtolower(data_get($resp, 'data.data.0.status', 'pending'));
 
-            /** -----------------------------------------------------------------
-             *  5️⃣ Atualiza o withdraw com o provider_identifier REAL
-             * ----------------------------------------------------------------- */
+            /** ---------------------------------------------------------
+             *  5️⃣ Atualiza o saque com o identifier
+             * --------------------------------------------------------- */
             DB::transaction(function () use ($withdraw, $providerReference, $status, $resp) {
                 $withdraw->update([
                     'status'             => $status,
@@ -217,9 +208,36 @@ class WithdrawOutController extends Controller
                 ]);
             });
 
-            /** -----------------------------------------------------------------
-             *  ✅ Sucesso total
-             * ----------------------------------------------------------------- */
+            /** ---------------------------------------------------------
+             *  6️⃣ Dispara Webhook OUT (criação)
+             * --------------------------------------------------------- */
+            if ($user->webhook_enabled && $user->webhook_out_url) {
+                try {
+                    Http::timeout(10)->post($user->webhook_out_url, [
+                        'event' => 'withdraw.created',
+                        'data' => [
+                            'id'            => $withdraw->id,
+                            'external_id'   => $withdraw->external_id,
+                            'amount'        => $gross,
+                            'liquid_amount' => $net,
+                            'pix_key'       => $withdraw->pixkey,
+                            'pix_key_type'  => $withdraw->pixkey_type,
+                            'status'        => $status,
+                            'reference'     => $providerReference,
+                            'endtoend'      => null,
+                        ],
+                    ]);
+                } catch (\Throwable $e) {
+                    Log::warning('Falha ao enviar webhook withdraw.created', [
+                        'user_id' => $user->id,
+                        'error'   => $e->getMessage()
+                    ]);
+                }
+            }
+
+            /** ---------------------------------------------------------
+             *  🔚 Retorno oficial
+             * --------------------------------------------------------- */
             return response()->json([
                 'success' => true,
                 'message' => 'Saque solicitado com sucesso!',
@@ -248,14 +266,14 @@ class WithdrawOutController extends Controller
 
             return response()->json([
                 'success' => false,
-                'error' => 'Falha ao criar saque. ' . $e->getMessage(),
+                'error'   => 'Falha ao criar saque. ' . $e->getMessage(),
             ], 502);
         }
     }
 
-    /** -----------------------------------------------------------------
-     *  🔁 Estorna saldo e marca o withdraw como failed
-     * ----------------------------------------------------------------- */
+    /** ---------------------------------------------------------
+     *  🔁 Estorno
+     * --------------------------------------------------------- */
     private function refund(User $user, float $gross, Withdraw $withdraw, $error = null)
     {
         DB::transaction(function () use ($user, $gross) {
