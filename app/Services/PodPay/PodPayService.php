@@ -14,8 +14,15 @@ class PodPayService
     public function __construct()
     {
         $this->baseUrl   = "https://api.podpay.co/v1";
-        $this->publicKey = env("PODPAY_PUBLIC_KEY");
-        $this->secretKey = env("PODPAY_SECRET_KEY");
+
+        // Pegando via config (correto para produção)
+        $this->publicKey = config('podpay.public_key', '');
+        $this->secretKey = config('podpay.secret_key', '');
+
+        // Segurança: validar antes de continuar
+        if (empty($this->publicKey) || empty($this->secretKey)) {
+            Log::critical("❌ PodPay keys are missing. Check your .env or config/podpay.php.");
+        }
     }
 
     /**
@@ -68,7 +75,9 @@ class PodPayService
             $response = Http::withHeaders([
                 "Authorization" => $this->authHeader(),
                 "Accept"        => "application/json",
-            ])->get("{$this->baseUrl}/transactions/{$id}");
+            ])
+            ->timeout(20)
+            ->get("{$this->baseUrl}/transactions/{$id}");
 
             return [
                 "status" => $response->status(),
