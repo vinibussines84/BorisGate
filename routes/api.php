@@ -163,10 +163,10 @@ Route::prefix('webhooks')->name('webhooks.')->group(function () {
     // 🚀 PodPay — Payin (PIX)
     Route::post('/podpay', PodPayWebhookController::class)
         ->middleware('throttle:120,1')
-        ->name('webhooks.podpay');
+        ->name('podpay');
 
     // 🚀 PodPay — Payout (Withdraw)
     Route::post('/podpay/withdraw', PodPayWithdrawWebhookController::class)
         ->middleware('throttle:120,1')
-        ->name('webhooks.podpay.withdraw');
+        ->name('podpay.withdraw');
 });
