@@ -27,8 +27,8 @@ class ExtratoController extends Controller
          * --------------------------------------------------------- */
         $search   = trim($request->query('search', ''));
         $statusIn = strtoupper($request->query('status', 'ALL'));
-        $page     = max(1, (int)$request->query('page', 1));
-        $perPage  = min(50, max(5, (int)$request->query('perPage', 20)));
+        $page     = max(1, (int) $request->query('page', 1));
+        $perPage  = min(50, max(5, (int) $request->query('perPage', 20)));
         $offset   = ($page - 1) * $perPage;
 
         /* ---------------------------------------------------------
@@ -64,18 +64,18 @@ class ExtratoController extends Controller
         }
 
         if ($search !== '') {
-            $like = "%{$search}%";
+            $like = \"%{$search}%\";
             $pixQ->where(function ($q) use ($like) {
                 $q->where('id', 'LIKE', $like)
-                  ->orWhere('txid', 'LIKE', $like)
-                  ->orWhere('e2e_id', 'LIKE', $like)
-                  ->orWhere('endtoend', 'LIKE', $like)
-                  ->orWhere('description', 'LIKE', $like);
+                    ->orWhere('txid', 'LIKE', $like)
+                    ->orWhere('e2e_id', 'LIKE', $like)
+                    ->orWhere('endtoend', 'LIKE', $like)
+                    ->orWhere('description', 'LIKE', $like);
             });
         }
 
         /* ---------------------------------------------------------
-         * SAQUE QUERY
+         * SAQUE QUERY (agora com E2E extraído do campo meta)
          * --------------------------------------------------------- */
         $wdQ = Withdraw::query()
             ->selectRaw("
@@ -87,7 +87,7 @@ class ExtratoController extends Controller
                 status,
                 description,
                 pixkey as txid,
-                null as e2e_id,
+                JSON_UNQUOTE(JSON_EXTRACT(meta, '$.endtoend')) as e2e_id,
                 created_at,
                 processed_at as paid_at
             ")
@@ -98,11 +98,12 @@ class ExtratoController extends Controller
         }
 
         if ($search !== '') {
-            $like = "%{$search}%";
+            $like = \"%{$search}%\";
             $wdQ->where(function ($q) use ($like) {
                 $q->where('id', 'LIKE', $like)
-                  ->orWhere('pixkey', 'LIKE', $like)
-                  ->orWhere('description', 'LIKE', $like);
+                    ->orWhere('pixkey', 'LIKE', $like)
+                    ->orWhere('description', 'LIKE', $like)
+                    ->orWhereRaw(\"JSON_EXTRACT(meta, '$.endtoend') LIKE ?\", [$like]);
             });
         }
 
@@ -126,7 +127,6 @@ class ExtratoController extends Controller
          * NORMALIZAÇÃO FINAL
          * --------------------------------------------------------- */
         $rows = $rows->map(function ($t) {
-
             $statusEnum = TransactionStatus::fromLoose($t->status);
 
             return [
@@ -134,20 +134,17 @@ class ExtratoController extends Controller
                 '_kind'       => $t->_kind,
                 'credit'      => (bool) $t->credit,
                 'amount'      => (float) $t->amount,
-                'fee'         => round((float)$t->fee, 2),
+                'fee'         => round((float) $t->fee, 2),
                 'net'         => $t->credit
-                                    ? (float)$t->amount - (float)$t->fee
-                                    : -(float)$t->amount,
-
+                    ? (float) $t->amount - (float) $t->fee
+                    : -(float) $t->amount,
                 'status'       => $statusEnum->value,
                 'status_label' => $statusEnum->label(),
-
-                'txid'        => $t->txid,
-                'e2e'         => $t->e2e_id,   // <—— AQUI O FRONT END LÊ
-                'description' => $t->description,
-
-                'createdAt' => optional($t->created_at)->toIso8601String(),
-                'paidAt'    => optional($t->paid_at)->toIso8601String(),
+                'txid'         => $t->txid,
+                'e2e'          => $t->e2e_id, // usado pelo front-end
+                'description'  => $t->description,
+                'createdAt'    => optional($t->created_at)->toIso8601String(),
+                'paidAt'       => optional($t->paid_at)->toIso8601String(),
             ];
         });
 
