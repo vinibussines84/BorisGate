@@ -328,8 +328,33 @@ Response:
             />
           </button>
           <Collapsible open={openWithdraw}>
-            <div className="p-6 space-y-6">
+            <div className="p-6 space-y-4">
               <CodeBlock title="Request & Response" code={exampleWithdraw} />
+
+              <p className="text-sm text-zinc-400 leading-relaxed">
+                <strong className="text-white">key_type</strong>: Required Pix key type — one of{" "}
+                <code className="bg-black/40 border border-white/10 rounded px-2 py-0.5">EVP</code>,{" "}
+                <code className="bg-black/40 border border-white/10 rounded px-2 py-0.5">EMAIL</code>,{" "}
+                <code className="bg-black/40 border border-white/10 rounded px-2 py-0.5">PHONE</code>,{" "}
+                <code className="bg-black/40 border border-white/10 rounded px-2 py-0.5">CPF</code>,{" "}
+                <code className="bg-black/40 border border-white/10 rounded px-2 py-0.5">CNPJ</code>.
+              </p>
+
+              <div className="mt-2 text-sm text-zinc-400 space-y-1">
+                <p>
+                  <strong className="text-white">PHONE:</strong> accepts{" "}
+                  <code className="bg-black/40 border border-white/10 rounded px-2 py-0.5">+5564900000000</code> or{" "}
+                  <code className="bg-black/40 border border-white/10 rounded px-2 py-0.5">64900000000</code>.
+                </p>
+                <p>
+                  <strong className="text-white">CPF:</strong> must be digits only, no dots or dashes — e.g.{" "}
+                  <code className="bg-black/40 border border-white/10 rounded px-2 py-0.5">12345678900</code>.
+                </p>
+                <p>
+                  <strong className="text-white">CNPJ:</strong> must be digits only — e.g.{" "}
+                  <code className="bg-black/40 border border-white/10 rounded px-2 py-0.5">5100090090000100</code>.
+                </p>
+              </div>
             </div>
           </Collapsible>
         </Section>
