@@ -2,7 +2,6 @@
 
 namespace App\Providers\Filament;
 
-use App\Http\Middleware\EnsureUserActive;
 use App\Http\Middleware\EnsureDashrashOne;
 use Filament\Http\Middleware\DisableBladeIconComponents;
 use Filament\Http\Middleware\DispatchServingFilamentEvent;
@@ -29,12 +28,12 @@ class AdminPanelProvider extends PanelProvider
             /*
             |--------------------------------------------------------------------------
             | Autenticação
-            | Usa o mesmo guard da aplicação (web)
-            | NÃO usa o login nativo do Filament.
+            | Usa o guard "web" da aplicação (login próprio do app)
+            | NÃO usa a página de login do Filament.
             |--------------------------------------------------------------------------
             */
             ->authGuard('web')
-            // ->login() // ❌ não habilitar login próprio
+            // ->login() ❌ NÃO usar login do Filament
 
             /*
             |--------------------------------------------------------------------------
@@ -42,38 +41,42 @@ class AdminPanelProvider extends PanelProvider
             |--------------------------------------------------------------------------
             */
             ->brandName('TrustCash')
-            ->colors(['primary' => Color::Green])
+            ->colors([
+                'primary' => Color::Green,
+            ])
             ->maxContentWidth(Width::Full)
             ->topNavigation()
 
             /*
             |--------------------------------------------------------------------------
-            | Descoberta automática de recursos, páginas e widgets
+            | Descoberta automática (Resources, Pages, Widgets)
             |--------------------------------------------------------------------------
             */
-            ->discoverResources(in: app_path('Filament/Resources'), for: 'App\\Filament\\Resources')
-            ->discoverPages(in: app_path('Filament/Pages'), for: 'App\\Filament\\Pages')
-            ->discoverWidgets(in: app_path('Filament/Widgets'), for: 'App\\Filament\\Widgets')
+            ->discoverResources(
+                in: app_path('Filament/Resources'),
+                for: 'App\\Filament\\Resources'
+            )
+            ->discoverPages(
+                in: app_path('Filament/Pages'),
+                for: 'App\\Filament\\Pages'
+            )
+            ->discoverWidgets(
+                in: app_path('Filament/Widgets'),
+                for: 'App\\Filament\\Widgets'
+            )
             ->pages([
                 Pages\Dashboard::class,
             ])
 
             /*
             |--------------------------------------------------------------------------
-            | Middleware da aplicação
+            | Middleware principal
             |--------------------------------------------------------------------------
-            | Usa o grupo "web" que já inclui:
-            | - EncryptCookies
-            | - StartSession
-            | - ShareErrorsFromSession
-            | - VerifyCsrfToken
-            | - SubstituteBindings
-            |
-            | Assim, evita múltiplos StartSession e perda de sessão.
+            | Usa apenas "web", evitando duplicação de sessão.
             |--------------------------------------------------------------------------
             */
             ->middleware([
-                'web', // ✅ usa o mesmo stack do app
+                'web',
                 DisableBladeIconComponents::class,
                 DispatchServingFilamentEvent::class,
             ])
@@ -85,8 +88,14 @@ class AdminPanelProvider extends PanelProvider
             */
             ->authMiddleware([
                 \Illuminate\Auth\Middleware\Authenticate::class . ':web',
-                //EnsureUserActive::class,
                 EnsureDashrashOne::class,
-            ]);
+            ])
+
+            /*
+            |--------------------------------------------------------------------------
+            | Plugins (mantido vazio por segurança)
+            |--------------------------------------------------------------------------
+            */
+            ->plugins([]);
     }
 }
