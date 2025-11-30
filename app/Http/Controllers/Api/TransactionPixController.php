@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use App\Models\Transaction;
 use App\Models\Withdraw;
 use App\Enums\TransactionStatus;
@@ -55,11 +56,10 @@ class TransactionPixController extends Controller
         $externalId   = $data['external_id'];
 
         // 🚫 Duplicate check
-        $duplicate = Transaction::where('user_id', $user->id)
+        if (Transaction::where('user_id', $user->id)
             ->where('external_reference', '=', $externalId)
-            ->exists();
+            ->exists()) {
 
-        if ($duplicate) {
             return response()->json([
                 'success' => false,
                 'error'   => "The external_id '{$externalId}' already exists for this user."
@@ -92,144 +92,157 @@ class TransactionPixController extends Controller
         $name  = $data['name']  ?? $user->name ?? $user->nome_completo ?? 'Client';
         $email = $data['email'] ?? $user->email ?? 'no-email@placeholder.com';
 
+        /**
+         * 1️⃣ Criar a transação local (rápido)
+         * NÃO inclui request externo aqui (ESSENCIAL para a performance)
+         */
+        $tx = Transaction::create([
+            'tenant_id'          => $user->tenant_id,
+            'user_id'            => $user->id,
+            'direction'          => Transaction::DIR_IN,
+            'status'             => TransactionStatus::PENDENTE,
+            'currency'           => 'BRL',
+            'method'             => 'pix',
+            'provider'           => 'Lumnis',
+            'amount'             => $amountReais,
+            'fee'                => $this->computeFee($user, $amountReais),
+            'external_reference' => $externalId,
+            'provider_payload'   => [
+                'name'     => $name,
+                'email'    => $email,
+                'document' => $cpf,
+                'phone'    => $phone,
+            ],
+            'ip'         => $request->ip(),
+            'user_agent' => $request->userAgent(),
+        ]);
+
+        /**
+         * 2️⃣ Chamada Lumnis (lento) — AGORA FORA DA TRANSACTION
+         */
         try {
-            $result = DB::transaction(function () use (
-                $user, $request, $amountReais, $amountCents, $cpf, $name, $email, $phone, $externalId, $lumnis
-            ) {
-                // Create local transaction
-                $tx = Transaction::create([
-                    'tenant_id'          => $user->tenant_id,
-                    'user_id'            => $user->id,
-                    'direction'          => Transaction::DIR_IN,
-                    'status'             => TransactionStatus::PENDENTE,
-                    'currency'           => 'BRL',
-                    'method'             => 'pix',
-                    'provider'           => 'Lumnis',
-                    'amount'             => $amountReais,
-                    'fee'                => $this->computeFee($user, $amountReais),
-                    'external_reference' => $externalId,
-                    'provider_payload'   => [
-                        'name'     => $name,
-                        'email'    => $email,
-                        'document' => $cpf,
-                        'phone'    => $phone,
-                    ],
-                    'ip'         => $request->ip(),
-                    'user_agent' => $request->userAgent(),
-                ]);
+            $payload = [
+                "amount"      => $amountCents,
+                "externalRef" => $externalId,
+                "postback"    => route('webhooks.lumnis'),
+                "customer"    => [
+                    "name"     => $name,
+                    "email"    => $email,
+                    "phone"    => $phone,
+                    "document" => $cpf,
+                ],
+                "items" => [[
+                    "title"     => "PIX Payment",
+                    "unitPrice" => $amountCents,
+                    "quantity"  => 1,
+                    "tangible"  => false,
+                ]],
+                "method"       => "PIX",
+                "installments" => 1,
+            ];
 
-                // Payload for Lumnis
-                $payload = [
-                    "amount"      => $amountCents,
-                    "externalRef" => $externalId,
-                    "postback"    => route('webhooks.lumnis'),
-                    "customer"    => [
-                        "name"     => $name,
-                        "email"    => $email,
-                        "phone"    => $phone,
-                        "document" => $cpf,
-                    ],
-                    "items" => [[
-                        "title"     => "PIX Payment",
-                        "unitPrice" => $amountCents,
-                        "quantity"  => 1,
-                        "tangible"  => false,
-                    ]],
-                    "method"       => "PIX",
-                    "installments" => 1,
-                ];
+            $response = $lumnis->createTransaction($payload);
 
-                // Call to Lumnis
-                $response = $lumnis->createTransaction($payload);
+            if (!in_array($response["status"], [200, 201])) {
+                throw new \Exception("Lumnis error: " . json_encode($response["body"]));
+            }
 
-                if (!in_array($response["status"], [200, 201])) {
-                    throw new \Exception("Lumnis error: " . json_encode($response["body"]));
-                }
+            $dataAPI = is_array($response["body"])
+                ? $response["body"]
+                : json_decode($response["body"], true);
 
-                $dataAPI = is_array($response["body"])
-                    ? $response["body"]
-                    : json_decode($response["body"], true);
+            $transactionId = data_get($dataAPI, 'id');
+            $qrCodeText    = data_get($dataAPI, 'qrcode');
 
-                $transactionId = data_get($dataAPI, 'id');
-                $qrCodeText    = data_get($dataAPI, 'qrcode');
-
-                if (!$transactionId || !$qrCodeText) {
-                    throw new \Exception("Invalid Lumnis response");
-                }
-
-                // Update local transaction
-                $tx->update([
-                    'txid'                    => $transactionId,
-                    'provider_transaction_id' => $transactionId,
-                    'provider_payload'        => [
-                        'name'         => $name,
-                        'email'        => $email,
-                        'document'     => $cpf,
-                        'phone'        => $phone,
-                        'qr_code_text' => $qrCodeText,
-                        'provider_raw' => $dataAPI,
-                    ],
-                ]);
-
-                // Send webhook to client
-                if ($user->webhook_enabled && $user->webhook_in_url) {
-                    try {
-                        Http::timeout(10)->post($user->webhook_in_url, [
-                            'type'            => 'Pix Create',
-                            'event'           => 'created',
-                            'transaction_id'  => $tx->id,
-                            'external_id'     => $tx->external_reference,
-                            'user'            => $user->name,
-                            'amount'          => number_format($tx->amount, 2, '.', ''),
-                            'fee'             => number_format($tx->fee, 2, '.', ''),
-                            'currency'        => $tx->currency,
-                            'status'          => $tx->status,
-                            'txid'            => $tx->txid,
-                            'e2e'             => $tx->e2e_id,
-                            'direction'       => $tx->direction,
-                            'method'          => $tx->method,
-                            'created_at'      => $tx->created_at,
-                            'updated_at'      => $tx->updated_at,
-                            'paid_at'         => $tx->paid_at,
-                            'canceled_at'     => $tx->canceled_at,
-                            'provider_payload'=> $tx->provider_payload,
-                        ]);
-                    } catch (\Throwable $ex) {
-                        \Log::warning('⚠️ Failed to send Pix webhook', [
-                            'user_id' => $user->id,
-                            'url'     => $user->webhook_in_url,
-                            'error'   => $ex->getMessage(),
-                        ]);
-                    }
-                }
-
-                return [
-                    'transaction_id' => $tx->id,
-                    'external_id'    => $externalId,
-                    'status'         => $tx->status,
-                    'amount'         => number_format($amountReais, 2, '.', ''),
-                    'fee'            => number_format($tx->fee, 2, '.', ''),
-                    'txid'           => $transactionId,
-                    'qr_code_text'   => $qrCodeText,
-                ];
-            });
-
-            return response()->json([
-                'success' => true,
-                ...$result
-            ]);
+            if (!$transactionId || !$qrCodeText) {
+                throw new \Exception("Invalid Lumnis response");
+            }
 
         } catch (\Throwable $e) {
-            \Log::error("PIX_CREATION_ERROR", [
+
+            Log::error("PIX_CREATION_ERROR", [
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
+            ]);
+
+            // Marca como erro — não quebra fluxo de API
+            $tx->update([
+                'status' => TransactionStatus::FALHADO,
             ]);
 
             return response()->json([
                 'success' => false,
-                'error'   => 'Internal server error while creating PIX.'
+                'error'   => 'Failed to create PIX transaction (provider error).'
             ], 500);
         }
+
+        /**
+         * 3️⃣ Atualizar transação local (rápido)
+         */
+        $tx->update([
+            'txid'                    => $transactionId,
+            'provider_transaction_id' => $transactionId,
+            'provider_payload'        => [
+                'name'         => $name,
+                'email'        => $email,
+                'document'     => $cpf,
+                'phone'        => $phone,
+                'qr_code_text' => $qrCodeText,
+                'provider_raw' => $dataAPI,
+            ],
+        ]);
+
+        /**
+         * 4️⃣ WEBHOOK AGORA É ASSÍNCRONO (NÃO ATRASA A API)
+         */
+        if ($user->webhook_enabled && $user->webhook_in_url) {
+
+            dispatch(function () use ($user, $tx) {
+
+                try {
+                    Http::post($user->webhook_in_url, [
+                        'type'            => 'Pix Create',
+                        'event'           => 'created',
+                        'transaction_id'  => $tx->id,
+                        'external_id'     => $tx->external_reference,
+                        'user'            => $user->name,
+                        'amount'          => number_format($tx->amount, 2, '.', ''),
+                        'fee'             => number_format($tx->fee, 2, '.', ''),
+                        'currency'        => $tx->currency,
+                        'status'          => $tx->status,
+                        'txid'            => $tx->txid,
+                        'e2e'             => $tx->e2e_id,
+                        'direction'       => $tx->direction,
+                        'method'          => $tx->method,
+                        'created_at'      => $tx->created_at,
+                        'updated_at'      => $tx->updated_at,
+                        'paid_at'         => $tx->paid_at,
+                        'canceled_at'     => $tx->canceled_at,
+                        'provider_payload'=> $tx->provider_payload,
+                    ]);
+
+                } catch (\Throwable $e) {
+                    Log::warning("⚠️ Failed webhook (async)", [
+                        'user_id' => $user->id,
+                        'error'   => $e->getMessage(),
+                    ]);
+                }
+
+            })->onQueue('webhooks');
+        }
+
+        /**
+         * 5️⃣ Resposta rápida
+         */
+        return response()->json([
+            'success'        => true,
+            'transaction_id' => $tx->id,
+            'external_id'    => $externalId,
+            'status'         => $tx->status,
+            'amount'         => number_format($amountReais, 2, '.', ''),
+            'fee'            => number_format($tx->fee, 2, '.', ''),
+            'txid'           => $transactionId,
+            'qr_code_text'   => $qrCodeText,
+        ]);
     }
 
     /**
@@ -249,9 +262,7 @@ class TransactionPixController extends Controller
             return response()->json(['success' => false, 'error' => 'Invalid credentials.'], 401);
         }
 
-        /**
-         * 1️⃣ Procurar PIX-IN (Transaction)
-         */
+        // PIX-IN
         $tx = Transaction::where('external_reference', $externalId)
             ->where('user_id', $user->id)
             ->first();
@@ -283,9 +294,7 @@ class TransactionPixController extends Controller
             ]);
         }
 
-        /**
-         * 2️⃣ Procurar SAQUE (Withdraw)
-         */
+        // PIX-OUT
         $withdraw = Withdraw::where('external_id', $externalId)
             ->where('user_id', $user->id)
             ->first();
@@ -306,8 +315,6 @@ class TransactionPixController extends Controller
                     'pix_key'        => $withdraw->pixkey,
                     'pix_key_type'   => $withdraw->pixkey_type,
                     'provider_ref'   => $withdraw->provider_reference,
-
-                    // Dados do webhook
                     'endtoend'       => $meta['endtoend'] ?? null,
                     'identifier'     => $meta['identifier'] ?? null,
                     'receiver_name'  => $meta['receiver_name'] ?? null,
@@ -315,7 +322,6 @@ class TransactionPixController extends Controller
                     'receiver_ispb'  => $meta['receiver_bank_ispb'] ?? null,
                     'paid_at'        => $meta['paid_at'] ?? $withdraw->processed_at,
                     'provider_payload' => $this->cleanWithdrawPayload($meta['raw_provider_payload'] ?? null),
-
                     'created_at' => $withdraw->created_at,
                     'updated_at' => $withdraw->updated_at,
                 ]
@@ -328,18 +334,11 @@ class TransactionPixController extends Controller
         ], 404);
     }
 
-    /**
-     * 🚿 Remove dados sensíveis como o campo postback
-     */
     private function cleanWithdrawPayload($payload)
     {
-        if (!is_array($payload)) {
-            return $payload;
-        }
+        if (!is_array($payload)) return $payload;
 
-        if (isset($payload['operation']['postback'])) {
-            unset($payload['operation']['postback']);
-        }
+        unset($payload['operation']['postback']);
 
         return $payload;
     }
@@ -363,7 +362,8 @@ class TransactionPixController extends Controller
     {
         if (preg_match('/(\d)\1{10}/', $cpf)) return false;
         for ($t = 9; $t < 11; $t++) {
-            for ($d = 0, $c = 0; $c < $t; $c++) $d += $cpf[$c] * (($t + 1) - $c);
+            for ($d = 0, $c = 0; $c < $t; $c++)
+                $d += $cpf[$c] * (($t + 1) - $c);
             $d = ((10 * $d) % 11) % 10;
             if ($cpf[$c] != $d) return false;
         }
