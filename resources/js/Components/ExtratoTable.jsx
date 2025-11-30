@@ -1,4 +1,3 @@
-// resources/js/Components/ExtractTable.jsx
 import React, { useMemo, useEffect } from "react";
 import {
   FileText,
@@ -128,7 +127,8 @@ export default function ExtractTable({
   perPage = 10,
   totalItems = 0,
   loading = false,
-  fetchTransactions, // optional callback to refresh from API
+  fetchTransactions,
+  searchTerm = "", // <-- ADICIONEI AQUI PARA CAPTURAR O TERMO DE BUSCA
 }) {
   const totalPages = useMemo(
     () => Math.max(1, Math.ceil(totalItems / perPage)),
@@ -140,7 +140,6 @@ export default function ExtractTable({
 
   /* === Cache management === */
   useEffect(() => {
-    // store cache when loaded and not empty
     if (!loading && transactions.length > 0) {
       localStorage.setItem(
         CACHE_KEY,
@@ -155,7 +154,6 @@ export default function ExtractTable({
   }, [transactions, loading, page, totalItems]);
 
   useEffect(() => {
-    // auto-refresh cache when expired
     const cache = JSON.parse(localStorage.getItem(CACHE_KEY));
     if (!cache) return;
     const expired = Date.now() - cache.timestamp > CACHE_TTL;
@@ -177,9 +175,17 @@ export default function ExtractTable({
     }
   }, []);
 
-  const activeTransactions = cached?.transactions?.length
-    ? cached.transactions
-    : transactions;
+  /* =====================================================================================
+     🚨 CORREÇÃO — NÃO USAR CACHE QUANDO SEARCH ESTIVER ATIVO
+  ====================================================================================== */
+  const shouldBypassCache = searchTerm && searchTerm.trim() !== "";
+
+  const activeTransactions =
+    shouldBypassCache || !cached?.transactions?.length
+      ? transactions
+      : cached.transactions;
+
+  /* ===================================================================================== */
 
   return (
     <div className="bg-[#0b0b0b]/95 border border-white/10 rounded-3xl p-6 backdrop-blur-sm min-h-[520px] flex flex-col justify-between transition-all duration-300">
@@ -215,9 +221,7 @@ export default function ExtractTable({
               {loading ? (
                 [...Array(perPage)].map((_, i) => (
                   <tr key={i} className="border-b border-white/5 animate-pulse">
-                    <td colSpan={7} className="py-4 text-center text-gray-600">
-                      &nbsp;
-                    </td>
+                    <td colSpan={7} className="py-4">&nbsp;</td>
                   </tr>
                 ))
               ) : activeTransactions.length === 0 ? (
@@ -236,27 +240,21 @@ export default function ExtractTable({
                     <td className="py-2.5 px-4 font-mono text-xs text-gray-300">
                       #{t.id}
                     </td>
-
                     <td className="py-2.5 px-4">
                       <OriginPill type={t.credit ? "PIX" : "SAQUE"} />
                     </td>
-
-                    <td className="py-2.5 px-4 text-right font-semibold tabular-nums text-gray-200">
+                    <td className="py-2.5 px-4 text-right font-semibold text-gray-200">
                       {formatCurrency(t.amount)}
                     </td>
-
                     <td className="py-2.5 px-4">
                       <StatusPill status={mapStatus(t.status)} />
                     </td>
-
                     <td className="py-2.5 px-4 font-mono text-xs text-gray-400">
-                      {t.e2e ?? t.e2e_id ?? t.endtoend ?? "—"}
+                      {t.e2e ?? "—"}
                     </td>
-
                     <td className="py-2.5 px-4 text-gray-400">
                       {fmtDate(t.paidAt || t.createdAt)}
                     </td>
-
                     <td className="py-2.5 px-4 text-center">
                       <button
                         onClick={(e) => {
