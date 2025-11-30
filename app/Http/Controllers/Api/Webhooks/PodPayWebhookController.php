@@ -63,10 +63,10 @@ class PodPayWebhookController extends Controller
             /* ============================================================
              * 4️⃣ Extrai informações úteis
              * ============================================================ */
-            $endToEnd = data_get($data, 'pix.end2EndId');
-            $paidCents = (int) data_get($data, 'paidAmount', 0);
+            $endToEnd    = data_get($data, 'pix.end2EndId');
+            $paidCents   = (int) data_get($data, 'paidAmount', 0);
             $amountReais = round($paidCents / 100, 2);
-            $paidAt = data_get($data, 'paidAt');
+            $paidAt      = data_get($data, 'paidAt');
 
             /* ============================================================
              * 5️⃣ Ignora status intermediários
@@ -74,7 +74,7 @@ class PodPayWebhookController extends Controller
             $nonFinal = ['WAITING_PAYMENT', 'PENDING', 'CREATED', 'PROCESSING', 'AUTHORIZED'];
             if (in_array($status, $nonFinal)) {
                 Log::info("⏸ Ignorado: status intermediário {$status}", [
-                    'tx_id' => $tx->id,
+                    'tx_id'  => $tx->id,
                     'status' => $status,
                 ]);
                 return response()->json(['ignored' => true, 'reason' => 'non_final_status']);
@@ -84,6 +84,7 @@ class PodPayWebhookController extends Controller
              * 6️⃣ Status final: pago ou falhou
              * ============================================================ */
             if (in_array($status, ['PAID', 'APPROVED', 'CONFIRMED'])) {
+
                 $cleanPayload = [
                     "id"            => data_get($data, 'id'),
                     "type"          => data_get($data, 'type', 'transaction'),
@@ -91,7 +92,7 @@ class PodPayWebhookController extends Controller
                     "status"        => data_get($data, 'status'),
                     "paidAt"        => $paidAt,
                     "paidAmount"    => $paidCents,
-                    "paidReais"     => $amountReais, // ✅ convertido
+                    "paidReais"     => $amountReais,
                     "pix" => [
                         "qrcode"    => data_get($data, 'pix.qrcode'),
                         "end2EndId" => $endToEnd,
@@ -100,12 +101,12 @@ class PodPayWebhookController extends Controller
 
                 DB::transaction(function () use ($tx, $txid, $endToEnd, $cleanPayload, $amountReais, $paidAt) {
                     $tx->update([
-                        'status'                 => TransactionStatus::PAGA->value,
-                        'paid_at'                => $paidAt ? now() : now(),
-                        'e2e_id'                 => $endToEnd ?: $tx->e2e_id,
-                        'provider_transaction_id'=> $txid,
-                        'amount'                 => $amountReais ?: $tx->amount, // ✅ corrigido
-                        'provider_payload'       => $cleanPayload,
+                        'status'                  => TransactionStatus::PAGA->value,
+                        'paid_at'                 => $paidAt ? now() : now(),
+                        'e2e_id'                  => $endToEnd ?: $tx->e2e_id,
+                        'provider_transaction_id' => $txid,
+                        'amount'                  => $amountReais ?: $tx->amount,
+                        'provider_payload'        => $cleanPayload,
                     ]);
                 });
 
@@ -115,32 +116,36 @@ class PodPayWebhookController extends Controller
                     'valor_reais'    => $amountReais,
                 ]);
 
+                /* ✅ DESPACHA O JOB COM O MODELO DIRETO (NÃO COM ID) */
                 if ($tx->user?->webhook_enabled && $tx->user?->webhook_in_url) {
-                    SendWebhookPixUpdateJob::dispatch($tx->id);
+                    SendWebhookPixUpdateJob::dispatch($tx);
                 }
 
                 return response()->json(['success' => true, 'status' => 'paid']);
             }
 
+            /* ============================================================
+             * 7️⃣ Falhou
+             * ============================================================ */
             if (in_array($status, ['FAILED', 'ERROR', 'CANCELED'])) {
                 DB::transaction(function () use ($tx, $txid, $status, $data) {
                     $tx->update([
-                        'status'                 => TransactionStatus::FALHOU->value,
-                        'provider_transaction_id'=> $txid,
-                        'provider_payload'       => $data,
+                        'status'                  => TransactionStatus::FALHOU->value,
+                        'provider_transaction_id' => $txid,
+                        'provider_payload'        => $data,
                     ]);
                 });
 
                 Log::warning("❌ PodPay: transação marcada como FALHOU", [
                     'transaction_id' => $tx->id,
-                    'status' => $status,
+                    'status'         => $status,
                 ]);
 
                 return response()->json(['success' => true, 'status' => 'failed']);
             }
 
             /* ============================================================
-             * 7️⃣ Status desconhecido
+             * 8️⃣ Status desconhecido
              * ============================================================ */
             Log::warning("⚠️ Webhook PodPay com status desconhecido", [
                 'status' => $status,
@@ -150,7 +155,6 @@ class PodPayWebhookController extends Controller
             return response()->json(['ignored' => true, 'reason' => 'unknown_status']);
 
         } catch (\Throwable $e) {
-
             Log::error("🚨 ERRO NO WEBHOOK PODPAY", [
                 'error'   => $e->getMessage(),
                 'trace'   => $e->getTraceAsString(),
