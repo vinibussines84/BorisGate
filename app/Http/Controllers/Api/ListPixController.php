@@ -50,16 +50,16 @@ class ListPixController extends Controller
             });
         }
 
-        // filtro busca
+        // filtro busca — CORRIGIDO
         if ($search !== '') {
             $pixQuery->where(function ($q) use ($search) {
                 $s = "%{$search}%";
+
                 $q->where('id', 'LIKE', $s)
                     ->orWhere('txid', 'LIKE', $s)
                     ->orWhere('e2e_id', 'LIKE', $s)
-                    ->orWhere('description', 'LIKE', $s)
-                    ->orWhere('reference', 'LIKE', $s)
-                    ->orWhere('external_id', 'LIKE', $s);
+                    ->orWhere('external_reference', 'LIKE', $s)
+                    ->orWhere('description', 'LIKE', $s);
             });
         }
 
@@ -76,6 +76,7 @@ class ListPixController extends Controller
          * NORMALIZAÇÃO PIX
          * ------------------------------------------------------------- */
         $pix = $pixRows->map(function ($t) use ($user) {
+
             $raw = strtolower((string) $t->status);
             $statusEnum = TransactionStatus::fromLoose($raw);
 
@@ -116,9 +117,8 @@ class ListPixController extends Controller
 
                 'description'  => $t->description ?? '',
                 'txid'         => $t->txid ?? '',
-                'e2e_id'       => $t->e2e_id ?? '',
-                'reference'    => $t->reference ?? '',
-                'external_id'  => $t->external_id ?? '',
+                'e2e'          => $t->e2e_id ?? '',
+                'external_reference' => $t->external_reference ?? '',
 
                 'createdAt'    => optional($t->created_at)->toIso8601String(),
                 'paidAt'       => optional($t->paid_at)->toIso8601String(),
@@ -150,8 +150,9 @@ class ListPixController extends Controller
             $wdQuery->where(function ($q) use ($search) {
                 $s = "%{$search}%";
                 $q->where('id', 'LIKE', $s)
+                    ->orWhere('pixkey', 'LIKE', $s)
                     ->orWhere('description', 'LIKE', $s)
-                    ->orWhere('pixkey', 'LIKE', $s);
+                    ->orWhereRaw("JSON_EXTRACT(meta, '$.endtoend') LIKE ?", [$s]);
             });
         }
 
@@ -222,7 +223,7 @@ class ListPixController extends Controller
         });
 
         /* -------------------------------------------------------------
-         * MERGE FINAL (SEM strtotime)
+         * MERGE FINAL
          * ------------------------------------------------------------- */
         $all = $pix
             ->concat($withdraws)
