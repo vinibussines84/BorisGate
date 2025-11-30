@@ -8,6 +8,10 @@ use App\Http\Controllers\Api\TransactionPixController;
 use App\Http\Controllers\Api\WithdrawOutController;
 use App\Http\Controllers\Api\BalanceController;
 
+// PodPay
+use App\Http\Controllers\Api\PodPayTransactionController;
+use App\Http\Controllers\Webhooks\PodPayWebhookController;
+
 use App\Http\Controllers\Webhooks\VeltraxWebhookController;
 use App\Http\Controllers\Webhooks\GatewayWebhookController;
 
@@ -48,7 +52,7 @@ Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
 
 
 // ───────────────────────────────────────────────
-// PIX — CASH IN
+// PIX — CASH IN (Lumnis - atual)
 // ───────────────────────────────────────────────
 
 // Criar transação Pix (CashIn)
@@ -56,13 +60,11 @@ Route::post('/transaction/pix', [TransactionPixController::class, 'store'])
     ->middleware('throttle:30,1')
     ->name('transaction.pix.store');
 
-
-// 🚀 Consultar por TXID (corrigido — agora chama showByTxid)
+// Consultar por TXID
 Route::get('/v1/transaction/status/{txid}', [TransactionPixController::class, 'showByTxid'])
     ->where('txid', '[A-Za-z0-9]+')
     ->middleware('throttle:60,1')
     ->name('transaction.pix.status.txid');
-
 
 // Consultar status por EXTERNAL_ID
 Route::get('/v1/transaction/status/external/{externalId}', [TransactionPixController::class, 'statusByExternal'])
@@ -70,12 +72,20 @@ Route::get('/v1/transaction/status/external/{externalId}', [TransactionPixContro
     ->middleware('throttle:60,1')
     ->name('transaction.pix.status.external');
 
-
-// (rota antiga opcional — mesma função, outro caminho)
+// Rota antiga
 Route::get('/transaction/pix/{txid}', [TransactionPixController::class, 'showByTxid'])
     ->where('txid', '[A-Za-z0-9]+')
     ->middleware('throttle:60,1')
     ->name('transaction.pix.show');
+
+
+// ───────────────────────────────────────────────
+// PIX — CASH IN (PodPay - NOVO)
+// ───────────────────────────────────────────────
+
+Route::post('/v1/transaction/pix', [PodPayTransactionController::class, 'store'])
+    ->middleware('throttle:30,1')
+    ->name('v1.transaction.pix.store');
 
 
 // ───────────────────────────────────────────────
@@ -173,4 +183,9 @@ Route::prefix('webhooks')->name('webhooks.')->group(function () {
     Route::post('/lumnis/withdraw', LumnisWithdrawController::class)
         ->middleware('throttle:120,1')
         ->name('lumnis.withdraw');
+
+    // 🚀 Novo Webhook PodPay
+    Route::post('/podpay', PodPayWebhookController::class)
+        ->middleware('throttle:120,1')
+        ->name('podpay');
 });
