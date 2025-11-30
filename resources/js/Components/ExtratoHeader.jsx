@@ -1,4 +1,3 @@
-// resources/js/Components/ExtratoHeader.jsx
 import React, { useRef, useCallback, useEffect, useState } from "react";
 import {
   FileText,
@@ -31,17 +30,20 @@ export default function ExtratoHeader({
   const tabRefs = useRef([]);
 
   /* ==========================================================
-     ATUALIZA A “PÍLULA” DO STATUS SELECIONADO
+     ANIMAÇÃO DA PÍLULA VERDE DO FILTRO SELECIONADO
   ========================================================== */
   const calcPill = useCallback(() => {
     const idx = STATUS_TABS.findIndex((s) => s.key === statusFilter);
     const el = tabRefs.current[idx];
-    if (el) setPillStyle({ left: el.offsetLeft, width: el.offsetWidth });
+    if (el) {
+      const { offsetLeft, offsetWidth } = el;
+      setPillStyle({ left: offsetLeft, width: offsetWidth });
+    }
   }, [statusFilter]);
 
   useEffect(() => {
-    const t = setTimeout(calcPill, 60);
-    return () => clearTimeout(t);
+    const timeout = setTimeout(calcPill, 80);
+    return () => clearTimeout(timeout);
   }, [calcPill]);
 
   /* ==========================================================
@@ -58,11 +60,13 @@ export default function ExtratoHeader({
     if (e.key === "Enter") refresh(true);
   };
 
-  /* ========================================================== */
+  /* ==========================================================
+     RENDER
+  ========================================================== */
   return (
-    <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[#0b0b0b]/95 p-6 sm:p-7 backdrop-blur-sm min-h-[180px]">
+    <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[#0b0b0b]/95 p-6 sm:p-7 backdrop-blur-sm min-h-[180px] transition-all duration-300">
 
-      {/* HEADER SUPERIOR */}
+      {/* CABEÇALHO SUPERIOR */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div className="flex items-center gap-3">
           <div className="p-3 rounded-2xl border border-white/10 bg-[#0a0a0a]/90 shrink-0">
@@ -101,6 +105,7 @@ export default function ExtratoHeader({
         </div>
 
         <div className="flex sm:flex-row flex-col gap-3 shrink-0">
+          {/* Entradas */}
           <div className="flex items-center justify-between sm:justify-start gap-3 rounded-2xl px-5 py-3 bg-[#0a0a0a]/95 border border-[#1b1b1b] shadow-inner w-[180px]">
             <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-[#02fb5c]/20 border border-[#02fb5c]/40">
               <ArrowUpRight size={15} className="text-[#02fb5c]" />
@@ -113,6 +118,7 @@ export default function ExtratoHeader({
             </div>
           </div>
 
+          {/* Saídas */}
           <div className="flex items-center justify-between sm:justify-start gap-3 rounded-2xl px-5 py-3 bg-[#0a0a0a]/95 border border-[#1b1b1b] shadow-inner w-[180px]">
             <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-[#2b0000]/40 border border-[#ff3b5c]/40">
               <ArrowDownRight size={15} className="text-[#ff3b5c]" />
@@ -129,7 +135,6 @@ export default function ExtratoHeader({
 
       {/* FILTROS */}
       <div className="mt-8 flex flex-col lg:flex-row gap-3 items-center justify-between">
-        
         {/* STATUS FILTER */}
         <div className="flex items-center gap-2 w-full lg:w-auto">
           <span className="text-[11px] text-gray-400 flex items-center gap-1.5 shrink-0">
@@ -137,18 +142,22 @@ export default function ExtratoHeader({
           </span>
 
           <div className="relative flex items-center overflow-x-auto no-scrollbar p-1 rounded-xl bg-[#050505]/80 border border-[#1a1a1a] max-w-full scroll-smooth min-h-[32px]">
+            {/* PILL */}
             <div
               className="absolute h-[28px] rounded-lg bg-[#02fb5c]/10 border border-[#02fb5c]/40 transition-all duration-300 ease-out"
               style={{ width: pillStyle.width, left: pillStyle.left }}
             />
+
             <div className="flex flex-nowrap space-x-1">
               {STATUS_TABS.map((s, i) => (
                 <button
                   key={s.key}
                   ref={(el) => (tabRefs.current[i] = el)}
                   onClick={() => {
-                    setStatusFilter(s.key);
-                    refresh(false); // 🔥 força atualização ao clicar
+                    if (s.key !== statusFilter) {
+                      setStatusFilter(s.key);
+                      refresh(false); // 🔥 força reload imediato
+                    }
                   }}
                   className={`relative z-10 px-4 py-1 text-[11px] rounded-lg whitespace-nowrap transition-colors ${
                     statusFilter === s.key
@@ -163,7 +172,7 @@ export default function ExtratoHeader({
           </div>
         </div>
 
-        {/* SEARCH + BUTTON */}
+        {/* SEARCH */}
         <div className="relative flex items-center gap-2 w-full sm:max-w-[380px]">
           <div className="relative flex-1">
             <Search
@@ -180,6 +189,7 @@ export default function ExtratoHeader({
             />
           </div>
 
+          {/* BOTÃO SEARCH */}
           <button
             onClick={() => refresh(true)}
             className="px-4 py-2 text-xs font-medium rounded-lg bg-[#02fb5c]/20 border border-[#02fb5c]/40 text-[#02fb5c] hover:bg-[#02fb5c]/30 transition-all"
@@ -187,7 +197,6 @@ export default function ExtratoHeader({
             Search
           </button>
         </div>
-
       </div>
     </div>
   );
