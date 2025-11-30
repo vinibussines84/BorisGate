@@ -93,6 +93,7 @@ class Transaction extends Model
     {
         $raw = $this->attributes['status'] ?? null;
         if ($raw === null) return null;
+
         return TransactionStatus::fromLoose((string) $raw);
     }
 
@@ -176,7 +177,9 @@ class Transaction extends Model
         return Attribute::get(function () {
             $created = data_get($this->provider_payload, 'created_at');
             $expire  = $this->pix_expire;
+
             if (!$created || !$expire) return null;
+
             return Carbon::parse($created)->addSeconds($expire);
         });
     }
@@ -191,19 +194,22 @@ class Transaction extends Model
     // ================= MUTATORS =================
     public function setStatusAttribute($value): void
     {
-        // Melhor opção: aceita enum e string sem erro
+        // Aceita Enum diretamente
         if ($value instanceof TransactionStatus) {
             $this->attributes['status'] = $value->value;
             return;
         }
 
+        // Aceita strings e valores soltos
         $this->attributes['status'] = TransactionStatus::fromLoose((string) $value)->value;
     }
 
     public function setDirectionAttribute($value): void
     {
         $value = strtolower($value);
-        $this->attributes['direction'] = in_array($value, [self::DIR_IN, self::DIR_OUT])
+
+        $this->attributes['direction'] =
+            in_array($value, [self::DIR_IN, self::DIR_OUT])
             ? $value
             : self::DIR_IN;
     }
@@ -226,6 +232,42 @@ class Transaction extends Model
         $this->attributes['e2e_id'] = $v ? substr($v, 0, 100) : null;
     }
 
+    // ================= BOOLEAN HELPERS =================
+    public function isPaga(): bool
+    {
+        return $this->status === TransactionStatus::PAGA->value;
+    }
+
+    public function isPendente(): bool
+    {
+        return $this->status === TransactionStatus::PENDENTE->value;
+    }
+
+    public function isFalha(): bool
+    {
+        return $this->status === TransactionStatus::FALHA->value;
+    }
+
+    public function isErro(): bool
+    {
+        return $this->status === TransactionStatus::ERRO->value;
+    }
+
+    public function isMed(): bool
+    {
+        return $this->status === TransactionStatus::MED->value;
+    }
+
+    public function isUnderReview(): bool
+    {
+        return $this->status === TransactionStatus::UNDER_REVIEW->value;
+    }
+
+    public function isStatus(TransactionStatus $status): bool
+    {
+        return $this->status === $status->value;
+    }
+
     // ================= HELPERS =================
     public function markPaid(?\DateTimeInterface $when = null): void
     {
@@ -241,8 +283,9 @@ class Transaction extends Model
             $m->direction = $m->direction ?: self::DIR_IN;
             $m->currency  = $m->currency  ?: 'BRL';
             $m->method    = $m->method    ?: 'pix';
+
             $m->applied_available_amount = $m->applied_available_amount ?? 0;
-            $m->applied_blocked_amount   = $m->applied_blocked_amount   ?? 0;
+            $m->applied_blocked_amount   = $m->applied_blocked_amount ?? 0;
         });
     }
 }
