@@ -23,7 +23,7 @@ class WithdrawOutController extends Controller
     {
         try {
             /* ============================================================
-             * 🔐 Autenticação
+             * 🔐 Autenticação via Headers
              * ============================================================ */
             $authKey   = $request->header('X-Auth-Key');
             $secretKey = $request->header('X-Secret-Key');
@@ -41,7 +41,7 @@ class WithdrawOutController extends Controller
             }
 
             /* ============================================================
-             * 🔤 Normalizar key_type para lowercase
+             * 🔤 Normalizar key_type
              * ============================================================ */
             if ($request->has('key_type')) {
                 $request->merge([
@@ -50,7 +50,7 @@ class WithdrawOutController extends Controller
             }
 
             /* ============================================================
-             * 🧾 Validação
+             * 🧾 Validação dos campos
              * ============================================================ */
             $data = $request->validate([
                 'amount'   => ['required', 'numeric', 'min:0.01'],
@@ -68,7 +68,7 @@ class WithdrawOutController extends Controller
             ]);
 
             /* ============================================================
-             * 💸 Regras de valor mínimo
+             * 💸 Valor mínimo
              * ============================================================ */
             $gross = (float) $data['amount'];
 
@@ -77,7 +77,7 @@ class WithdrawOutController extends Controller
             }
 
             /* ============================================================
-             * 🔎 Validação PIX
+             * 🔎 Validar chave PIX
              * ============================================================ */
             if (!KeyValidator::validate($data['key'], strtoupper($data['key_type']))) {
                 return $this->error('Chave PIX inválida para o tipo informado.');
@@ -98,16 +98,17 @@ class WithdrawOutController extends Controller
             }
 
             /* ============================================================
-             * 🔢 External ID
+             * 🔢 External ID único
              * ============================================================ */
-            $externalId = $data['external_id'] ?? 'WD_' . now()->timestamp . '_' . random_int(1000, 9999);
+            $externalId = $data['external_id'] ??
+                'WD_' . now()->timestamp . '_' . random_int(1000, 9999);
 
             if (Withdraw::where('user_id', $user->id)->where('external_id', $externalId)->exists()) {
                 return $this->error('External ID duplicado.');
             }
 
             /* ============================================================
-             * 🧾 1️⃣ Criar registro local + debitar
+             * 🧾 1️⃣ Criar saque no banco + debitar saldo
              * ============================================================ */
             $internalRef = 'withdraw_' . now()->timestamp . '_' . random_int(1000, 9999);
 
@@ -154,6 +155,7 @@ class WithdrawOutController extends Controller
              * 2️⃣ Criar saque na PodPay
              * ============================================================ */
             $payload = [
+                "method"      => "fiat", // Obrigatório na PodPay
                 "amount"      => (int) round($gross * 100),
                 "netPayout"   => false,
                 "pixKey"      => $data['key'],
@@ -165,11 +167,11 @@ class WithdrawOutController extends Controller
 
             if (!$resp['success']) {
                 $this->refund($user, $gross, $withdraw, $resp);
-                return $this->error('Falha ao criar saque .');
+                return $this->error('Falha ao criar saque na PodPay.');
             }
 
             /* ============================================================
-             * 3️⃣ Capturar ID do provider
+             * 3️⃣ Capturar ID retornado pelo provider
              * ============================================================ */
             $providerReference = data_get($resp, 'data.id');
 
@@ -181,7 +183,7 @@ class WithdrawOutController extends Controller
             $status = strtolower(data_get($resp, 'data.status', 'pending'));
 
             /* ============================================================
-             * 4️⃣ Atualizar registro local
+             * 4️⃣ Atualizar saque no banco
              * ============================================================ */
             DB::transaction(function () use ($withdraw, $providerReference, $status, $resp) {
                 $withdraw->update([
@@ -194,7 +196,7 @@ class WithdrawOutController extends Controller
             });
 
             /* ============================================================
-             * 5️⃣ Webhook OUT
+             * 5️⃣ Webhook externo (cliente)
              * ============================================================ */
             if ($user->webhook_enabled && $user->webhook_out_url) {
                 Http::post($user->webhook_out_url, [
@@ -213,7 +215,7 @@ class WithdrawOutController extends Controller
             }
 
             /* ============================================================
-             * ✅ Sucesso
+             * 🟢 Sucesso
              * ============================================================ */
             return response()->json([
                 'success' => true,
@@ -232,7 +234,7 @@ class WithdrawOutController extends Controller
 
         } catch (\Throwable $e) {
 
-            Log::error('🚨 Erro ao criar saque', [
+            Log::error('🚨 Erro ao criar saque PodPay', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
             ]);
@@ -246,7 +248,7 @@ class WithdrawOutController extends Controller
     }
 
     /**
-     * 🔁 Reembolso + marca erro
+     * 🔁 Reembolso + marca como falho
      */
     private function refund(?User $user, float $gross, Withdraw $withdraw, $error = null)
     {
@@ -260,10 +262,12 @@ class WithdrawOutController extends Controller
 
         $withdraw->update([
             'status' => 'failed',
-            'meta'   => array_merge($withdraw->meta ?? [], ['error' => $error]),
+            'meta'   => array_merge($withdraw->meta ?? [], [
+                'error' => $error
+            ]),
         ]);
 
-        Log::warning('💸 Reembolso realizado após falha no saque.', [
+        Log::warning('💸 Reembolso após falha no saque PodPay', [
             'user_id'     => $user?->id,
             'withdraw_id' => $withdraw->id,
             'reason'      => $error,
@@ -271,7 +275,7 @@ class WithdrawOutController extends Controller
     }
 
     /**
-     * 🧩 Resposta padrão de erro
+     * 🧩 Resposta de erro padrão
      */
     private function error(string $message)
     {
