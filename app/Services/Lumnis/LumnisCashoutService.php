@@ -42,7 +42,16 @@ class LumnisCashoutService
                 throw new \Exception('Falha na autenticação com a Lumnis API.');
             }
 
-            return $response->json('access_token');
+            $token = $response->json('access_token');
+
+            if (!$token) {
+                Log::error('❌ Token de acesso ausente na resposta da Lumnis', [
+                    'body' => $response->json(),
+                ]);
+                throw new \Exception('Token ausente na autenticação com a Lumnis API.');
+            }
+
+            return $token;
         });
     }
 
@@ -77,8 +86,35 @@ class LumnisCashoutService
 
             $data = $response->json() ?? [];
 
+            // 🔧 Normaliza estrutura de resposta
+            $normalized = [
+                'id'          => data_get($data, 'id')
+                                ?? data_get($data, 'data.id')
+                                ?? data_get($data, 'data.0.id')
+                                ?? data_get($data, 'data.data.0.id')
+                                ?? null,
+                'identifier'  => data_get($data, 'identifier')
+                                ?? data_get($data, 'data.identifier')
+                                ?? data_get($data, 'data.0.identifier')
+                                ?? data_get($data, 'data.data.0.identifier')
+                                ?? null,
+                'status'      => data_get($data, 'status')
+                                ?? data_get($data, 'data.status')
+                                ?? data_get($data, 'data.0.status')
+                                ?? data_get($data, 'data.data.0.status')
+                                ?? null,
+            ];
+
+            // 🔍 Log da resposta bruta e normalizada
+            Log::info('📦 Lumnis createWithdrawal response', [
+                'payload'     => $payload,
+                'raw'         => $data,
+                'normalized'  => $normalized,
+                'status_code' => $response->status(),
+            ]);
+
+            // ❌ Falha HTTP
             if (!$response->successful()) {
-                // Normaliza mensagem (caso venha como array)
                 $msg = $data['message'] ?? $data['error'] ?? 'Erro Lumnis Cashout';
                 if (is_array($msg)) {
                     $msg = implode('; ', $msg);
@@ -98,17 +134,19 @@ class LumnisCashoutService
                 ];
             }
 
+            // ✅ Sucesso
             return [
                 'success' => true,
                 'status'  => $response->status(),
                 'message' => $data['message'] ?? 'WITHDRAW_REQUEST',
-                'data'    => $data,
+                'data'    => array_merge($data, $normalized),
             ];
 
         } catch (\Throwable $e) {
             Log::error('🚨 Exceção Lumnis Cashout', [
                 'message' => $e->getMessage(),
                 'payload' => $payload,
+                'trace'   => $e->getTraceAsString(),
             ]);
 
             return [

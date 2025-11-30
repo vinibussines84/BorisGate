@@ -14,107 +14,157 @@ class LumnisWithdrawController extends Controller
     public function __invoke(Request $request)
     {
         try {
-
             $payload = $request->json()->all();
 
-            // status: APPROVED / PAID
-            $status = strtolower(data_get($payload, 'status'));
+            Log::info('↪️ Webhook Lumnis recebido', ['payload' => $payload]);
 
-            // ID REAL DO SAQUE (sempre vem)
-            $reference = data_get($payload, 'id');
+            /* ============================================================
+             * 1️⃣ STATUS (PENDING | APPROVED | PAID)
+             * ============================================================ */
+            $status = strtolower(data_get($payload, 'status', 'unknown'));
 
-            if (!$reference) {
-                Log::warning('⚠️ Lumnis webhook sem ID', ['payload' => $payload]);
-                return response()->json(['ignored' => true, 'reason' => 'missing_id']);
-            }
-
-            // Aceita apenas APPROVED ou PAID
+            // Somente atualiza quando o status final for aprovado/pago
             if (!in_array($status, ['approved', 'paid'])) {
                 return response()->json([
                     'ignored' => true,
-                    'reason'  => 'status_not_approved',
-                    'status'  => $status
-                ]);
+                    'reason'  => 'status_not_final',
+                    'status'  => $status,
+                ], 200);
             }
 
-            // Tenta localizar o saque pelo provider_reference (id do lote)
-            $withdraw = Withdraw::where('provider_reference', $reference)->first();
+            /* ============================================================
+             * 2️⃣ PEGAR O IDENTIFICADOR UNIFICADO (robusto)
+             * ============================================================ */
+            $reference =
+                   data_get($payload, 'id')                             // ID principal (normal)
+                ?? data_get($payload, 'data.id')                        // fallback alternativo
+                ?? data_get($payload, 'receipt.0.identifier')           // se vier no array receipt
+                ?? data_get($payload, 'receipt.0.id')                   // backup raro
+                ?? null;
 
-            // Fallback opcional: alguns registros antigos usaram "identifier"
-            if (!$withdraw) {
-                $withdraw = Withdraw::where('provider_reference', data_get($payload,'receipt.0.identifier'))->first();
+            if (!$reference) {
+                Log::warning('⚠️ Webhook Lumnis: referência ausente', ['payload' => $payload]);
+                return response()->json(['ignored' => true, 'reason' => 'missing_reference'], 200);
             }
 
+            /* ============================================================
+             * 3️⃣ BUSCAR O SAQUE LOCAL
+             * ============================================================ */
+            $withdraw = Withdraw::where('provider_reference', $reference)
+                ->orWhere('external_id', $reference)
+                ->first();
+
             if (!$withdraw) {
-                Log::warning('❌ Lumnis webhook: saque não encontrado', [
+                Log::warning('❌ Webhook Lumnis: saque não encontrado', [
                     'reference' => $reference,
-                    'identifier' => data_get($payload,'receipt.0.identifier'),
                     'payload'   => $payload,
                 ]);
-                return response()->json(['error' => 'withdraw_not_found'], 404);
+                // Retorna 200 para evitar reenvio infinito pela Lumnis
+                return response()->json(['ignored' => true, 'reason' => 'withdraw_not_found'], 200);
             }
 
-            // Extrai o primeiro receipt
-            $receipt = data_get($payload, 'receipt.0', []);
+            /* ============================================================
+             * 4️⃣ DADOS DO WEBHOOK
+             * ============================================================ */
+            $receipt = (array) data_get($payload, 'receipt.0', []);
 
-            // Conversões de centavos → reais
-            $requested  = ((int) data_get($payload, 'requested', 0)) / 100;
-            $paidAmount = ((int) data_get($payload, 'paid', 0)) / 100;
-            $opAmount   = ((int) data_get($payload, 'operation.amount', 0)) / 100;
+            $requestedCents = (int) data_get($payload, 'requested', 0);
+            $paidCents      = (int) data_get($payload, 'paid', 0);
+            $opCents        = (int) data_get($payload, 'operation.amount', 0);
 
-            // Atualiza META
-            $meta = (array) $withdraw->meta;
+            $requestedReais = $requestedCents / 100;
+            $paidReais      = $paidCents / 100;
+            $opAmount       = $opCents / 100;
 
-            $meta['raw_provider_payload'] = $payload;
-            $meta['endtoend']             = data_get($receipt, 'endtoend');
-            $meta['identifier']           = data_get($receipt, 'identifier');
-            $meta['receiver_name']        = data_get($receipt, 'receiver_name');
-            $meta['receiver_bank']        = data_get($receipt, 'receiver_bank');
-            $meta['receiver_bank_ispb']   = data_get($receipt, 'receiver_bank_ispb');
-            $meta['refused_reason']       = data_get($receipt, 'refused_reason');
-            $meta['paid_at']              = now()->toIso8601String();
-            $meta['paid_status']          = $status;
+            $endtoend     = data_get($receipt, 'endtoend');
+            $identifier   = data_get($receipt, 'identifier');
+            $receiverName = data_get($receipt, 'receiver_name');
+            $receiverBank = data_get($receipt, 'receiver_bank');
+            $receiverIspb = data_get($receipt, 'receiver_bank_ispb');
+            $refReason    = data_get($receipt, 'refused_reason');
 
-            // Atualização idempotente
-            if ($withdraw->status !== 'paid') {
-
-                $withdraw->update([
-                    'status'       => 'paid',
-                    'processed_at' => now(),
-                    'amount'       => $requested, // valor em reais
-                    'meta'         => $meta,
+            /* ============================================================
+             * 5️⃣ IDEMPOTÊNCIA (não reprocessar já pagos)
+             * ============================================================ */
+            if (in_array($withdraw->status, ['paid', 'approved'])) {
+                Log::info('ℹ️ Webhook Lumnis ignorado (já estava pago)', [
+                    'withdraw_id' => $withdraw->id,
+                    'reference'   => $reference,
                 ]);
+                return response()->json(['ignored' => true, 'reason' => 'already_paid'], 200);
+            }
 
-                $user = User::find($withdraw->user_id);
+            /* ============================================================
+             * 6️⃣ ATUALIZAR O SAQUE
+             * ============================================================ */
+            $meta = (array) $withdraw->meta;
+            $meta = array_merge($meta, [
+                'raw_provider_payload' => $payload,
+                'requested_reais'      => $requestedReais,
+                'paid_reais'           => $paidReais,
+                'operation_reais'      => $opAmount,
+                'endtoend'             => $endtoend,
+                'identifier'           => $identifier,
+                'receiver_name'        => $receiverName,
+                'receiver_bank'        => $receiverBank,
+                'receiver_bank_ispb'   => $receiverIspb,
+                'refused_reason'       => $refReason,
+                'paid_at'              => now()->toIso8601String(),
+            ]);
 
-                if ($user && $user->webhook_enabled && $user->webhook_out_url) {
+            $withdraw->update([
+                'status'       => 'paid',
+                'processed_at' => now(),
+                'amount'       => $requestedReais ?: $withdraw->amount,
+                'meta'         => $meta,
+            ]);
 
-                    // Remove o postback antes de repassar ao cliente
+            Log::info('✅ Saque atualizado via webhook Lumnis', [
+                'withdraw_id' => $withdraw->id,
+                'reference'   => $reference,
+                'status'      => $status,
+            ]);
+
+            /* ============================================================
+             * 7️⃣ ENVIAR WEBHOOK OUT PARA O CLIENTE
+             * ============================================================ */
+            $user = User::find($withdraw->user_id);
+
+            if ($user?->webhook_enabled && $user?->webhook_out_url) {
+                // limpar postback antes de enviar
+                if (isset($payload['operation']['postback'])) {
                     unset($payload['operation']['postback']);
+                }
 
-                    // Payload com valores convertidos
-                    $payloadToClient = $payload;
-                    $payloadToClient['requested'] = $requested;
-                    $payloadToClient['paid']      = $paidAmount;
-                    $payloadToClient['operation']['amount'] = $opAmount;
-                    $payloadToClient['external_id'] = $withdraw->external_id;
+                $payloadToClient = $payload;
+                $payloadToClient['requested'] = $requestedReais;
+                $payloadToClient['paid']      = $paidReais;
+                $payloadToClient['operation']['amount'] = $opAmount;
+                $payloadToClient['external_id'] = $withdraw->external_id;
 
-                    try {
-                        Http::timeout(10)->post($user->webhook_out_url, [
-                            'event' => 'withdraw.updated',
-                            'data'  => $payloadToClient,
-                        ]);
+                try {
+                    Http::timeout(10)->post($user->webhook_out_url, [
+                        'event' => 'withdraw.updated',
+                        'data'  => $payloadToClient,
+                    ]);
 
-                    } catch (\Throwable $ex) {
-                        Log::warning('⚠️ Falha ao enviar webhook withdraw.updated', [
-                            'user_id' => $user->id,
-                            'url'     => $user->webhook_out_url,
-                            'error'   => $ex->getMessage(),
-                        ]);
-                    }
+                    Log::info('📤 Webhook OUT enviado ao cliente com sucesso', [
+                        'withdraw_id'  => $withdraw->id,
+                        'user_id'      => $user->id,
+                        'url'          => $user->webhook_out_url,
+                    ]);
+                } catch (\Throwable $e) {
+                    Log::warning('⚠️ Falha ao enviar webhook OUT para cliente', [
+                        'user_id' => $user->id,
+                        'url'     => $user->webhook_out_url,
+                        'error'   => $e->getMessage(),
+                    ]);
                 }
             }
 
+            /* ============================================================
+             * 8️⃣ RESPOSTA FINAL PARA LUMNIS
+             * ============================================================ */
             return response()->json([
                 'received'     => true,
                 'status'       => $status,
@@ -122,12 +172,12 @@ class LumnisWithdrawController extends Controller
                 'external_id'  => $withdraw->external_id,
                 'withdraw_id'  => $withdraw->id,
                 'user_id'      => $withdraw->user_id,
-            ]);
+            ], 200);
 
         } catch (\Throwable $e) {
-
-            Log::error('❌ Erro no webhook Lumnis Withdraw', [
+            Log::error('❌ Erro no processamento do Webhook Lumnis', [
                 'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return response()->json(['error' => 'internal_error'], 500);
