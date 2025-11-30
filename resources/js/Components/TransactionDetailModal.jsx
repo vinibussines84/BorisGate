@@ -223,8 +223,6 @@ export default function TransactionDetailModal({
                 value={isCredit ? "Crédito" : "Débito"}
                 icon={isCredit ? ArrowUpRight : ArrowDownRight}
               />
-              <Field label="Método" value="Api via Pix" icon={CreditCard} />
-              <Field label="Provedor" value={tx.provider} icon={Zap} />
             </div>
 
             {/* REFERÊNCIAS */}
@@ -232,6 +230,9 @@ export default function TransactionDetailModal({
               <h3 className="text-sm font-semibold text-gray-300 mb-2">
                 Referências
               </h3>
+              {tx.external_id && (
+                <Field label="External ID" value={tx.external_id} icon={Hash} />
+              )}
               {tx.e2eToShow && (
                 <Field label="E2E" value={tx.e2eToShow} icon={Hash} />
               )}

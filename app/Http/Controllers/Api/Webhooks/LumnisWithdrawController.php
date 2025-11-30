@@ -70,30 +70,35 @@ class LumnisWithdrawController extends Controller
             }
 
             /* ============================================================
-             * 5️⃣ NORMALIZAÇÃO DE VALORES
+             * 5️⃣ NORMALIZAÇÃO DE VALORES + META
              * ============================================================ */
             $receipt = (array) data_get($payload, 'receipt.0', []);
+
             $requestedReais = ((int) data_get($payload, 'requested', 0)) / 100;
             $paidReais      = ((int) data_get($payload, 'paid', 0)) / 100;
 
             $meta = (array) $withdraw->meta;
             $meta['raw_provider_payload'] = $payload;
-            $meta['paid_at'] = now()->toIso8601String();
+            $meta['paid_at']        = now()->toIso8601String();
             $meta['refused_reason'] = data_get($receipt, 'refused_reason');
+            $meta['endtoend']       = data_get($receipt, 'endtoend');
+            $meta['receiver_name']  = data_get($receipt, 'receiver_name');
+            $meta['receiver_bank']  = data_get($receipt, 'receiver_bank');
+            $meta['receiver_ispb']  = data_get($receipt, 'receiver_bank_ispb');
 
             /* ============================================================
              * 6️⃣ CASO DE ERRO → ESTORNAR E MARCAR COMO FALHO
              * ============================================================ */
             if ($isError) {
-                DB::transaction(function () use ($user, $withdraw, $requestedReais, $meta) {
+                DB::transaction(function () use ($user, $withdraw, $meta) {
                     // Reembolsar o saldo
                     $u = User::where('id', $user->id)->lockForUpdate()->first();
-                    $u->amount_available += $withdraw->gross_amount; // retorna valor bruto
+                    $u->amount_available += $withdraw->gross_amount;
                     $u->save();
 
                     $withdraw->update([
                         'status' => 'failed',
-                        'meta'   => array_merge($meta, ['error_type' => 'lumnis_error']),
+                        'meta'   => $meta + ['error_type' => 'lumnis_error'],
                     ]);
                 });
 
@@ -121,17 +126,13 @@ class LumnisWithdrawController extends Controller
                     'status'       => 'paid',
                     'processed_at' => now(),
                     'amount'       => $requestedReais ?: $withdraw->amount,
-                    'meta'         => array_merge($meta, [
-                        'endtoend'        => data_get($receipt, 'endtoend'),
-                        'receiver_name'   => data_get($receipt, 'receiver_name'),
-                        'receiver_bank'   => data_get($receipt, 'receiver_bank'),
-                        'receiver_ispb'   => data_get($receipt, 'receiver_bank_ispb'),
-                    ]),
+                    'meta'         => $meta + ['success_at' => now()->toIso8601String()],
                 ]);
 
                 Log::info('✅ Saque marcado como pago via Lumnis', [
                     'withdraw_id' => $withdraw->id,
                     'reference'   => $reference,
+                    'endtoend'    => data_get($receipt, 'endtoend'),
                 ]);
 
                 $this->notifyClient($user, $withdraw, $payload, 'withdraw.paid');
@@ -180,7 +181,6 @@ class LumnisWithdrawController extends Controller
         }
 
         try {
-            // Remover postback para evitar loops
             if (isset($payload['operation']['postback'])) {
                 unset($payload['operation']['postback']);
             }

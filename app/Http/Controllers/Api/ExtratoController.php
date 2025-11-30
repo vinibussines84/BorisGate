@@ -75,7 +75,7 @@ class ExtratoController extends Controller
         }
 
         /* ---------------------------------------------------------
-         * SAQUE QUERY (agora com E2E extraído do campo meta)
+         * SAQUE QUERY (com E2E em meta)
          * --------------------------------------------------------- */
         $wdQ = Withdraw::query()
             ->selectRaw("
@@ -108,13 +108,11 @@ class ExtratoController extends Controller
         }
 
         /* ---------------------------------------------------------
-         * UNION REAL COM SUBQUERY (count + paginação corretos)
+         * UNION COM PAGINAÇÃO
          * --------------------------------------------------------- */
         $unionBase = $pixQ->unionAll($wdQ);
 
-        $total = DB::query()
-            ->fromSub($unionBase, 't')
-            ->count();
+        $total = DB::query()->fromSub($unionBase, 't')->count();
 
         $rows = DB::query()
             ->fromSub($unionBase, 't')
@@ -141,7 +139,7 @@ class ExtratoController extends Controller
                 'status'       => $statusEnum->value,
                 'status_label' => $statusEnum->label(),
                 'txid'         => $t->txid,
-                'e2e'          => $t->e2e_id, // usado pelo front-end
+                'e2e'          => $t->e2e_id,
                 'description'  => $t->description,
                 'createdAt'    => optional($t->created_at)->toIso8601String(),
                 'paidAt'       => optional($t->paid_at)->toIso8601String(),
