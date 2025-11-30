@@ -188,7 +188,7 @@ class PodPayWithdrawWebhookController extends Controller
                 'endtoend'         => $e2e,
                 'identifier'       => $reference,
                 'receiver_name'    => $withdraw->meta['receiver_name'] ?? $user->name,
-                'receiver_bank'    => $withdraw->meta['receiver_bank'] ?? 'PODPAY',
+                'receiver_bank'    => $withdraw->meta['receiver_bank'] ?? 'EquitPay',
                 'receiver_bank_ispb'=> $withdraw->meta['receiver_ispb'] ?? '90400888',
                 'refused_reason'   => $statusFormatted === 'APPROVED'
                     ? 'Withdraw Successfull'
