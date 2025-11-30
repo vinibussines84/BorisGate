@@ -31,7 +31,7 @@ class TransactionPixController extends Controller
             ], 401);
         }
 
-        // 🔑 Resolve user by keys
+        // 🔑 Resolve user
         $user = $this->resolveUser($auth, $secret);
 
         if (!$user) {
@@ -41,7 +41,7 @@ class TransactionPixController extends Controller
             ], 401);
         }
 
-        // 🧩 Basic validation
+        // ✔ Validation
         $data = $request->validate([
             'amount'       => ['required', 'numeric', 'min:0.01'],
             'name'         => ['sometimes', 'string', 'max:100'],
@@ -55,11 +55,11 @@ class TransactionPixController extends Controller
         $amountCents  = (int) round($amountReais * 100);
         $externalId   = $data['external_id'];
 
-        // 🚫 LIMIT PIX TO R$1000
-        if ($amountReais > 1000) {
+        // 🚫 LIMIT PIX TO R$2000
+        if ($amountReais > 2000) {
             return response()->json([
                 'success' => false,
-                'error'   => 'The maximum allowed PIX amount is R$1000. Please contact support.'
+                'error'   => 'The maximum allowed PIX amount is R$2000. Please contact support.'
             ], 422);
         }
 
@@ -101,7 +101,7 @@ class TransactionPixController extends Controller
         $email = $data['email'] ?? $user->email ?? 'no-email@placeholder.com';
 
         /**
-         * 1️⃣ Criar a transação local (rápido)
+         * 1️⃣ Criar transação local
          */
         $tx = Transaction::create([
             'tenant_id'          => $user->tenant_id,
@@ -125,7 +125,7 @@ class TransactionPixController extends Controller
         ]);
 
         /**
-         * 2️⃣ Chamada Lumnis (lento)
+         * 2️⃣ Chamada Lumnis
          */
         try {
             $payload = [
@@ -171,7 +171,6 @@ class TransactionPixController extends Controller
                 'error' => $e->getMessage(),
             ]);
 
-            // Marca como erro
             $tx->update([
                 'status' => TransactionStatus::FALHADO,
             ]);
@@ -183,7 +182,7 @@ class TransactionPixController extends Controller
         }
 
         /**
-         * 3️⃣ Atualizar transação local
+         * 3️⃣ Atualizar transação
          */
         $tx->update([
             'txid'                    => $transactionId,
@@ -199,7 +198,7 @@ class TransactionPixController extends Controller
         ]);
 
         /**
-         * 4️⃣ WEBHOOK ASSÍNCRONO
+         * 4️⃣ WEBHOOK AO CLIENTE (fila)
          */
         if ($user->webhook_enabled && $user->webhook_in_url) {
 
@@ -235,7 +234,7 @@ class TransactionPixController extends Controller
         }
 
         /**
-         * 5️⃣ Resposta rápida
+         * 5️⃣ RESPOSTA
          */
         return response()->json([
             'success'        => true,
