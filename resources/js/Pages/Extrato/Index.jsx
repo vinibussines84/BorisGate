@@ -46,14 +46,18 @@ export default function Extrato() {
   const debounceRef = useRef(null);
 
   /* ==========================================================
-     REFRESH HANDLER (para forçar busca)
+     REFRESH HANDLER
   ========================================================== */
   const refreshHandler = (isSearch = false) => {
+    // 🔹 se for busca → volta pra página 1 e limpa cache
     if (isSearch) {
       setPage(1);
-      sessionStorage.removeItem(CACHE_KEY);
-      localStorage.removeItem(TABLE_CACHE_KEY);
     }
+
+    // 🔹 sempre limpar caches antes de refazer a requisição
+    sessionStorage.removeItem(CACHE_KEY);
+    localStorage.removeItem(TABLE_CACHE_KEY);
+
     fetchExtrato(false);
   };
 
@@ -87,26 +91,16 @@ export default function Extrato() {
       }
 
       try {
-        // 🔧 Corrigido: só envia o status se for diferente de "all"
-        const baseQuery = new URLSearchParams({
+        const query = new URLSearchParams({
           page,
           perPage,
+          status: statusFilter !== "all" ? statusFilter : "",
           search: searchTerm || "",
         }).toString();
 
-        const statusParam =
-          statusFilter && statusFilter.toUpperCase() !== "ALL"
-            ? `&status=${encodeURIComponent(statusFilter)}`
-            : "";
-
-        const finalQuery = `${baseQuery}${statusParam}`;
-
-        // 🔍 Debug opcional
-        // console.log("🔎 Fetching extrato with:", { statusFilter, finalQuery });
-
         const [resBalance, resTx] = await Promise.all([
           axios.get("/api/balances"),
-          axios.get(`/api/list/pix?${finalQuery}`),
+          axios.get(`/api/list/pix?${query}`),
         ]);
 
         /* BALANCE */
@@ -125,7 +119,7 @@ export default function Extrato() {
 
         for (const t of list) {
           const st = (t.status || "").toLowerCase();
-          if (["paga", "paid", "approved", "completed"].includes(st)) {
+          if (["paga", "paid", "approved"].includes(st)) {
             if (t.credit) entradasTotal += Number(t.amount);
             else saidasTotal += Number(t.amount);
           }
@@ -156,15 +150,21 @@ export default function Extrato() {
   );
 
   /* ==========================================================
-     DEBOUNCE → dispara o fetch após 400ms (busca e filtro)
+     FETCH AUTOMÁTICO (debounce para busca)
   ========================================================== */
   useEffect(() => {
-    clearTimeout(debounceRef.current);
+    // 🔹 se for mudança de status → força reload imediato
+    if (debounceRef.current) clearTimeout(debounceRef.current);
 
-    debounceRef.current = setTimeout(() => {
-      localStorage.removeItem(TABLE_CACHE_KEY);
+    if (searchTerm.trim() === "") {
+      // ao mudar statusFilter, recarrega imediatamente
       fetchExtrato(false);
-    }, 400);
+    } else {
+      // busca → delay de 400ms
+      debounceRef.current = setTimeout(() => {
+        fetchExtrato(false);
+      }, 400);
+    }
 
     return () => clearTimeout(debounceRef.current);
   }, [searchTerm, statusFilter, page]);
@@ -189,6 +189,7 @@ export default function Extrato() {
 
       <div className="min-h-screen bg-[#0B0B0B] py-10 px-4 sm:px-6 lg:px-8 text-gray-100">
         <div className="max-w-6xl mx-auto space-y-8">
+          
           {/* HEADER */}
           <Suspense fallback={<SkeletonBlock height={160} />}>
             <ExtratoHeader
@@ -196,10 +197,13 @@ export default function Extrato() {
               entradas={entradas}
               saidas={saidas}
               statusFilter={statusFilter}
-              setStatusFilter={setStatusFilter}
+              setStatusFilter={(val) => {
+                setStatusFilter(val);
+                refreshHandler(false); // 🔥 força atualização ao trocar filtro
+              }}
               searchTerm={searchTerm}
               setSearchTerm={setSearchTerm}
-              refresh={refreshHandler}
+              refresh={(isSearch) => refreshHandler(isSearch)}
             />
           </Suspense>
 
@@ -218,7 +222,7 @@ export default function Extrato() {
                 perPage={perPage}
                 loading={loadingTable}
                 searchTerm={searchTerm}
-                refresh={fetchExtrato}
+                refresh={(p) => fetchExtrato(p)}
               />
             </Suspense>
           </div>

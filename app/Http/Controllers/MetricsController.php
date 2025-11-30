@@ -73,7 +73,7 @@ class MetricsController extends Controller
             ->whereBetween('created_at', [$startUtc, $endUtc])
             ->count();
 
-        // 🔹 Período
+        // 🔹 Período formatado
         $periodo = sprintf(
             '%s – %s',
             $startTz->locale('pt_BR')->translatedFormat('d \\d\\e F'),
@@ -155,7 +155,7 @@ class MetricsController extends Controller
                 'credit'      => true,
             ]);
 
-        // 🔹 Saques pagos
+        // 🔹 SAQUES pagos
         $saques = Withdraw::query()
             ->where('user_id', $u->id)
             ->where('status', 'paid')
@@ -166,6 +166,8 @@ class MetricsController extends Controller
             ->map(fn ($w) => [
                 'kind'        => 'SAQUE',
                 'id'          => (int) $w->id,
+                // ✅ Inclui o E2E salvo no meta JSON
+                'e2e'         => data_get($w->meta, 'e2e') ?? data_get($w->meta, 'endtoend'),
                 'amount'      => (float) ($w->gross_amount ?? $w->amount),
                 'fee'         => (float) ($w->fee_amount ?? 0),
                 'net'         => (float) ($w->amount ?? 0),
