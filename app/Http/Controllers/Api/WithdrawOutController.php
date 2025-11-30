@@ -147,7 +147,7 @@ class WithdrawOutController extends Controller
             $payload = [
                 "method"      => "fiat",
                 "amount"      => (int) round($gross * 100),
-                "netPayout"   => false,
+                "netPayout"   => true,
                 "pixKey"      => $data['key'],
                 "pixKeyType"  => strtolower($data['key_type']),
                 "postbackUrl" => route('webhooks.podpay.withdraw'),
