@@ -50,7 +50,7 @@ class PodPayTransactionController extends Controller
 
         $amountReais = (float) $data['amount'];
 
-        // 🚫 LIMITE R$3.000,00
+        // 🚫 LIMIT R$3000,00
         if ($amountReais > 3000) {
             return response()->json([
                 'success' => false,
@@ -61,11 +61,11 @@ class PodPayTransactionController extends Controller
         $amountCents = (int) round($amountReais * 100);
         $externalId  = $data['external_id'];
 
-        // ❌ DUPLICATE CHECK
+        // ❌ Duplicate check
         if (Transaction::where('user_id', $user->id)
             ->where('external_reference', $externalId)
-            ->exists()
-        ) {
+            ->exists()) {
+
             return response()->json([
                 'success' => false,
                 'error'   => "The external_id '{$externalId}' already exists."
@@ -78,7 +78,7 @@ class PodPayTransactionController extends Controller
         $name  = $data['name']  ?? $user->name  ?? 'Client';
         $email = $data['email'] ?? $user->email ?? 'no-email@placeholder.com';
 
-        // 💾 Create transaction local
+        // 1️⃣ Create local transaction
         $tx = Transaction::create([
             'tenant_id'          => $user->tenant_id,
             'user_id'            => $user->id,
@@ -95,7 +95,7 @@ class PodPayTransactionController extends Controller
             'user_agent'         => $request->userAgent(),
         ]);
 
-        // 🌐 PAYLOAD PODPAY
+        // 2️⃣ PodPay Payload
         $payload = [
             "amount"        => $amountCents,
             "currency"      => "BRL",
@@ -131,7 +131,7 @@ class PodPayTransactionController extends Controller
             return response()->json([
                 'success' => false,
                 'error'   => 'PodPay provider error.',
-                'details' => $response["body"],
+                'details' => $response["body"]
             ], 500);
         }
 
@@ -139,16 +139,24 @@ class PodPayTransactionController extends Controller
         $transactionId = data_get($body, 'id');
         $qrCodeText    = data_get($body, 'pix.qrcode');
 
-        // Update local
+        // 3️⃣ Update local transaction
         $tx->update([
             'txid'                    => $transactionId,
             'provider_transaction_id' => $transactionId,
             'provider_payload'        => $body,
         ]);
 
-        /**
-         * 4️⃣ WEBHOOK — IGUAL AO LUMNIS (SINCRONO)
-         */
+        // 4️⃣ Normalize provider_payload to MATCH LUMNIS
+        $normalizedProviderPayload = [
+            'name'         => data_get($body, 'customer.name'),
+            'email'        => data_get($body, 'customer.email'),
+            'document'     => data_get($body, 'customer.document.number'),
+            'phone'        => data_get($body, 'customer.phone'),
+            'qr_code_text' => $qrCodeText,
+            'provider_raw' => $body,
+        ];
+
+        // 5️⃣ Webhook (sync) — IDENTICAL TO LUMNIS
         if ($user->webhook_enabled && $user->webhook_in_url) {
 
             try {
@@ -163,14 +171,14 @@ class PodPayTransactionController extends Controller
                     'currency'        => $tx->currency,
                     'status'          => $tx->status,
                     'txid'            => $tx->txid,
-                    'e2e'             => $tx->e2e_id,
+                    'e2e'             => null,
                     'direction'       => $tx->direction,
                     'method'          => $tx->method,
                     'created_at'      => $tx->created_at,
                     'updated_at'      => $tx->updated_at,
                     'paid_at'         => $tx->paid_at,
                     'canceled_at'     => $tx->canceled_at,
-                    'provider_payload'=> $tx->provider_payload,
+                    'provider_payload'=> $normalizedProviderPayload,
                 ]);
             } catch (\Throwable $e) {
                 Log::warning("⚠️ Failed PodPay webhook (sync)", [
@@ -180,9 +188,7 @@ class PodPayTransactionController extends Controller
             }
         }
 
-        /**
-         * 5️⃣ RESPOSTA FINAL — PADRÃO LUMNIS
-         */
+        // 6️⃣ Response — identical pattern
         return response()->json([
             'success'        => true,
             'transaction_id' => $tx->id,
