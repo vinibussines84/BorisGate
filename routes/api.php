@@ -48,7 +48,7 @@ Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
 
 
 // ───────────────────────────────────────────────
-// PIX
+// PIX — CASH IN
 // ───────────────────────────────────────────────
 
 // Criar transação Pix (CashIn)
@@ -56,19 +56,22 @@ Route::post('/transaction/pix', [TransactionPixController::class, 'store'])
     ->middleware('throttle:30,1')
     ->name('transaction.pix.store');
 
-// Consultar status da transação por TXID
-Route::get('/v1/transaction/status/{txid}', [TransactionPixController::class, 'status'])
+
+// 🚀 Consultar por TXID (corrigido — agora chama showByTxid)
+Route::get('/v1/transaction/status/{txid}', [TransactionPixController::class, 'showByTxid'])
     ->where('txid', '[A-Za-z0-9]+')
     ->middleware('throttle:60,1')
-    ->name('transaction.pix.status');
+    ->name('transaction.pix.status.txid');
 
-// ✅ Consultar status da transação por EXTERNAL_ID
+
+// Consultar status por EXTERNAL_ID
 Route::get('/v1/transaction/status/external/{externalId}', [TransactionPixController::class, 'statusByExternal'])
     ->where('externalId', '[A-Za-z0-9\-_]+')
     ->middleware('throttle:60,1')
     ->name('transaction.pix.status.external');
 
-// (Opcional antigo — buscar TXID direto)
+
+// (rota antiga opcional — mesma função, outro caminho)
 Route::get('/transaction/pix/{txid}', [TransactionPixController::class, 'showByTxid'])
     ->where('txid', '[A-Za-z0-9]+')
     ->middleware('throttle:60,1')
@@ -76,7 +79,7 @@ Route::get('/transaction/pix/{txid}', [TransactionPixController::class, 'showByT
 
 
 // ───────────────────────────────────────────────
-// WITHDRAW (CashOut)
+// WITHDRAW — CASH OUT
 // ───────────────────────────────────────────────
 Route::post('/withdraw/out', [WithdrawOutController::class, 'store'])
     ->middleware('throttle:10,1')
@@ -92,7 +95,7 @@ Route::post('/trustpay/out', [TrustPayOutController::class, 'store'])
 
 
 // ───────────────────────────────────────────────
-// BALANCE (Consulta de Saldo)
+// BALANCE
 // ───────────────────────────────────────────────
 Route::get('/v1/balance/available', [BalanceController::class, 'available'])
     ->middleware('throttle:60,1')
@@ -104,94 +107,69 @@ Route::get('/v1/balance/available', [BalanceController::class, 'available'])
 // ───────────────────────────────────────────────────────────────────────────────
 Route::prefix('webhooks')->name('webhooks.')->group(function () {
 
-    // ────────────────────────────
     // VELTRAX
-    // ────────────────────────────
-    Route::post('/veltrax', VeltraxWebhookController::class)
-        ->name('veltrax');
+    Route::post('/veltrax', VeltraxWebhookController::class)->name('veltrax');
 
-    // ────────────────────────────
-    // GATEWAY GENÉRICO
-    // ────────────────────────────
+    // Gateway Genérico
     Route::post('/gateway', [GatewayWebhookController::class, 'handle'])
         ->middleware('throttle:120,1')
         ->name('gateway');
 
-    // ────────────────────────────
-    // TRUSTPAY PAYIN
-    // ────────────────────────────
+    // TrustPay Payin
     Route::post('/trustpay/paid', [TrustPayWebhookController::class, 'handle'])
         ->middleware('throttle:120,1')
         ->name('trustpay.paid');
 
-    // ────────────────────────────
-    // TRUSTPAY PAYOUT
-    // ────────────────────────────
+    // TrustPay Payout
     Route::post('/trustout/payout', [TrustPayOutController::class, 'webhookPayout'])
         ->middleware('throttle:120,1')
         ->name('trustout.payout');
 
-    // Alias (mesmo destino)
     Route::post('/trustpay/payout', [TrustPayOutController::class, 'webhookPayout'])
         ->middleware('throttle:120,1')
         ->name('trustpay.payout');
 
-    // ────────────────────────────
-    // CASHTIME PAYIN
-    // ────────────────────────────
+    // Cashtime Payin
     Route::post('/cashtime', [CashtimeWebhookController::class, 'handle'])
         ->middleware('throttle:120,1')
         ->name('cashtime');
 
-    // ────────────────────────────
-    // RAPDYN PAYIN
-    // ────────────────────────────
+    // Rapdyn Payin
     Route::post('/rapdyn', [RapdynWebhookController::class, 'handle'])
         ->middleware('throttle:120,1')
         ->name('rapdyn');
 
-    // ────────────────────────────
-    // CASS PAGAMENTOS PAYIN
-    // ────────────────────────────
+    // CASS Pagamentos Payin
     Route::post('/cass', [CassWebhookController::class, 'handle'])
         ->middleware('throttle:120,1')
         ->name('cass');
 
-    // ────────────────────────────
-    // PLUGGOU PAYIN
-    // ────────────────────────────
+    // Pluggou Payin
     Route::post('/pluggou', PluggouWebhookController::class)
         ->middleware('throttle:120,1')
         ->name('pluggou');
 
-    // ────────────────────────────
-    // PLUGGOU PAYOUT
-    // ────────────────────────────
+    // Pluggou Payout
     Route::post('/pluggou/payout', PluggouPayoutWebhookController::class)
         ->middleware('throttle:120,1')
         ->name('pluggou.payout');
 
-    // ────────────────────────────
-    // REFLOWPAY PAYIN
-    // ────────────────────────────
+    // ReflowPay Payin
     Route::post('/reflowpay', ReflowPayWebhookController::class)
         ->middleware('throttle:120,1')
         ->name('reflowpay');
 
-    // ────────────────────────────
-    // REFLOWPAY PAYOUT
-    // ────────────────────────────
+    // ReflowPay Payout
     Route::post('/reflowpay/cashout', ReflowPayCashoutWebhookController::class)
         ->middleware('throttle:120,1')
         ->name('reflowpay.cashout');
 
-    // ────────────────────────────
-    // LUMNIS WEBHOOKS
-    // ────────────────────────────
+    // Lumnis Payin
     Route::post('/lumnis', LumnisWebhookController::class)
         ->middleware('throttle:120,1')
         ->name('lumnis');
 
+    // Lumnis Payout
     Route::post('/lumnis/withdraw', LumnisWithdrawController::class)
         ->middleware('throttle:120,1')
         ->name('lumnis.withdraw');

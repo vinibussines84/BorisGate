@@ -191,6 +191,12 @@ class Transaction extends Model
     // ================= MUTATORS =================
     public function setStatusAttribute($value): void
     {
+        // Melhor opção: aceita enum e string sem erro
+        if ($value instanceof TransactionStatus) {
+            $this->attributes['status'] = $value->value;
+            return;
+        }
+
         $this->attributes['status'] = TransactionStatus::fromLoose((string) $value)->value;
     }
 
