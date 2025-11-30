@@ -105,13 +105,11 @@ export default function ApiDocs({
   const [openCreate, setOpenCreate] = useState(false);
   const [openWithdraw, setOpenWithdraw] = useState(false);
   const [openBalance, setOpenBalance] = useState(false);
-  const [openStatus, setOpenStatus] = useState(false);
   const [openStatusExternal, setOpenStatusExternal] = useState(false);
 
   const createEndpoint = `${base_url}/transaction/pix`;
   const withdrawEndpoint = `${base_url}/withdraw/out`;
   const balanceEndpoint = `${base_url}/v1/balance/available`;
-  const statusEndpoint = `${base_url}/v1/transaction/status/{txid}`;
   const statusExternalEndpoint = `${base_url}/v1/transaction/status/external/{external_id}`;
 
   const exampleCreate = `POST ${createEndpoint}
@@ -183,25 +181,6 @@ Response:
     "amount_available": 15320.55,
     "amount_blocked": 0.00,
     "updated_at": "2025-11-29T13:45:00Z"
-  }
-}`;
-
-  const exampleStatus = `GET ${statusEndpoint}
-X-Auth-Key: <your_auth_key>
-X-Secret-Key: <your_secret_key>
-
-Response:
-{
-  "success": true,
-  "data": {
-    "id": 12,
-    "txid": "1994816896526934639",
-    "external_id": "PEDIDO-12345",
-    "amount": 49.9,
-    "fee": 0,
-    "status": "pendente",
-    "created_at": "2025-11-29T13:50:00Z",
-    "updated_at": "2025-11-29T13:51:00Z"
   }
 }`;
 
@@ -311,34 +290,6 @@ Response:
           </Collapsible>
         </Section>
 
-        {/* Status by TXID */}
-        <Section>
-          <button
-            onClick={() => setOpenStatus((v) => !v)}
-            className="flex items-center justify-between w-full px-6 py-4 hover:bg-white/[0.05] transition"
-          >
-            <div className="flex items-center gap-3 text-white">
-              <Badge>GET</Badge>
-              <span className="font-medium">Transaction Status (by TXID)</span>
-              <span className="hidden sm:inline text-xs text-zinc-500">
-                /v1/transaction/status/{"{txid}"}
-              </span>
-            </div>
-            <ChevronDown
-              size={18}
-              className={cls(
-                "text-zinc-400 transition-transform",
-                openStatus ? "rotate-180" : "rotate-0"
-              )}
-            />
-          </button>
-          <Collapsible open={openStatus}>
-            <div className="p-6 space-y-6">
-              <CodeBlock title="Example" code={exampleStatus} />
-            </div>
-          </Collapsible>
-        </Section>
-
         {/* Status by External ID */}
         <Section>
           <button
@@ -347,7 +298,9 @@ Response:
           >
             <div className="flex items-center gap-3 text-white">
               <Badge>GET</Badge>
-              <span className="font-medium">Transaction Status (by External ID)</span>
+              <span className="font-medium">
+                Transaction Status (by External ID)
+              </span>
               <span className="hidden sm:inline text-xs text-zinc-500">
                 /v1/transaction/status/external/{"{external_id}"}
               </span>
@@ -430,14 +383,42 @@ Response:
               <Webhook size={18} />
               <h2 className="text-lg font-medium">Webhooks</h2>
             </div>
-            <p className="text-sm text-zinc-400 leading-relaxed">
-              Webhooks are triggered asynchronously when transactions or withdraws change status.  
-              Your endpoint must respond with{" "}
+            <p className="text-sm text-zinc-400 leading-relaxed mb-4">
+              Webhooks are triggered asynchronously when transactions or withdraws
+              change status. Your endpoint must respond with{" "}
               <code className="bg-black/40 border border-white/10 rounded px-2 py-0.5">
                 200 OK
               </code>{" "}
               to acknowledge receipt.
             </p>
+
+            <div className="mt-3">
+              <h3 className="text-sm font-medium text-white mb-2">
+                Withdraw Webhook Status Types
+              </h3>
+              <ul className="text-sm text-zinc-400 space-y-1 border-l border-white/10 pl-4">
+                <li>
+                  <span className="text-zinc-300 font-medium">PENDING</span> —
+                  Withdraw request created and pending processing.
+                </li>
+                <li>
+                  <span className="text-zinc-300 font-medium">APPROVED</span> —
+                  Withdraw approved and processing.
+                </li>
+                <li>
+                  <span className="text-zinc-300 font-medium">PAID</span> —
+                  Withdraw successfully completed.
+                </li>
+                <li>
+                  <span className="text-zinc-300 font-medium">ERROR</span> —
+                  Processing failed; amount refunded to wallet.
+                </li>
+                <li>
+                  <span className="text-zinc-300 font-medium">FAILED</span> —
+                  Withdraw failed permanently; refunded to wallet.
+                </li>
+              </ul>
+            </div>
           </div>
         </Section>
       </div>
