@@ -10,15 +10,15 @@ use Illuminate\Support\Facades\Log;
 use App\Models\Transaction;
 use App\Models\Withdraw;
 use App\Enums\TransactionStatus;
-use App\Services\Lumnis\LumnisService;
+use App\Services\PodPay\PodPayService;
 use App\Models\User;
 
 class TransactionPixController extends Controller
 {
     /**
-     * 🧾 Create a new PIX transaction (CASH IN)
+     * 🧾 Create a new PIX transaction (CASH IN) — now using PodPay
      */
-    public function store(Request $request, LumnisService $lumnis)
+    public function store(Request $request, PodPayService $podpay)
     {
         // 🔒 Required headers
         $auth   = $request->header('X-Auth-Key');
@@ -101,7 +101,7 @@ class TransactionPixController extends Controller
         $email = $data['email'] ?? $user->email ?? 'no-email@placeholder.com';
 
         /**
-         * 1️⃣ Criar transação local
+         * 1️⃣ Create local transaction
          */
         $tx = Transaction::create([
             'tenant_id'          => $user->tenant_id,
@@ -110,7 +110,7 @@ class TransactionPixController extends Controller
             'status'             => TransactionStatus::PENDENTE,
             'currency'           => 'BRL',
             'method'             => 'pix',
-            'provider'           => 'Lumnis',
+            'provider'           => 'PodPay',
             'amount'             => $amountReais,
             'fee'                => $this->computeFee($user, $amountReais),
             'external_reference' => $externalId,
@@ -125,49 +125,57 @@ class TransactionPixController extends Controller
         ]);
 
         /**
-         * 2️⃣ Chamada Lumnis
+         * 2️⃣ PodPay Payload
+         */
+        $payload = [
+            "amount"        => $amountCents,
+            "currency"      => "BRL",
+            "paymentMethod" => "pix",
+            "pix" => [
+                "expiresInDays" => 1
+            ],
+            "customer" => [
+                "name" => $name,
+                "email" => $email,
+                "phone" => $phone,
+                "document" => [
+                    "number" => $cpf,
+                    "type"   => "cpf"
+                ]
+            ],
+            "externalRef" => $externalId,
+            "postbackUrl" => route('webhooks.podpay'),
+            "items" => [[
+                "title"      => "Pix Payment",
+                "unitPrice"  => $amountCents,
+                "quantity"   => 1,
+                "tangible"   => false,
+                "externalRef"=> "API-Pix"
+            ]]
+        ];
+
+        /**
+         * 3️⃣ CALL PODPAY
          */
         try {
-            $payload = [
-                "amount"      => $amountCents,
-                "externalRef" => $externalId,
-                "postback"    => route('webhooks.lumnis'),
-                "customer"    => [
-                    "name"     => $name,
-                    "email"    => $email,
-                    "phone"    => $phone,
-                    "document" => $cpf,
-                ],
-                "items" => [[
-                    "title"     => "PIX Payment",
-                    "unitPrice" => $amountCents,
-                    "quantity"  => 1,
-                    "tangible"  => false,
-                ]],
-                "method"       => "PIX",
-                "installments" => 1,
-            ];
-
-            $response = $lumnis->createTransaction($payload);
+            $response = $podpay->createPixTransaction($payload);
 
             if (!in_array($response["status"], [200, 201])) {
-                throw new \Exception("Lumnis error: " . json_encode($response["body"]));
+                throw new \Exception(json_encode($response["body"]));
             }
 
-            $dataAPI = is_array($response["body"])
-                ? $response["body"]
-                : json_decode($response["body"], true);
+            $body = $response["body"];
 
-            $transactionId = data_get($dataAPI, 'id');
-            $qrCodeText    = data_get($dataAPI, 'qrcode');
+            $transactionId = data_get($body, 'id');
+            $qrCodeText    = data_get($body, 'pix.qrcode');
 
             if (!$transactionId || !$qrCodeText) {
-                throw new \Exception("Invalid Lumnis response");
+                throw new \Exception("Invalid PodPay response");
             }
 
         } catch (\Throwable $e) {
 
-            Log::error("PIX_CREATION_ERROR", [
+            Log::error("PODPAY_PIX_CREATE_ERROR", [
                 'error' => $e->getMessage(),
             ]);
 
@@ -182,19 +190,39 @@ class TransactionPixController extends Controller
         }
 
         /**
-         * 3️⃣ Atualizar transação
+         * 4️⃣ Atualizar transação
          */
+        $cleanRaw = [
+            'id'          => data_get($body, 'id'),
+            'total'       => data_get($body, 'amount'),
+            'method'      => 'PIX',
+            'qrcode'      => data_get($body, 'pix.qrcode'),
+            'status'      => 'PENDING',
+            'currency'    => data_get($body, 'currency'),
+            'customer'    => [
+                'name'     => data_get($body, 'customer.name'),
+                'email'    => data_get($body, 'customer.email'),
+                'phone'    => data_get($body, 'customer.phone'),
+                'document' => data_get($body, 'customer.document.number'),
+            ],
+            'created_at'  => data_get($body, 'createdAt'),
+            'identifier'  => data_get($body, 'pix.end2EndId'),
+            'external_ref'=> data_get($body, 'externalRef'),
+        ];
+
+        $providerPayload = [
+            'name'         => $name,
+            'email'        => $email,
+            'document'     => $cpf,
+            'phone'        => $phone,
+            'qr_code_text' => $qrCodeText,
+            'provider_raw' => $cleanRaw,
+        ];
+
         $tx->update([
             'txid'                    => $transactionId,
             'provider_transaction_id' => $transactionId,
-            'provider_payload'        => [
-                'name'         => $name,
-                'email'        => $email,
-                'document'     => $cpf,
-                'phone'        => $phone,
-                'qr_code_text' => $qrCodeText,
-                'provider_raw' => $dataAPI,
-            ],
+            'provider_payload'        => $providerPayload,
         ]);
 
         /**
