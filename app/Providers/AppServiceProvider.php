@@ -24,15 +24,22 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        // Prefetch do Vite (mantido)
+        // ⚡ Pré-carregamento do Vite
         Vite::prefetch(concurrency: 3);
 
-        // Registro do Observer das transações
+        // 👀 Observador de transações
         Transaction::observe(TransactionObserver::class);
 
-        // 🔐 Permitir acesso ao Pulse somente para o e-mail especificado
+        // 🔐 Libera acesso ao Pulse apenas para o seu e-mail
         Gate::define('viewPulse', function (User $user) {
             return in_array($user->email, [
+                'hubsend7@gmail.com',
+            ]);
+        });
+
+        // 🔐 Libera acesso ao Horizon apenas para o seu e-mail
+        Gate::define('viewHorizon', function ($user = null) {
+            return in_array(optional($user)->email, [
                 'hubsend7@gmail.com',
             ]);
         });

@@ -4,14 +4,13 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use App\Models\Transaction;
 use App\Models\Withdraw;
 use App\Enums\TransactionStatus;
 use App\Services\PodPay\PodPayService;
 use App\Models\User;
+use App\Jobs\SendWebhookPixCreatedJob;
 
 class TransactionPixController extends Controller
 {
@@ -20,7 +19,7 @@ class TransactionPixController extends Controller
      */
     public function store(Request $request, PodPayService $podpay)
     {
-        // 🔐 Autenticação básica via headers
+        // 🔐 Autenticação via headers
         $auth   = $request->header('X-Auth-Key');
         $secret = $request->header('X-Secret-Key');
 
@@ -29,12 +28,11 @@ class TransactionPixController extends Controller
         }
 
         $user = $this->resolveUser($auth, $secret);
-
         if (!$user) {
             return response()->json(['success' => false, 'error' => 'Invalid credentials.'], 401);
         }
 
-        // 🧩 Validação de parâmetros
+        // 🧩 Validação
         $data = $request->validate([
             'amount'       => ['required', 'numeric', 'min:0.01'],
             'name'         => ['sometimes', 'string', 'max:100'],
@@ -48,12 +46,12 @@ class TransactionPixController extends Controller
         $amountCents = (int) round($amountReais * 100);
         $externalId  = $data['external_id'];
 
-        // Limite máximo preventivo
+        // Limite preventivo
         if ($amountReais > 3000) {
             return response()->json(['success' => false, 'error' => 'The maximum allowed PIX amount is R$3000.'], 422);
         }
 
-        // Evitar duplicidade de external_id
+        // Evitar duplicidade
         if (Transaction::where('user_id', $user->id)
             ->where('external_reference', $externalId)
             ->exists()) {
@@ -63,13 +61,13 @@ class TransactionPixController extends Controller
             ], 409);
         }
 
-        // 🧾 CPF normalizado e validado
+        // CPF
         $cpf = preg_replace('/\D/', '', ($data['document'] ?? $user->cpf_cnpj ?? ''));
         if (!$cpf || strlen($cpf) !== 11 || !$this->validateCpf($cpf)) {
             return response()->json(['success' => false, 'error' => 'Invalid CPF.', 'field' => 'document'], 422);
         }
 
-        // ☎️ Telefone validado
+        // Telefone
         $phone = preg_replace('/\D/', '', ($data['phone'] ?? $user->phone ?? ''));
         if (!$phone || strlen($phone) < 11 || strlen($phone) > 12) {
             return response()->json(['success' => false, 'error' => 'Invalid phone number.', 'field' => 'phone'], 422);
@@ -78,7 +76,7 @@ class TransactionPixController extends Controller
         $name  = $data['name']  ?? $user->name ?? $user->nome_completo ?? 'Client';
         $email = $data['email'] ?? $user->email ?? 'no-email@placeholder.com';
 
-        // 🧮 Criar registro local
+        // 🧮 Criar transação local
         $tx = Transaction::create([
             'tenant_id'          => $user->tenant_id,
             'user_id'            => $user->id,
@@ -95,7 +93,7 @@ class TransactionPixController extends Controller
             'user_agent'         => $request->userAgent(),
         ]);
 
-        // 🔗 Construir payload PodPay
+        // 🔗 Payload para a PodPay
         $payload = [
             "amount"        => $amountCents,
             "currency"      => "BRL",
@@ -170,32 +168,9 @@ class TransactionPixController extends Controller
             ],
         ]);
 
-        // 📡 Enviar webhook externo (assíncrono)
+        // 📡 Enviar webhook (Job rastreável pelo Horizon)
         if ($user->webhook_enabled && $user->webhook_in_url) {
-            dispatch(function () use ($user, $tx) {
-                try {
-                    Http::post($user->webhook_in_url, [
-                        'type'            => 'Pix Create',
-                        'event'           => 'created',
-                        'transaction_id'  => $tx->id,
-                        'external_id'     => $tx->external_reference,
-                        'user'            => $user->name,
-                        'amount'          => $tx->amount,
-                        'fee'             => $tx->fee,
-                        'currency'        => $tx->currency,
-                        'status'          => $tx->status,
-                        'txid'            => $tx->txid,
-                        'e2e'             => $tx->e2e_id,
-                        'direction'       => $tx->direction,
-                        'method'          => $tx->method,
-                        'created_at'      => $tx->created_at,
-                        'updated_at'      => $tx->updated_at,
-                        'provider_payload'=> $tx->provider_payload,
-                    ]);
-                } catch (\Throwable $e) {
-                    Log::warning("⚠️ Failed webhook (async)", ['user_id' => $user->id, 'error' => $e->getMessage()]);
-                }
-            })->onQueue('webhooks');
+            SendWebhookPixCreatedJob::dispatch($user, $tx);
         }
 
         // ✅ Retorno final
@@ -289,7 +264,7 @@ class TransactionPixController extends Controller
         return response()->json(['success' => false, 'error' => 'No transaction or withdraw found for this external_id.'], 404);
     }
 
-    // Utilitários auxiliares
+    // 🔧 Utilitários auxiliares
     private function resolveUser(string $auth, string $secret)
     {
         return User::where('authkey', $auth)->where('secretkey', $secret)->first();

@@ -11,7 +11,7 @@
         "filament/filament": "^3.2",
         "inertiajs/inertia-laravel": "^2.0",
         "laravel/framework": "^12.0",
-        "laravel/horizon": "^5.38",
+        "laravel/horizon": "^5.40",
         "laravel/nightwatch": "^1.15",
         "laravel/pulse": "^1.4",
         "laravel/reverb": "^1.6",
