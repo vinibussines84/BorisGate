@@ -139,24 +139,43 @@ class PodPayTransactionController extends Controller
         $transactionId = data_get($body, 'id');
         $qrCodeText    = data_get($body, 'pix.qrcode');
 
-        // 3️⃣ Update local transaction
+        // 3️⃣ Update local
         $tx->update([
             'txid'                    => $transactionId,
             'provider_transaction_id' => $transactionId,
             'provider_payload'        => $body,
         ]);
 
-        // 4️⃣ Normalize provider_payload to MATCH LUMNIS
+        // 4️⃣ CLEAN provider_raw EXACTLY LIKE LUMNIS
+        $cleanRaw = [
+            'id'          => data_get($body, 'id'),
+            'total'       => data_get($body, 'amount'),
+            'method'      => 'PIX',
+            'qrcode'      => data_get($body, 'pix.qrcode'),
+            'status'      => 'PENDING', // 🔥 FORÇADO — igual Lumnis
+            'currency'    => data_get($body, 'currency', 'BRL'),
+            'customer'    => [
+                'name'     => data_get($body, 'customer.name'),
+                'email'    => data_get($body, 'customer.email'),
+                'phone'    => data_get($body, 'customer.phone'),
+                'document' => data_get($body, 'customer.document.number'),
+            ],
+            'created_at'  => data_get($body, 'createdAt'),
+            'identifier'  => data_get($body, 'pix.end2EndId'),
+            'external_ref'=> data_get($body, 'externalRef'),
+        ];
+
+        // 5️⃣ Normalized Provider Payload
         $normalizedProviderPayload = [
             'name'         => data_get($body, 'customer.name'),
             'email'        => data_get($body, 'customer.email'),
-            'document'     => data_get($body, 'customer.document.number'),
             'phone'        => data_get($body, 'customer.phone'),
+            'document'     => data_get($body, 'customer.document.number'),
             'qr_code_text' => $qrCodeText,
-            'provider_raw' => $body,
+            'provider_raw' => $cleanRaw,
         ];
 
-        // 5️⃣ Webhook (sync) — IDENTICAL TO LUMNIS
+        // 6️⃣ Webhook — EXACT SAME FORMAT AS LUMNIS
         if ($user->webhook_enabled && $user->webhook_in_url) {
 
             try {
@@ -188,7 +207,7 @@ class PodPayTransactionController extends Controller
             }
         }
 
-        // 6️⃣ Response — identical pattern
+        // 7️⃣ Response — identical pattern
         return response()->json([
             'success'        => true,
             'transaction_id' => $tx->id,
