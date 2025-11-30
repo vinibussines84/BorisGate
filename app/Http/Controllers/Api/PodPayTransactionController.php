@@ -49,16 +49,17 @@ class PodPayTransactionController extends Controller
         ]);
 
         $amountReais = (float) $data['amount'];
-        $amountCents = (int) round($amountReais * 100);
-        $externalId  = $data['external_id'];
 
-        // 🚫 LIMIT PIX TO R$3000
+        // 🚫 LIMITE R$3.000,00
         if ($amountReais > 3000) {
             return response()->json([
                 'success' => false,
                 'error'   => 'The maximum allowed PIX amount is R$3000. Please contact support.'
             ], 422);
         }
+
+        $amountCents = (int) round($amountReais * 100);
+        $externalId  = $data['external_id'];
 
         // ❌ DUPLICATE CHECK
         if (Transaction::where('user_id', $user->id)
@@ -71,10 +72,9 @@ class PodPayTransactionController extends Controller
             ], 409);
         }
 
-        // ✔ Customer data
+        // Customer data
         $cpf   = preg_replace('/\D/', '', $data['document'] ?? $user->cpf_cnpj ?? '');
         $phone = preg_replace('/\D/', '', $data['phone'] ?? $user->phone ?? '');
-
         $name  = $data['name']  ?? $user->name  ?? 'Client';
         $email = $data['email'] ?? $user->email ?? 'no-email@placeholder.com';
 
@@ -123,7 +123,7 @@ class PodPayTransactionController extends Controller
             ]]
         ];
 
-        // 🔥 CALL SERVICE
+        // 🔥 CALL PODPAY
         $response = $podpay->createPixTransaction($payload);
 
         if (!in_array($response["status"], [200, 201])) {
@@ -131,7 +131,7 @@ class PodPayTransactionController extends Controller
             return response()->json([
                 'success' => false,
                 'error'   => 'PodPay provider error.',
-                'details' => $response["body"]
+                'details' => $response["body"],
             ], 500);
         }
 
@@ -139,7 +139,7 @@ class PodPayTransactionController extends Controller
         $transactionId = data_get($body, 'id');
         $qrCodeText    = data_get($body, 'pix.qrcode');
 
-        // Update local TX
+        // Update local
         $tx->update([
             'txid'                    => $transactionId,
             'provider_transaction_id' => $transactionId,
@@ -147,42 +147,42 @@ class PodPayTransactionController extends Controller
         ]);
 
         /**
-         * 4️⃣ WEBHOOK ASSÍNCRONO — IGUAL AO LUMNIS
+         * 4️⃣ WEBHOOK — IGUAL AO LUMNIS (SINCRONO)
          */
         if ($user->webhook_enabled && $user->webhook_in_url) {
 
-            dispatch(function () use ($user, $tx) {
-                try {
-                    Http::post($user->webhook_in_url, [
-                        'type'            => 'Pix Create',
-                        'event'           => 'created',
-                        'transaction_id'  => $tx->id,
-                        'external_id'     => $tx->external_reference,
-                        'user'            => $user->name,
-                        'amount'          => number_format($tx->amount, 2, '.', ''),
-                        'fee'             => number_format($tx->fee, 2, '.', ''),
-                        'currency'        => $tx->currency,
-                        'status'          => $tx->status,
-                        'txid'            => $tx->txid,
-                        'e2e'             => $tx->e2e_id,
-                        'direction'       => $tx->direction,
-                        'method'          => $tx->method,
-                        'created_at'      => $tx->created_at,
-                        'updated_at'      => $tx->updated_at,
-                        'paid_at'         => $tx->paid_at,
-                        'canceled_at'     => $tx->canceled_at,
-                        'provider_payload'=> $tx->provider_payload,
-                    ]);
-                } catch (\Throwable $e) {
-                    Log::warning("⚠️ Failed webhook (PodPay async)", [
-                        'user_id' => $user->id,
-                        'error'   => $e->getMessage(),
-                    ]);
-                }
-            })->onQueue('webhooks');
+            try {
+                Http::post($user->webhook_in_url, [
+                    'type'            => 'Pix Create',
+                    'event'           => 'created',
+                    'transaction_id'  => $tx->id,
+                    'external_id'     => $tx->external_reference,
+                    'user'            => $user->name,
+                    'amount'          => number_format($tx->amount, 2, '.', ''),
+                    'fee'             => number_format($tx->fee, 2, '.', ''),
+                    'currency'        => $tx->currency,
+                    'status'          => $tx->status,
+                    'txid'            => $tx->txid,
+                    'e2e'             => $tx->e2e_id,
+                    'direction'       => $tx->direction,
+                    'method'          => $tx->method,
+                    'created_at'      => $tx->created_at,
+                    'updated_at'      => $tx->updated_at,
+                    'paid_at'         => $tx->paid_at,
+                    'canceled_at'     => $tx->canceled_at,
+                    'provider_payload'=> $tx->provider_payload,
+                ]);
+            } catch (\Throwable $e) {
+                Log::warning("⚠️ Failed PodPay webhook (sync)", [
+                    'user_id' => $user->id,
+                    'error'   => $e->getMessage(),
+                ]);
+            }
         }
 
-        // ✅ RESPOSTA PADRONIZADA IGUAL AO LUMNIS
+        /**
+         * 5️⃣ RESPOSTA FINAL — PADRÃO LUMNIS
+         */
         return response()->json([
             'success'        => true,
             'transaction_id' => $tx->id,
