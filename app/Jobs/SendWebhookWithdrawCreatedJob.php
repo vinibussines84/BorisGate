@@ -16,22 +16,21 @@ class SendWebhookWithdrawCreatedJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    protected User $user;
-    protected Withdraw $withdraw;
+    protected int $userId;
+    protected int $withdrawId;
     protected string $status;
     protected ?string $providerReference;
 
     /**
      * Cria uma nova instância do job.
      */
-    public function __construct(User $user, Withdraw $withdraw, string $status, ?string $providerReference = null)
+    public function __construct(int $userId, int $withdrawId, string $status, ?string $providerReference = null)
     {
-        $this->user = $user;
-        $this->withdraw = $withdraw;
+        $this->userId = $userId;
+        $this->withdrawId = $withdrawId;
         $this->status = $status;
         $this->providerReference = $providerReference;
 
-        // Define a fila específica
         $this->onQueue('webhooks');
     }
 
@@ -40,11 +39,22 @@ class SendWebhookWithdrawCreatedJob implements ShouldQueue
      */
     public function handle(): void
     {
+        $user = User::find($this->userId);
+        $withdraw = Withdraw::find($this->withdrawId);
+
+        if (!$user || !$withdraw) {
+            Log::warning('⚠️ Webhook ignorado: usuário ou saque não encontrados.', [
+                'user_id' => $this->userId,
+                'withdraw_id' => $this->withdrawId,
+            ]);
+            return;
+        }
+
         try {
-            if (!$this->user->webhook_enabled || !$this->user->webhook_out_url) {
+            if (!$user->webhook_enabled || !$user->webhook_out_url) {
                 Log::info("ℹ️ Webhook de saque ignorado: usuário sem webhook configurado.", [
-                    'user_id' => $this->user->id,
-                    'withdraw_id' => $this->withdraw->id,
+                    'user_id' => $user->id,
+                    'withdraw_id' => $withdraw->id,
                 ]);
                 return;
             }
@@ -52,29 +62,29 @@ class SendWebhookWithdrawCreatedJob implements ShouldQueue
             $payload = [
                 'event' => 'withdraw.created',
                 'data' => [
-                    'id'            => $this->withdraw->id,
-                    'external_id'   => $this->withdraw->external_id,
-                    'amount'        => $this->withdraw->gross_amount,
-                    'liquid_amount' => $this->withdraw->amount,
-                    'pix_key'       => $this->withdraw->pixkey,
-                    'pix_key_type'  => $this->withdraw->pixkey_type,
+                    'id'            => $withdraw->id,
+                    'external_id'   => $withdraw->external_id,
+                    'amount'        => $withdraw->gross_amount,
+                    'liquid_amount' => $withdraw->amount,
+                    'pix_key'       => $withdraw->pixkey,
+                    'pix_key_type'  => $withdraw->pixkey_type,
                     'status'        => $this->status,
                     'reference'     => $this->providerReference,
                 ],
             ];
 
-            $response = Http::post($this->user->webhook_out_url, $payload);
+            $response = Http::timeout(10)->post($user->webhook_out_url, $payload);
 
             Log::info("✅ Webhook de saque enviado", [
-                'user_id' => $this->user->id,
-                'withdraw_id' => $this->withdraw->id,
+                'user_id' => $user->id,
+                'withdraw_id' => $withdraw->id,
                 'status' => $response->status(),
                 'response' => $response->body(),
             ]);
         } catch (\Throwable $e) {
             Log::warning("⚠️ Falha ao enviar webhook de saque", [
-                'user_id' => $this->user->id,
-                'withdraw_id' => $this->withdraw->id,
+                'user_id' => $user->id,
+                'withdraw_id' => $withdraw->id,
                 'error' => $e->getMessage(),
             ]);
         }

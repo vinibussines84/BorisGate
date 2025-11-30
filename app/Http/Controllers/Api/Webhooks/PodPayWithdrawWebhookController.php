@@ -94,7 +94,8 @@ class PodPayWithdrawWebhookController extends Controller
                     ]);
                 });
 
-                SendWebhookWithdrawUpdatedJob::dispatch($user, $withdraw, 'FAILED', $reference, $payload);
+                // 🔄 Dispara job assíncrono (com IDs)
+                SendWebhookWithdrawUpdatedJob::dispatch($user->id, $withdraw->id, 'FAILED', $reference, $payload);
 
                 Log::error('❌ Saque PodPay marcado como FAILED', [
                     'withdraw_id' => $withdraw->id,
@@ -127,7 +128,8 @@ class PodPayWithdrawWebhookController extends Controller
                     'e2e'         => $e2e,
                 ]);
 
-                SendWebhookWithdrawUpdatedJob::dispatch($user, $withdraw, 'APPROVED', $reference, $payload);
+                // 🔄 Dispara job assíncrono (com IDs)
+                SendWebhookWithdrawUpdatedJob::dispatch($user->id, $withdraw->id, 'APPROVED', $reference, $payload);
 
                 return response()->json(['success' => true, 'status' => 'paid']);
             }

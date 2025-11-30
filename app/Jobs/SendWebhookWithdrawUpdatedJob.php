@@ -16,19 +16,16 @@ class SendWebhookWithdrawUpdatedJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    protected User $user;
-    protected Withdraw $withdraw;
+    protected int $userId;
+    protected int $withdrawId;
     protected string $status;
     protected string $reference;
     protected array $raw;
 
-    /**
-     * Cria uma nova instância do job.
-     */
-    public function __construct(User $user, Withdraw $withdraw, string $status, string $reference, array $raw = [])
+    public function __construct(int $userId, int $withdrawId, string $status, string $reference, array $raw = [])
     {
-        $this->user = $user;
-        $this->withdraw = $withdraw;
+        $this->userId = $userId;
+        $this->withdrawId = $withdrawId;
         $this->status = strtoupper($status);
         $this->reference = $reference;
         $this->raw = $raw;
@@ -36,63 +33,71 @@ class SendWebhookWithdrawUpdatedJob implements ShouldQueue
         $this->onQueue('webhooks');
     }
 
-    /**
-     * Executa o job.
-     */
     public function handle(): void
     {
+        $user = User::find($this->userId);
+        $withdraw = Withdraw::find($this->withdrawId);
+
+        if (!$user || !$withdraw) {
+            Log::warning('⚠️ Webhook OUT ignorado: usuário ou saque não encontrados.', [
+                'user_id' => $this->userId,
+                'withdraw_id' => $this->withdrawId,
+            ]);
+            return;
+        }
+
         try {
-            if (!$this->user->webhook_enabled || !$this->user->webhook_out_url) {
+            if (!$user->webhook_enabled || !$user->webhook_out_url) {
                 Log::info('ℹ️ Webhook OUT ignorado (usuário sem webhook configurado).', [
-                    'user_id' => $this->user->id,
+                    'user_id' => $user->id,
                 ]);
                 return;
             }
 
-            $e2e = $this->withdraw->meta['e2e'] ?? null;
+            $e2e = $withdraw->meta['e2e'] ?? null;
 
             $payload = [
                 'id'        => $this->reference,
                 'status'    => $this->status,
-                'requested' => (float) $this->withdraw->gross_amount,
-                'paid'      => (float) $this->withdraw->amount,
+                'requested' => (float) $withdraw->gross_amount,
+                'paid'      => (float) $withdraw->amount,
                 'operation' => [
-                    'amount'      => (float) $this->withdraw->gross_amount,
-                    'key'         => $this->withdraw->pixkey,
-                    'key_type'    => strtoupper($this->withdraw->pixkey_type),
+                    'amount'      => (float) $withdraw->gross_amount,
+                    'key'         => $withdraw->pixkey,
+                    'key_type'    => strtoupper($withdraw->pixkey_type),
                     'description' => 'Withdraw',
                     'details'     => [
-                        'name'      => $this->user->name,
-                        'document'  => $this->user->cpf_cnpj ?? '00000000000',
+                        'name'      => $user->name,
+                        'document'  => $user->cpf_cnpj ?? '00000000000',
                     ],
                 ],
                 'receipt' => [[
                     'status'            => $this->status,
                     'endtoend'          => $e2e,
                     'identifier'        => $this->reference,
-                    'receiver_name'     => $this->withdraw->meta['receiver_name'] ?? $this->user->name,
-                    'receiver_bank'     => $this->withdraw->meta['receiver_bank'] ?? 'EquitPay',
-                    'receiver_bank_ispb'=> $this->withdraw->meta['receiver_ispb'] ?? '90400888',
+                    'receiver_name'     => $withdraw->meta['receiver_name'] ?? $user->name,
+                    'receiver_bank'     => $withdraw->meta['receiver_bank'] ?? 'EquitPay',
+                    'receiver_bank_ispb'=> $withdraw->meta['receiver_ispb'] ?? '90400888',
                     'refused_reason'    => $this->status === 'APPROVED'
                         ? 'Withdraw Successful'
                         : ($this->raw['data']['description'] ?? null),
                 ]],
-                'external_id' => $this->withdraw->external_id,
+                'external_id' => $withdraw->external_id,
             ];
 
-            $response = Http::timeout(10)->post($this->user->webhook_out_url, [
+            $response = Http::timeout(10)->post($user->webhook_out_url, [
                 'event' => 'withdraw.updated',
                 'data'  => $payload,
             ]);
 
             Log::info('📤 Webhook OUT (withdraw.updated) enviado com sucesso', [
-                'user_id'     => $this->user->id,
-                'withdraw_id' => $this->withdraw->id,
+                'user_id'     => $user->id,
+                'withdraw_id' => $withdraw->id,
                 'status'      => $response->status(),
             ]);
         } catch (\Throwable $e) {
             Log::warning('⚠️ Falha ao enviar webhook OUT (withdraw.updated)', [
-                'withdraw_id' => $this->withdraw->id,
+                'withdraw_id' => $withdraw->id,
                 'error'       => $e->getMessage(),
             ]);
         }

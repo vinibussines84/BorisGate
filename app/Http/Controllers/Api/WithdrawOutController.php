@@ -52,7 +52,7 @@ class WithdrawOutController extends Controller
             $data = $request->validate([
                 'amount'   => ['required', 'numeric', 'min:0.01'],
                 'key'      => ['required', 'string'],
-                'key_type' => ['required', Rule::in(['cpf','cnpj','email','phone','evp','copypaste'])],
+                'key_type' => ['required', Rule::in(['cpf', 'cnpj', 'email', 'phone', 'evp', 'copypaste'])],
                 'description' => ['nullable', 'string', 'max:255'],
                 'external_id' => ['nullable', 'string', 'max:64'],
             ]);
@@ -197,10 +197,15 @@ class WithdrawOutController extends Controller
             });
 
             /* ============================================================
-             * 5️⃣ Enviar Webhook via Job
+             * 5️⃣ Enviar Webhook via Job (com IDs)
              * ============================================================ */
             if ($user->webhook_enabled && $user->webhook_out_url) {
-                SendWebhookWithdrawCreatedJob::dispatch($user, $withdraw, $status, $providerReference);
+                SendWebhookWithdrawCreatedJob::dispatch(
+                    $user->id,
+                    $withdraw->id,
+                    $status,
+                    $providerReference
+                );
             }
 
             /* ============================================================
