@@ -11,6 +11,7 @@ use App\Http\Controllers\Api\BalanceController;
 // PodPay
 use App\Http\Controllers\Api\PodPayTransactionController;
 use App\Http\Controllers\Api\Webhooks\PodPayWebhookController;
+use App\Http\Controllers\Api\Webhooks\PodPayWithdrawWebhookController; // ✅ ADICIONADO
 
 use App\Http\Controllers\Webhooks\VeltraxWebhookController;
 use App\Http\Controllers\Webhooks\GatewayWebhookController;
@@ -55,24 +56,20 @@ Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
 // PIX — CASH IN (Lumnis - atual)
 // ───────────────────────────────────────────────
 
-// Criar transação Pix (CashIn)
 Route::post('/transaction/pix', [TransactionPixController::class, 'store'])
     ->middleware('throttle:30,1')
     ->name('transaction.pix.store');
 
-// Consultar por TXID
 Route::get('/v1/transaction/status/{txid}', [TransactionPixController::class, 'showByTxid'])
     ->where('txid', '[A-Za-z0-9]+')
     ->middleware('throttle:60,1')
     ->name('transaction.pix.status.txid');
 
-// Consultar status por EXTERNAL_ID
 Route::get('/v1/transaction/status/external/{externalId}', [TransactionPixController::class, 'statusByExternal'])
     ->where('externalId', '[A-Za-z0-9\-_]+')
     ->middleware('throttle:60,1')
     ->name('transaction.pix.status.external');
 
-// Rota antiga
 Route::get('/transaction/pix/{txid}', [TransactionPixController::class, 'showByTxid'])
     ->where('txid', '[A-Za-z0-9]+')
     ->middleware('throttle:60,1')
@@ -91,6 +88,7 @@ Route::post('/v1/transaction/pix', [PodPayTransactionController::class, 'store']
 // ───────────────────────────────────────────────
 // WITHDRAW — CASH OUT
 // ───────────────────────────────────────────────
+
 Route::post('/withdraw/out', [WithdrawOutController::class, 'store'])
     ->middleware('throttle:10,1')
     ->name('withdraw.out.store');
@@ -99,6 +97,7 @@ Route::post('/withdraw/out', [WithdrawOutController::class, 'store'])
 // ───────────────────────────────────────────────
 // TRUSTPAY OUT
 // ───────────────────────────────────────────────
+
 Route::post('/trustpay/out', [TrustPayOutController::class, 'store'])
     ->middleware('throttle:10,1')
     ->name('trustpay.out');
@@ -107,6 +106,7 @@ Route::post('/trustpay/out', [TrustPayOutController::class, 'store'])
 // ───────────────────────────────────────────────
 // BALANCE
 // ───────────────────────────────────────────────
+
 Route::get('/v1/balance/available', [BalanceController::class, 'available'])
     ->middleware('throttle:60,1')
     ->name('balance.available');
@@ -184,8 +184,9 @@ Route::prefix('webhooks')->name('webhooks.')->group(function () {
         ->middleware('throttle:120,1')
         ->name('lumnis.withdraw');
 
-    // 🚀 Novo Webhook PodPay
-    Route::post('/podpay', PodPayWebhookController::class)
+    // 🚀 PodPay — Payout (CASHOUT)
+    Route::post('/podpay/withdraw', PodPayWithdrawWebhookController::class)
         ->middleware('throttle:120,1')
-        ->name('podpay');
+        ->name('podpay.withdraw');
+
 });

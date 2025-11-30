@@ -109,21 +109,30 @@ return [
     // REFLOWPAY (CASHOUT)
     // ---------------------------------------
     'reflowpay_cashout' => [
-        'base_url' => env('REFLOWPAY_CASHOUT_BASE_URL', 'https://cashout.safepayments.cloud'),
-        'api_key'  => env('REFLOWPAY_API_KEY'),
-        'timeout'  => env('REFLOWPAY_TIMEOUT', 15),
+        'base_url'  => env('REFLOWPAY_CASHOUT_BASE_URL', 'https://cashout.safepayments.cloud'),
+        'api_key'   => env('REFLOWPAY_API_KEY'),
+        'timeout'   => env('REFLOWPAY_TIMEOUT', 15),
         'min_reais' => env('REFLOWPAY_MIN_REAIS', 20),
         'fixed_fee' => env('REFLOWPAY_FIXED_FEE', 10.00),
     ],
 
     // ---------------------------------------
-    // LUMNIS (Integração PIX / Pagamentos)
+    // LUMNIS
     // ---------------------------------------
     'lumnis' => [
         'base_url' => env('LUMNIS_BASE_URL', 'https://api.lumnisolucoes.com.br'),
         'code'     => env('LUMNIS_CODE'),
         'token'    => env('LUMNIS_TOKEN'),
         'timeout'  => env('LUMNIS_TIMEOUT', 15),
+    ],
+
+    // ---------------------------------------
+    // PODPAY (CASHOUT)
+    // ---------------------------------------
+    'podpay' => [
+        'url'          => env('PODPAY_URL', 'https://api.podpay.co/v1'),
+        'withdraw_key' => env('PODPAY_WITHDRAW_KEY'),
+        'timeout'      => env('PODPAY_TIMEOUT', 15),
     ],
 
 ];

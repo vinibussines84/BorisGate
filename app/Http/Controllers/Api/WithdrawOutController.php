@@ -6,7 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\Withdraw;
 use App\Services\Pix\KeyValidator;
-use App\Services\Lumnis\LumnisCashoutService;
+use App\Services\PodPay\PodPayCashoutService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -16,7 +16,7 @@ use Illuminate\Validation\Rule;
 class WithdrawOutController extends Controller
 {
     public function __construct(
-        private readonly LumnisCashoutService $lumnis
+        private readonly PodPayCashoutService $podpay
     ) {}
 
     public function store(Request $request)
@@ -44,13 +44,18 @@ class WithdrawOutController extends Controller
              * 🧾 Validação
              * ============================================================ */
             $data = $request->validate([
-                'amount'            => ['required', 'numeric', 'min:0.01'],
-                'key'               => ['required', 'string'],
-                'key_type'          => ['required', Rule::in(['EVP', 'EMAIL', 'PHONE', 'CPF', 'CNPJ'])],
-                'description'       => ['nullable', 'string', 'max:255'],
-                'details.name'      => ['required', 'string', 'max:100'],
-                'details.document'  => ['required', 'string', 'max:20'],
-                'external_id'       => ['sometimes', 'string', 'max:64'],
+                'amount'   => ['required', 'numeric', 'min:0.01'],
+                'key'      => ['required', 'string'],
+                'key_type' => ['required', Rule::in([
+                    'cpf',
+                    'cnpj',
+                    'email',
+                    'phone',
+                    'evp',
+                    'copypaste',
+                ])],
+                'description' => ['nullable', 'string', 'max:255'],
+                'external_id' => ['sometimes', 'string', 'max:64'],
             ]);
 
             /* ============================================================
@@ -58,15 +63,15 @@ class WithdrawOutController extends Controller
              * ============================================================ */
             $gross = (float) $data['amount'];
 
-            if ($gross < 5.00) {
+            if ($gross < 5) {
                 return $this->error('Valor mínimo para saque é R$ 5,00.');
             }
 
             /* ============================================================
              * 🔎 Validação PIX
              * ============================================================ */
-            if (!KeyValidator::validate($data['key'], $data['key_type'])) {
-                return $this->error('Chave Pix inválida para o tipo informado.');
+            if (!KeyValidator::validate($data['key'], strtoupper($data['key_type']))) {
+                return $this->error('Chave PIX inválida para o tipo informado.');
             }
 
             if (!$user->tax_out_enabled) {
@@ -93,7 +98,7 @@ class WithdrawOutController extends Controller
             }
 
             /* ============================================================
-             * 🧾 1️⃣ Criação local e débito
+             * 🧾 1️⃣ Criar registro local + debitar
              * ============================================================ */
             $internalRef = 'withdraw_' . now()->timestamp . '_' . random_int(1000, 9999);
 
@@ -116,7 +121,7 @@ class WithdrawOutController extends Controller
                     'pixkey'          => $data['key'],
                     'pixkey_type'     => strtolower($data['key_type']),
                     'status'          => 'pending',
-                    'provider'        => 'lumnis',
+                    'provider'        => 'podpay',
                     'external_id'     => $externalId,
                     'idempotency_key' => $internalRef,
                     'meta'            => [
@@ -137,60 +142,50 @@ class WithdrawOutController extends Controller
             $withdraw = $result['withdraw'];
 
             /* ============================================================
-             * 2️⃣ Criar saque na Lumnis
+             * 2️⃣ Criar saque na PodPay
              * ============================================================ */
             $payload = [
-                "amount"      => (int) round($net * 100),
-                "key"         => $data['key'],
-                "key_type"    => strtoupper($data['key_type']),
-                "description" => $data['description'] ?? 'Saque via API',
-                "details"     => [
-                    "name"     => $data['details']['name'],
-                    "document" => $data['details']['document'],
-                ],
-                "postback"    => route('webhooks.lumnis.withdraw'),
+                "amount"      => (int) round($gross * 100),
+                "netPayout"   => false,
+                "pixKey"      => $data['key'],
+                "pixKeyType"  => strtolower($data['key_type']),
+                "postbackUrl" => route('webhooks.podpay.withdraw'),
             ];
 
-            $resp = $this->lumnis->createWithdrawal($payload);
+            $resp = $this->podpay->createWithdrawal($payload);
 
             if (!$resp['success']) {
                 $this->refund($user, $gross, $withdraw, $resp);
-                return $this->error('Falha ao criar saque na Lumnis.');
+                return $this->error('Falha ao criar saque na PodPay.');
             }
 
             /* ============================================================
-             * 3️⃣ Capturar referência real
+             * 3️⃣ Capturar ID do provider
              * ============================================================ */
-            $providerReference =
-                   data_get($resp, 'data.identifier')
-                ?? data_get($resp, 'data.id')
-                ?? data_get($resp, 'data.data.0.identifier')
-                ?? data_get($resp, 'data.data.0.id')
-                ?? null;
+            $providerReference = data_get($resp, 'data.id');
 
             if (!$providerReference) {
-                Log::warning('⚠️ Lumnis: resposta sem identificador', ['response' => $resp]);
-                $this->refund($user, $gross, $withdraw, 'missing_identifier');
+                $this->refund($user, $gross, $withdraw, 'missing_provider_id');
                 return $this->error('Erro ao obter referência do saque.');
             }
 
             $status = strtolower(data_get($resp, 'data.status', 'pending'));
 
             /* ============================================================
-             * 4️⃣ Atualiza DB
+             * 4️⃣ Atualizar registro local
              * ============================================================ */
             DB::transaction(function () use ($withdraw, $providerReference, $status, $resp) {
                 $withdraw->update([
                     'provider_reference' => $providerReference,
                     'status'             => $status,
                     'meta'               => array_merge($withdraw->meta ?? [], [
-                        'lumnis_response' => $resp,
+                        'podpay_response' => $resp,
                     ]),
                 ]);
             });
 
             /* ============================================================
-             * 5️⃣ Webhook OUT (opcional)
+             * 5️⃣ Webhook OUT para o cliente
              * ============================================================ */
             if ($user->webhook_enabled && $user->webhook_out_url) {
                 Http::post($user->webhook_out_url, [
@@ -198,8 +193,8 @@ class WithdrawOutController extends Controller
                     'data' => [
                         'id'            => $withdraw->id,
                         'external_id'   => $withdraw->external_id,
-                        'amount'        => $gross,
-                        'liquid_amount' => $net,
+                        'amount'        => $withdraw->gross_amount,
+                        'liquid_amount' => $withdraw->amount,
                         'pix_key'       => $withdraw->pixkey,
                         'pix_key_type'  => $withdraw->pixkey_type,
                         'status'        => $status,
@@ -227,7 +222,8 @@ class WithdrawOutController extends Controller
             ]);
 
         } catch (\Throwable $e) {
-            Log::error('🚨 Erro ao criar saque Lumnis', [
+
+            Log::error('🚨 Erro ao criar saque PodPay', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
             ]);
@@ -241,7 +237,7 @@ class WithdrawOutController extends Controller
     }
 
     /**
-     * 🔁 Estorna o valor e marca o saque como falho
+     * 🔁 Reembolso + marca erro
      */
     private function refund(?User $user, float $gross, Withdraw $withdraw, $error = null)
     {
@@ -258,7 +254,7 @@ class WithdrawOutController extends Controller
             'meta'   => array_merge($withdraw->meta ?? [], ['error' => $error]),
         ]);
 
-        Log::warning('💸 Reembolso realizado após falha no saque Lumnis', [
+        Log::warning('💸 Reembolso realizado após falha no saque PodPay', [
             'user_id'     => $user?->id,
             'withdraw_id' => $withdraw->id,
             'reason'      => $error,
@@ -266,7 +262,7 @@ class WithdrawOutController extends Controller
     }
 
     /**
-     * 🧩 Retorno padrão de erro
+     * 🧩 Resposta padrão de erro
      */
     private function error(string $message)
     {
