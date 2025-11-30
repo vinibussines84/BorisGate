@@ -160,13 +160,11 @@ Route::prefix('webhooks')->name('webhooks.')->group(function () {
         ->middleware('throttle:120,1')
         ->name('lumnis.withdraw');
 
-    // 🚀 PodPay — Payin (PIX)
+    // 🚀 PodPay — Payin (PIX) (sem limite)
     Route::post('/podpay', PodPayWebhookController::class)
-        ->middleware('throttle:120,1')
         ->name('podpay');
 
-    // 🚀 PodPay — Payout (Withdraw)
+    // 🚀 PodPay — Payout (Withdraw) (sem limite)
     Route::post('/podpay/withdraw', PodPayWithdrawWebhookController::class)
-        ->middleware('throttle:120,1')
         ->name('podpay.withdraw');
 });
