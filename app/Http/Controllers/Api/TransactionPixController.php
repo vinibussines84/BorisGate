@@ -20,7 +20,6 @@ class TransactionPixController extends Controller
      */
     public function store(Request $request, PodPayService $podpay)
     {
-        // 🔒 Required headers
         $auth   = $request->header('X-Auth-Key');
         $secret = $request->header('X-Secret-Key');
 
@@ -31,7 +30,6 @@ class TransactionPixController extends Controller
             ], 401);
         }
 
-        // 🔑 Resolve user
         $user = $this->resolveUser($auth, $secret);
 
         if (!$user) {
@@ -41,7 +39,6 @@ class TransactionPixController extends Controller
             ], 401);
         }
 
-        // ✔ Validation
         $data = $request->validate([
             'amount'       => ['required', 'numeric', 'min:0.01'],
             'name'         => ['sometimes', 'string', 'max:100'],
@@ -55,15 +52,13 @@ class TransactionPixController extends Controller
         $amountCents  = (int) round($amountReais * 100);
         $externalId   = $data['external_id'];
 
-        // 🚫 LIMIT PIX TO R$2000
         if ($amountReais > 3000) {
             return response()->json([
                 'success' => false,
-                'error'   => 'The maximum allowed PIX amount is R$3000. Please contact support.'
+                'error'   => 'The maximum allowed PIX amount is R$3000.'
             ], 422);
         }
 
-        // 🚫 Duplicate check
         if (Transaction::where('user_id', $user->id)
             ->where('external_reference', '=', $externalId)
             ->exists()) {
@@ -74,35 +69,29 @@ class TransactionPixController extends Controller
             ], 409);
         }
 
-        // CPF validation
         $cpf = preg_replace('/\D/', '', ($data['document'] ?? $user->cpf_cnpj ?? ''));
 
         if (!$cpf || strlen($cpf) !== 11 || !$this->validateCpf($cpf)) {
             return response()->json([
                 'success' => false,
                 'field'   => 'document',
-                'error'   => 'Invalid CPF. Provide a valid document.'
+                'error'   => 'Invalid CPF.'
             ], 422);
         }
 
-        // Phone validation
         $phone = preg_replace('/\D/', '', ($data['phone'] ?? $user->phone ?? ''));
 
         if (!$phone || strlen($phone) < 11 || strlen($phone) > 12) {
             return response()->json([
                 'success' => false,
                 'field'   => 'phone',
-                'error'   => 'Invalid phone number. Use DDD + number. Example: 11999999999'
+                'error'   => 'Invalid phone number.'
             ], 422);
         }
 
-        // Customer info
         $name  = $data['name']  ?? $user->name ?? $user->nome_completo ?? 'Client';
         $email = $data['email'] ?? $user->email ?? 'no-email@placeholder.com';
 
-        /**
-         * 1️⃣ Create local transaction
-         */
         $tx = Transaction::create([
             'tenant_id'          => $user->tenant_id,
             'user_id'            => $user->id,
@@ -124,9 +113,6 @@ class TransactionPixController extends Controller
             'user_agent' => $request->userAgent(),
         ]);
 
-        /**
-         * 2️⃣ PodPay Payload
-         */
         $payload = [
             "amount"        => $amountCents,
             "currency"      => "BRL",
@@ -154,9 +140,6 @@ class TransactionPixController extends Controller
             ]]
         ];
 
-        /**
-         * 3️⃣ CALL PODPAY
-         */
         try {
             $response = $podpay->createPixTransaction($payload);
 
@@ -175,9 +158,7 @@ class TransactionPixController extends Controller
 
         } catch (\Throwable $e) {
 
-            Log::error("PODPAY_PIX_CREATE_ERROR", [
-                'error' => $e->getMessage(),
-            ]);
+            Log::error("PODPAY_PIX_CREATE_ERROR", ['error' => $e->getMessage()]);
 
             $tx->update([
                 'status' => TransactionStatus::FALHADO,
@@ -185,13 +166,10 @@ class TransactionPixController extends Controller
 
             return response()->json([
                 'success' => false,
-                'error'   => 'Failed to create PIX transaction (provider error).'
+                'error'   => 'Failed to create PIX transaction.'
             ], 500);
         }
 
-        /**
-         * 4️⃣ Atualizar transação
-         */
         $cleanRaw = [
             'id'          => data_get($body, 'id'),
             'total'       => data_get($body, 'amount'),
@@ -225,9 +203,6 @@ class TransactionPixController extends Controller
             'provider_payload'        => $providerPayload,
         ]);
 
-        /**
-         * 4️⃣ WEBHOOK AO CLIENTE (fila)
-         */
         if ($user->webhook_enabled && $user->webhook_in_url) {
 
             dispatch(function () use ($user, $tx) {
@@ -261,9 +236,6 @@ class TransactionPixController extends Controller
             })->onQueue('webhooks');
         }
 
-        /**
-         * 5️⃣ RESPOSTA
-         */
         return response()->json([
             'success'        => true,
             'transaction_id' => $tx->id,
@@ -277,7 +249,7 @@ class TransactionPixController extends Controller
     }
 
     /**
-     * 🟦 CONSULTA POR EXTERNAL ID
+     * 🟦 CONSULTA POR EXTERNAL ID (CORRIGIDO)
      */
     public function statusByExternal(Request $request, string $externalId)
     {
@@ -293,7 +265,9 @@ class TransactionPixController extends Controller
             return response()->json(['success' => false, 'error' => 'Invalid credentials.'], 401);
         }
 
-        // PIX-IN
+        /**
+         * PIX-IN
+         */
         $tx = Transaction::where('external_reference', $externalId)
             ->where('user_id', $user->id)
             ->first();
@@ -325,7 +299,9 @@ class TransactionPixController extends Controller
             ]);
         }
 
-        // PIX-OUT
+        /**
+         * PIX-OUT
+         */
         $withdraw = Withdraw::where('external_id', $externalId)
             ->where('user_id', $user->id)
             ->first();
@@ -346,7 +322,10 @@ class TransactionPixController extends Controller
                     'pix_key'        => $withdraw->pixkey,
                     'pix_key_type'   => $withdraw->pixkey_type,
                     'provider_ref'   => $withdraw->provider_reference,
-                    'endtoend'       => $meta['endtoend'] ?? null,
+
+                    //  🔥 CORRIGIDO — agora retorna o E2E certo
+                    'endtoend'       => $meta['e2e'] ?? $meta['endtoend'] ?? null,
+
                     'identifier'     => $meta['identifier'] ?? null,
                     'receiver_name'  => $meta['receiver_name'] ?? null,
                     'receiver_bank'  => $meta['receiver_bank'] ?? null,

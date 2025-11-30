@@ -111,7 +111,7 @@ const OriginPill = React.memo(({ type }) => {
 OriginPill.displayName = "OriginPill";
 
 /* =====================================================================================
-   CACHE
+   CACHE CONFIG
 ===================================================================================== */
 const CACHE_KEY = "extract_table_cache_v1";
 const CACHE_TTL = 30 * 1000;
@@ -137,15 +137,13 @@ export default function ExtractTable({
 
   const canPrev = page > 1;
   const canNext = page < totalPages;
-
   const isSearching = searchTerm.trim() !== "";
 
   /* ------------------------------------------------------------------
-     NÃO SALVAR CACHE SE HOUVER BUSCA
+     CACHE LOGIC
   ------------------------------------------------------------------ */
   useEffect(() => {
-    if (isSearching) return; // 🔥 bloqueia salvamento
-
+    if (isSearching) return;
     if (!loading && transactions.length > 0) {
       localStorage.setItem(
         CACHE_KEY,
@@ -159,41 +157,23 @@ export default function ExtractTable({
     }
   }, [transactions, loading, page, totalItems, isSearching]);
 
-  /* ------------------------------------------------------------------
-     APAGAR CACHE QUANDO SEARCH MUDA
-  ------------------------------------------------------------------ */
   useEffect(() => {
-    if (isSearching) {
-      localStorage.removeItem(CACHE_KEY);
-    }
+    if (isSearching) localStorage.removeItem(CACHE_KEY);
   }, [isSearching]);
 
-  /* ------------------------------------------------------------------
-     FETCH AUTOMÁTICO QUANDO CACHE EXPIRAR (APENAS SEM SEARCH)
-  ------------------------------------------------------------------ */
   useEffect(() => {
     if (isSearching) return;
-
     const cache = JSON.parse(localStorage.getItem(CACHE_KEY));
     if (!cache) return;
-
     const expired = Date.now() - cache.timestamp > CACHE_TTL;
-
-    if (expired && typeof refresh === "function") {
-      refresh(false);
-    }
+    if (expired && typeof refresh === "function") refresh(false);
   }, [page, isSearching]);
 
-  /* ------------------------------------------------------------------
-     CARREGAMENTO DO CACHE (APENAS SEM SEARCH)
-  ------------------------------------------------------------------ */
   const cached = useMemo(() => {
     if (isSearching) return null;
-
-    const c = localStorage.getItem(CACHE_KEY);
-    if (!c) return null;
-
     try {
+      const c = localStorage.getItem(CACHE_KEY);
+      if (!c) return null;
       const json = JSON.parse(c);
       const valid = Date.now() - json.timestamp < CACHE_TTL;
       return valid ? json : null;
@@ -202,22 +182,20 @@ export default function ExtractTable({
     }
   }, [isSearching]);
 
-  /* FINAL: se está buscando → usa sempre dados reais */
   const activeTransactions =
     isSearching || !cached?.transactions?.length
       ? transactions
       : cached.transactions;
 
-  /* ===================================================================================== */
-
+  /* =====================================================================================
+     RENDER
+  ===================================================================================== */
   return (
     <div className="bg-[#0b0b0b]/95 border border-white/10 rounded-3xl p-6 backdrop-blur-sm min-h-[520px] flex flex-col justify-between transition-all duration-300">
-
       {/* HEADER */}
       <div>
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-base font-semibold text-white">Transaction History</h3>
-
           <span className="text-[11px] text-gray-400">
             {loading
               ? "Loading..."
@@ -258,7 +236,7 @@ export default function ExtractTable({
                   <tr
                     key={t.id}
                     className="border-b border-white/5 hover:bg-[#141414]/60 cursor-pointer transition-colors"
-                    onClick={() => onView(t)}
+                    onClick={() => onView?.(t)}
                   >
                     <td className="py-2.5 px-4 font-mono text-xs text-gray-300">
                       #{t.id}
@@ -276,8 +254,9 @@ export default function ExtractTable({
                       <StatusPill status={mapStatus(t.status)} />
                     </td>
 
+                    {/* 🔧 Corrigido: exibe e2e ou endtoend */}
                     <td className="py-2.5 px-4 font-mono text-xs text-gray-400">
-                      {t.e2e ?? "—"}
+                      {t.e2e || t.endtoend || "—"}
                     </td>
 
                     <td className="py-2.5 px-4 text-gray-400">
@@ -288,14 +267,13 @@ export default function ExtractTable({
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          onView(t);
+                          onView?.(t);
                         }}
                         className="inline-flex items-center gap-1 px-2 py-1 rounded-lg border text-xs border-white/10 text-gray-300 hover:bg-[#1a1a1a]"
                       >
                         <FileText size={13} /> Details
                       </button>
                     </td>
-
                   </tr>
                 ))
               )}
@@ -309,7 +287,6 @@ export default function ExtractTable({
         <p className="text-xs text-gray-400">
           Page {page} of {totalPages}
         </p>
-
         <div className="flex items-center gap-2">
           <button
             disabled={!canPrev}
@@ -322,7 +299,6 @@ export default function ExtractTable({
           >
             ← Previous
           </button>
-
           <button
             disabled={!canNext}
             onClick={() => canNext && setPage(page + 1)}
