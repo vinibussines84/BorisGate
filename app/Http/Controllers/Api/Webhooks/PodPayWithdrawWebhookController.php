@@ -15,7 +15,6 @@ class PodPayWithdrawWebhookController extends Controller
     public function __invoke(Request $request)
     {
         try {
-
             $payload = $request->json()->all();
 
             Log::info('📩 Webhook PodPay recebido', ['payload' => $payload]);
@@ -43,7 +42,7 @@ class PodPayWithdrawWebhookController extends Controller
 
             if (!$withdraw) {
                 Log::warning('⚠️ PodPay webhook: withdraw não encontrado', [
-                    'reference' => $reference
+                    'reference' => $reference,
                 ]);
                 return response()->json(['ignored' => true]);
             }
@@ -65,29 +64,22 @@ class PodPayWithdrawWebhookController extends Controller
              * 5️⃣ Regras de status
              * ============================================================ */
             $isCompleted = $status === 'COMPLETED';
-
             $isFailed =
-                str_starts_with($description, 'failed') ||    // description: FAILED: ...
-                str_contains($historyMsg, 'não encontramos') || // chave inexistente
+                str_starts_with($description, 'failed') ||
+                str_contains($historyMsg, 'não encontramos') ||
                 in_array($status, ['FAILED', 'ERROR', 'CANCELED']);
-
             $isProcessing = $status === 'PROCESSING' && !$isFailed;
 
-            /* ============================================================
-             * 6️⃣ Status intermediário → ignorar
-             * ============================================================ */
             if ($isProcessing) {
                 Log::info('⏸ Webhook PodPay ignorado (PROCESSING).');
                 return response()->json(['ignored' => true]);
             }
 
             /* ============================================================
-             * 7️⃣ CASO DE FALHA → estornar saldo + marcar failed
+             * 6️⃣ CASO DE FALHA → estornar saldo + marcar failed
              * ============================================================ */
             if ($isFailed) {
-
                 DB::transaction(function () use ($withdraw, $user, $payload) {
-
                     $u = User::where('id', $user->id)->lockForUpdate()->first();
                     $u->amount_available += $withdraw->gross_amount;
                     $u->save();
@@ -102,7 +94,11 @@ class PodPayWithdrawWebhookController extends Controller
                     ]);
                 });
 
-                $this->notifyClient($user, $withdraw, null, 'withdraw.failed');
+                // 🔥 Enviar webhook OUT formatado
+                $this->notifyClient($user, $withdraw, [
+                    'status' => 'FAILED',
+                    'reason' => $description ?: $historyMsg,
+                ]);
 
                 Log::error('❌ Saque PodPay marcado como FAILED', [
                     'withdraw_id' => $withdraw->id,
@@ -113,10 +109,9 @@ class PodPayWithdrawWebhookController extends Controller
             }
 
             /* ============================================================
-             * 8️⃣ CASO DE SUCESSO → COMPLETED = pago
+             * 7️⃣ CASO DE SUCESSO → COMPLETED = pago
              * ============================================================ */
             if ($isCompleted) {
-
                 $e2e = $this->generatePixE2E($withdraw);
 
                 $meta = $withdraw->meta ?? [];
@@ -136,21 +131,20 @@ class PodPayWithdrawWebhookController extends Controller
                     'e2e'         => $e2e,
                 ]);
 
-                // Enviar webhook OUT ao cliente com E2E
-                $this->notifyClient($user, $withdraw, $e2e, 'withdraw.paid');
+                // 🔥 Enviar webhook OUT formatado (igual Lumnis)
+                $this->notifyClient($user, $withdraw, [
+                    'status'  => 'APPROVED',
+                    'e2e'     => $e2e,
+                    'paid_at' => now()->toIso8601String(),
+                ]);
 
                 return response()->json(['success' => true, 'status' => 'paid']);
             }
 
-            /* ============================================================
-             * 9️⃣ Status desconhecido → ignora
-             * ============================================================ */
             Log::warning('⚠️ Webhook PodPay status desconhecido', ['status' => $status]);
-
             return response()->json(['ignored' => true]);
 
         } catch (\Throwable $e) {
-
             Log::error('🚨 Erro no Webhook PodPay', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
@@ -165,36 +159,44 @@ class PodPayWithdrawWebhookController extends Controller
      */
     private function generatePixE2E(Withdraw $withdraw): string
     {
-        $ispb = '90400888'; // ISPB igual ao exemplo fornecido
+        $ispb = '90400888';
         $timestamp = now()->format('YmdHis');
         $seq = str_pad($withdraw->id, 9, '0', STR_PAD_LEFT);
-
         return "E{$ispb}{$timestamp}{$seq}";
     }
 
     /**
-     * 📤 Enviar webhook OUT ao cliente
+     * 📤 Enviar webhook OUT ao cliente (FORMATO LUMNIS)
      */
-    private function notifyClient(?User $user, Withdraw $withdraw, $e2e, string $event)
+    private function notifyClient(?User $user, Withdraw $withdraw, array $extra = [])
     {
         if (!$user?->webhook_enabled || !$user?->webhook_out_url) {
             return;
         }
 
-        $payload = [
-            'withdraw_id' => $withdraw->id,
-            'external_id' => $withdraw->external_id,
-            'amount'      => $withdraw->gross_amount,
-            'liquid'      => $withdraw->amount,
-            'status'      => $withdraw->status,
-            'reference'   => $withdraw->provider_reference,
-        ];
+        $event = strtolower($extra['status'] ?? '') === 'failed'
+            ? 'withdraw.failed'
+            : 'withdraw.paid';
 
-        // 🔥 E2E só enviado se FOR SAQUE PAGO
-        if ($withdraw->status === 'paid') {
-            $payload['e2e']     = $e2e;
-            $payload['paid_at'] = $withdraw->meta['paid_at'] ?? null;
-        }
+        $payload = [
+            'id'             => $withdraw->provider_reference,
+            'status'         => $extra['status'] ?? strtoupper($withdraw->status),
+            'requested'      => (int) round($withdraw->gross_amount * 100),
+            'paid'           => (int) round($withdraw->amount * 100),
+            'receipt' => [[
+                'identifier'       => $withdraw->provider_reference,
+                'endtoend'         => $withdraw->meta['e2e'] ?? null,
+                'receiver_name'    => $withdraw->meta['receiver_name'] ?? $user->name,
+                'receiver_bank'    => $withdraw->meta['receiver_bank'] ?? 'PODPAY',
+                'receiver_bank_ispb'=> $withdraw->meta['receiver_ispb'] ?? '90400888',
+                'refused_reason'   => $extra['reason'] ?? null,
+            ]],
+            'external_id'    => $withdraw->external_id,
+            'receiver_name'  => $withdraw->meta['receiver_name'] ?? $user->name,
+            'receiver_bank'  => $withdraw->meta['receiver_bank'] ?? 'PODPAY',
+            'receiver_ispb'  => $withdraw->meta['receiver_ispb'] ?? '90400888',
+            'paid_at'        => $extra['paid_at'] ?? $withdraw->meta['paid_at'] ?? null,
+        ];
 
         try {
             Http::timeout(10)->post($user->webhook_out_url, [
@@ -205,10 +207,10 @@ class PodPayWithdrawWebhookController extends Controller
             Log::info('📤 Webhook OUT enviado ao cliente', [
                 'event'       => $event,
                 'withdraw_id' => $withdraw->id,
+                'user_id'     => $user->id,
             ]);
-
         } catch (\Throwable $e) {
-            Log::warning('⚠️ Falha ao enviar webhook OUT ao cliente', [
+            Log::warning('⚠️ Falha ao enviar webhook OUT', [
                 'error' => $e->getMessage(),
             ]);
         }
