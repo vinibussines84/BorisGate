@@ -10,7 +10,7 @@ use App\Http\Controllers\Api\BalanceController;
 
 // PodPay
 use App\Http\Controllers\Api\PodPayTransactionController;
-use App\Http\Controllers\Webhooks\PodPayWebhookController;
+use App\Http\Controllers\Api\Webhooks\PodPayWebhookController;
 
 use App\Http\Controllers\Webhooks\VeltraxWebhookController;
 use App\Http\Controllers\Webhooks\GatewayWebhookController;
