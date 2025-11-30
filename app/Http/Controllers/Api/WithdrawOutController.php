@@ -105,7 +105,7 @@ class WithdrawOutController extends Controller
         $internalRef = 'withdraw_' . now()->timestamp . '_' . random_int(1000, 9999);
 
         /** ---------------------------------------------------------
-         *  🧾 1️⃣ Criação local + débito em transação
+         *  🧾 1️⃣ Criação local + débito
          * --------------------------------------------------------- */
         try {
 
@@ -143,6 +143,7 @@ class WithdrawOutController extends Controller
                         'internal_reference' => $internalRef,
                         'tax_fixed'          => $u->tax_out_fixed,
                         'tax_percent'        => $u->tax_out_percent,
+                        'api_request'        => true,
                     ];
                 }
 
@@ -171,7 +172,7 @@ class WithdrawOutController extends Controller
             ];
 
             /** ---------------------------------------------------------
-             *  3️⃣ Chamada real para Lumnis
+             *  3️⃣ Chamada para Lumnis
              * --------------------------------------------------------- */
             $resp = $this->lumnis->createWithdrawal($payload);
 
@@ -185,17 +186,14 @@ class WithdrawOutController extends Controller
             }
 
             /** ---------------------------------------------------------
-             *  4️⃣ IDENTIFICADOR REAL (receipt.identifier)
+             *  4️⃣ Pega o ID REAL DO SAQUE DA LUMNIS
              * --------------------------------------------------------- */
-            $providerReference =
-                data_get($resp, 'data.data.0.receipt.0.identifier') ??
-                data_get($resp, 'data.data.0.identifier') ??
-                data_get($resp, 'data.data.0.id');
+            $providerReference = data_get($resp, 'data.data.0.id'); // <- CORRETO!
 
             $status = strtolower(data_get($resp, 'data.data.0.status', 'pending'));
 
             /** ---------------------------------------------------------
-             *  5️⃣ Atualiza o saque com o identifier
+             *  5️⃣ Atualiza com o provider_reference correto
              * --------------------------------------------------------- */
             DB::transaction(function () use ($withdraw, $providerReference, $status, $resp) {
                 $withdraw->update([
@@ -203,7 +201,6 @@ class WithdrawOutController extends Controller
                     'provider_reference' => $providerReference,
                     'meta'               => array_merge($withdraw->meta ?? [], [
                         'lumnis_response' => $resp,
-                        'provider_raw'    => $resp,
                     ]),
                 ]);
             });
@@ -227,12 +224,7 @@ class WithdrawOutController extends Controller
                             'endtoend'      => null,
                         ],
                     ]);
-                } catch (\Throwable $e) {
-                    Log::warning('Falha ao enviar webhook withdraw.created', [
-                        'user_id' => $user->id,
-                        'error'   => $e->getMessage()
-                    ]);
-                }
+                } catch (\Throwable $e) {}
             }
 
             /** ---------------------------------------------------------
