@@ -117,7 +117,7 @@ return [
     ],
 
     // ---------------------------------------
-    // LUMNIS
+    // LUMNIS (PIX CASHIN/CASHOUT)
     // ---------------------------------------
     'lumnis' => [
         'base_url' => env('LUMNIS_BASE_URL', 'https://api.lumnisolucoes.com.br'),
@@ -132,6 +132,8 @@ return [
     'podpay' => [
         'url'          => env('PODPAY_URL', 'https://api.podpay.co/v1'),
         'withdraw_key' => env('PODPAY_WITHDRAW_KEY'),
+        'secret_key'   => env('PODPAY_SECRET_KEY'),
+        'public_key'   => env('PODPAY_PUBLIC_KEY'),
         'timeout'      => env('PODPAY_TIMEOUT', 15),
     ],
 
