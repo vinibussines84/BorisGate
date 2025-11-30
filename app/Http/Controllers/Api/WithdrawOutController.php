@@ -41,6 +41,15 @@ class WithdrawOutController extends Controller
             }
 
             /* ============================================================
+             * 🔤 Normalizar key_type para lowercase
+             * ============================================================ */
+            if ($request->has('key_type')) {
+                $request->merge([
+                    'key_type' => strtolower($request->input('key_type'))
+                ]);
+            }
+
+            /* ============================================================
              * 🧾 Validação
              * ============================================================ */
             $data = $request->validate([
@@ -156,7 +165,7 @@ class WithdrawOutController extends Controller
 
             if (!$resp['success']) {
                 $this->refund($user, $gross, $withdraw, $resp);
-                return $this->error('Falha ao criar saque na PodPay.');
+                return $this->error('Falha ao criar saque .');
             }
 
             /* ============================================================
@@ -185,7 +194,7 @@ class WithdrawOutController extends Controller
             });
 
             /* ============================================================
-             * 5️⃣ Webhook OUT para o cliente
+             * 5️⃣ Webhook OUT
              * ============================================================ */
             if ($user->webhook_enabled && $user->webhook_out_url) {
                 Http::post($user->webhook_out_url, [
@@ -223,7 +232,7 @@ class WithdrawOutController extends Controller
 
         } catch (\Throwable $e) {
 
-            Log::error('🚨 Erro ao criar saque PodPay', [
+            Log::error('🚨 Erro ao criar saque', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
             ]);
@@ -254,7 +263,7 @@ class WithdrawOutController extends Controller
             'meta'   => array_merge($withdraw->meta ?? [], ['error' => $error]),
         ]);
 
-        Log::warning('💸 Reembolso realizado após falha no saque PodPay', [
+        Log::warning('💸 Reembolso realizado após falha no saque.', [
             'user_id'     => $user?->id,
             'withdraw_id' => $withdraw->id,
             'reason'      => $error,
