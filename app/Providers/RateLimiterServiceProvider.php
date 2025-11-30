@@ -11,18 +11,19 @@ class RateLimiterServiceProvider extends ServiceProvider
 {
     public function boot(): void
     {
-        // throttle:login
+        // throttle:login (mantenho porque é importante)
         RateLimiter::for('login', function (Request $request) {
             $email = strtolower($request->input('email') ?? 'guest');
+
             return [
                 Limit::perMinute(5)->by($email.'|'.$request->ip()),
                 Limit::perMinute(10)->by('ip:'.$request->ip()),
             ];
         });
 
-        // throttle:api (opcional)
+        // 🚀 SEM LIMITES PARA A API
         RateLimiter::for('api', function (Request $request) {
-            return Limit::perMinute(60)->by(optional($request->user())->id ?? $request->ip());
+            return Limit::none();
         });
     }
 }
