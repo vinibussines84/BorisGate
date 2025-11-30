@@ -36,13 +36,12 @@ class RouteServiceProvider extends ServiceProvider
      */
     protected function configureRateLimiting(): void
     {
-        // 🔐 Limiter específico para POST /login (chaveado por e-mail + IP)
+        // 🔐 Limiter apenas para LOGIN
         RateLimiter::for('login', function (Request $request) {
             $email = strtolower((string) $request->input('email'));
             $ip    = $request->ip();
             $key   = $email.'|'.$ip;
 
-            // 5 tentativas por minuto (ajuste se quiser)
             return [
                 Limit::perMinute(5)->by($key)->response(function () {
                     return response()->json([
@@ -52,9 +51,9 @@ class RouteServiceProvider extends ServiceProvider
             ];
         });
 
-        // 🌐 Limiter padrão da API (usado por "throttle:api")
+        // 🚀 SEM LIMITES PARA TODA API
         RateLimiter::for('api', function (Request $request) {
-            return Limit::perMinute(60)->by($request->ip());
+            return Limit::none();
         });
     }
 }
