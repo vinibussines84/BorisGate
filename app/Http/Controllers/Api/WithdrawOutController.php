@@ -3,13 +3,13 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\SendWebhookWithdrawCreatedJob;
 use App\Models\User;
 use App\Models\Withdraw;
 use App\Services\Pix\KeyValidator;
 use App\Services\PodPay\PodPayCashoutService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
 
@@ -197,22 +197,10 @@ class WithdrawOutController extends Controller
             });
 
             /* ============================================================
-             * 5️⃣ Webhook externo para o cliente
+             * 5️⃣ Enviar Webhook via Job
              * ============================================================ */
             if ($user->webhook_enabled && $user->webhook_out_url) {
-                Http::post($user->webhook_out_url, [
-                    'event' => 'withdraw.created',
-                    'data' => [
-                        'id'            => $withdraw->id,
-                        'external_id'   => $withdraw->external_id,
-                        'amount'        => $withdraw->gross_amount,
-                        'liquid_amount' => $withdraw->amount,
-                        'pix_key'       => $withdraw->pixkey,
-                        'pix_key_type'  => $withdraw->pixkey_type,
-                        'status'        => $status,
-                        'reference'     => $providerReference,
-                    ],
-                ]);
+                SendWebhookWithdrawCreatedJob::dispatch($user, $withdraw, $status, $providerReference);
             }
 
             /* ============================================================

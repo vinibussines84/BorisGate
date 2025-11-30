@@ -5,9 +5,9 @@ namespace App\Http\Controllers\Api\Webhooks;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Http;
 use App\Models\Transaction;
 use App\Enums\TransactionStatus;
+use App\Jobs\SendWebhookPixUpdateJob;
 
 class PodPayWebhookController extends Controller
 {
@@ -90,35 +90,9 @@ class PodPayWebhookController extends Controller
                     'externalRef'    => $tx->external_reference,
                 ]);
 
-                // 6️⃣ ENVIA WEBHOOK PARA O CLIENTE (igual Lumnis — Pix Update)
+                // 6️⃣ Envia webhook via fila Horizon
                 if ($tx->user->webhook_enabled && $tx->user->webhook_in_url) {
-                    try {
-                        Http::post($tx->user->webhook_in_url, [
-                            "type"            => "Pix Update",
-                            "event"           => "updated",
-                            "transaction_id"  => $tx->id,
-                            "external_id"     => $tx->external_reference,
-                            "user"            => $tx->user->name,
-                            "amount"          => number_format($tx->amount, 2, '.', ''),
-                            "fee"             => number_format($tx->fee, 2, '.', ''),
-                            "currency"        => $tx->currency,
-                            "status"          => "paga",
-                            "txid"            => $tx->txid,
-                            "e2e"             => $tx->e2e_id,
-                            "direction"       => $tx->direction,
-                            "method"          => $tx->method,
-                            "created_at"      => $tx->created_at,
-                            "updated_at"      => $tx->updated_at,
-                            "paid_at"         => $tx->paid_at,
-                            "canceled_at"     => $tx->canceled_at,
-                            "provider_payload"=> $cleanPayload
-                        ]);
-                    } catch (\Throwable $e) {
-                        Log::warning("⚠️ Falha ao enviar webhook ao cliente", [
-                            'tx_id' => $tx->id,
-                            'error' => $e->getMessage(),
-                        ]);
-                    }
+                    SendWebhookPixUpdateJob::dispatch($tx, $cleanPayload);
                 }
 
                 return response()->json([
