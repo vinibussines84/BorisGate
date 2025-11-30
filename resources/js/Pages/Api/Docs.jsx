@@ -309,7 +309,7 @@ Response:
           </Collapsible>
         </Section>
 
-        {/* Withdraw */}
+        {/* Withdraw - CORRIGIDO PARA INCLUIR COPYPASTE */}
         <Section>
           <button
             onClick={() => setOpenWithdraw((v) => !v)}
@@ -332,27 +332,32 @@ Response:
               <CodeBlock title="Request & Response" code={exampleWithdraw} />
 
               <p className="text-sm text-zinc-400 leading-relaxed">
-                <strong className="text-white">key_type</strong>: Required Pix key type — one of{" "}
+                <strong className="text-white">key_type</strong>: Tipo de chave Pix obrigatório — um de{" "}
                 <code className="bg-black/40 border border-white/10 rounded px-2 py-0.5">EVP</code>,{" "}
                 <code className="bg-black/40 border border-white/10 rounded px-2 py-0.5">EMAIL</code>,{" "}
                 <code className="bg-black/40 border border-white/10 rounded px-2 py-0.5">PHONE</code>,{" "}
                 <code className="bg-black/40 border border-white/10 rounded px-2 py-0.5">CPF</code>,{" "}
-                <code className="bg-black/40 border border-white/10 rounded px-2 py-0.5">CNPJ</code>.
+                <code className="bg-black/40 border border-white/10 rounded px-2 py-0.5">CNPJ</code>,{" "}
+                <code className="bg-black/40 border border-white/10 rounded px-2 py-0.5">COPYPASTE</code>.
               </p>
 
               <div className="mt-2 text-sm text-zinc-400 space-y-1">
                 <p>
-                  <strong className="text-white">PHONE:</strong> accepts{" "}
-                  <code className="bg-black/40 border border-white/10 rounded px-2 py-0.5">+5564900000000</code> or{" "}
+                  <strong className="text-white">PHONE:</strong> aceita{" "}
+                  <code className="bg-black/40 border border-white/10 rounded px-2 py-0.5">+5564900000000</code> ou{" "}
                   <code className="bg-black/40 border border-white/10 rounded px-2 py-0.5">64900000000</code>.
                 </p>
                 <p>
-                  <strong className="text-white">CPF:</strong> must be digits only, no dots or dashes — e.g.{" "}
+                  <strong className="text-white">CPF:</strong> deve conter apenas dígitos, sem pontos ou traços — e.g.{" "}
                   <code className="bg-black/40 border border-white/10 rounded px-2 py-0.5">12345678900</code>.
                 </p>
                 <p>
-                  <strong className="text-white">CNPJ:</strong> must be digits only — e.g.{" "}
+                  <strong className="text-white">CNPJ:</strong> deve conter apenas dígitos — e.g.{" "}
                   <code className="bg-black/40 border border-white/10 rounded px-2 py-0.5">5100090090000100</code>.
+                </p>
+                <p>
+                  <strong className="text-white">COPYPASTE:</strong> é a linha de código do QR Code Estático (Pix Copia e Cola) — e.g.{" "}
+                  <code className="bg-black/40 border border-white/10 rounded px-2 py-0.5">00020126...</code>.
                 </p>
               </div>
             </div>
@@ -414,7 +419,7 @@ Response:
                   <span className="text-zinc-300 font-medium">ERROR</span> — Processing failed; amount refunded to wallet.
                 </li>
                 <li>
-                  <span className="text-zinc-300 font-medium">FAILED</span> — Withdraw failed permanently; refunded to wallet.
+                  <span className="text-zinc-300 font-medium">FAILED</span> — Withdraw failed permanently; amount refunded to wallet.
                 </li>
               </ul>
             </div>
