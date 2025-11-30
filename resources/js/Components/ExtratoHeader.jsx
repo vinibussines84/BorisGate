@@ -1,3 +1,4 @@
+// resources/js/Components/ExtratoHeader.jsx
 import React, { useRef, useCallback, useEffect, useState } from "react";
 import {
   FileText,
@@ -16,7 +17,7 @@ const STATUS_TABS = [
   { key: "FALHADO", label: "Failed" },
 ];
 
-export default function ExtractHeader({
+export default function ExtratoHeader({
   saldo = 0,
   entradas = 0,
   saidas = 0,
@@ -29,6 +30,9 @@ export default function ExtractHeader({
   const [pillStyle, setPillStyle] = useState({ left: 0, width: 0 });
   const tabRefs = useRef([]);
 
+  /* ==========================================================
+     ATUALIZA A “PÍLULA” DO STATUS SELECIONADO
+  ========================================================== */
   const calcPill = useCallback(() => {
     const idx = STATUS_TABS.findIndex((s) => s.key === statusFilter);
     const el = tabRefs.current[idx];
@@ -40,6 +44,9 @@ export default function ExtractHeader({
     return () => clearTimeout(t);
   }, [calcPill]);
 
+  /* ==========================================================
+     FORMATADORES
+  ========================================================== */
   const formatCurrency = (value) =>
     (Number(value) || 0).toLocaleString("pt-BR", {
       style: "currency",
@@ -48,23 +55,26 @@ export default function ExtractHeader({
     });
 
   const onKeyPress = (e) => {
-    if (e.key === "Enter") {
-      refresh(true); // Buscar ao pressionar ENTER
-    }
+    if (e.key === "Enter") refresh(true);
   };
 
+  /* ========================================================== */
   return (
     <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[#0b0b0b]/95 p-6 sm:p-7 backdrop-blur-sm min-h-[180px]">
 
-      {/* TOP */}
+      {/* HEADER SUPERIOR */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div className="flex items-center gap-3">
           <div className="p-3 rounded-2xl border border-white/10 bg-[#0a0a0a]/90 shrink-0">
             <FileText className="w-5 h-5 text-[#02fb5c]" />
           </div>
           <div>
-            <h1 className="text-xl font-semibold text-white leading-none">Statement</h1>
-            <p className="text-gray-400 text-sm mt-0.5">Overview of account activity</p>
+            <h1 className="text-xl font-semibold text-white leading-none">
+              Statement
+            </h1>
+            <p className="text-gray-400 text-sm mt-0.5">
+              Overview of account activity
+            </p>
           </div>
         </div>
 
@@ -78,7 +88,7 @@ export default function ExtractHeader({
         </button>
       </div>
 
-      {/* BALANCE */}
+      {/* SALDOS */}
       <div className="mt-6 flex flex-col sm:flex-row sm:items-center justify-between gap-6">
         <div className="flex-1 rounded-2xl bg-[#0a0a0a]/95 border border-white/10 px-6 py-5 min-h-[110px] flex flex-col justify-between shadow-[0_0_25px_rgba(0,0,0,0.4)]">
           <div className="flex items-center gap-2 text-[11px] uppercase tracking-wide text-gray-400">
@@ -117,10 +127,10 @@ export default function ExtractHeader({
         </div>
       </div>
 
-      {/* FILTERS */}
+      {/* FILTROS */}
       <div className="mt-8 flex flex-col lg:flex-row gap-3 items-center justify-between">
         
-        {/* STATUS */}
+        {/* STATUS FILTER */}
         <div className="flex items-center gap-2 w-full lg:w-auto">
           <span className="text-[11px] text-gray-400 flex items-center gap-1.5 shrink-0">
             <Filter size={12} /> Status:
@@ -136,7 +146,10 @@ export default function ExtractHeader({
                 <button
                   key={s.key}
                   ref={(el) => (tabRefs.current[i] = el)}
-                  onClick={() => setStatusFilter(s.key)}
+                  onClick={() => {
+                    setStatusFilter(s.key);
+                    refresh(false); // 🔥 força atualização ao clicar
+                  }}
                   className={`relative z-10 px-4 py-1 text-[11px] rounded-lg whitespace-nowrap transition-colors ${
                     statusFilter === s.key
                       ? "text-[#02fb5c]"
@@ -150,7 +163,7 @@ export default function ExtractHeader({
           </div>
         </div>
 
-        {/* SEARCH + BOTÃO */}
+        {/* SEARCH + BUTTON */}
         <div className="relative flex items-center gap-2 w-full sm:max-w-[380px]">
           <div className="relative flex-1">
             <Search
@@ -161,13 +174,12 @@ export default function ExtractHeader({
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               onKeyDown={onKeyPress}
-              placeholder="Search by E2E, Amount,.."
+              placeholder="Search by E2E, Amount..."
               className="w-full pl-9 pr-3 py-2 text-xs rounded-lg bg-[#050505]/80 border border-[#1a1a1a]
                 text-gray-200 placeholder:text-gray-500 focus:ring-2 focus:ring-[#02fb5c]/40 transition-all duration-200"
             />
           </div>
 
-          {/* BOTÃO BUSCAR */}
           <button
             onClick={() => refresh(true)}
             className="px-4 py-2 text-xs font-medium rounded-lg bg-[#02fb5c]/20 border border-[#02fb5c]/40 text-[#02fb5c] hover:bg-[#02fb5c]/30 transition-all"

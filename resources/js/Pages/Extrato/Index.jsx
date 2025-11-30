@@ -46,17 +46,14 @@ export default function Extrato() {
   const debounceRef = useRef(null);
 
   /* ==========================================================
-     REFRESH HANDLER (NOVO)
+     REFRESH HANDLER (para forçar busca)
   ========================================================== */
   const refreshHandler = (isSearch = false) => {
-    // se for busca → página sempre volta para 1
     if (isSearch) {
       setPage(1);
       sessionStorage.removeItem(CACHE_KEY);
       localStorage.removeItem(TABLE_CACHE_KEY);
     }
-
-    // sempre refazer a requisição
     fetchExtrato(false);
   };
 
@@ -90,16 +87,26 @@ export default function Extrato() {
       }
 
       try {
-        const query = new URLSearchParams({
+        // 🔧 Corrigido: só envia o status se for diferente de "all"
+        const baseQuery = new URLSearchParams({
           page,
           perPage,
-          status: statusFilter !== "all" ? statusFilter : "",
           search: searchTerm || "",
         }).toString();
 
+        const statusParam =
+          statusFilter && statusFilter.toUpperCase() !== "ALL"
+            ? `&status=${encodeURIComponent(statusFilter)}`
+            : "";
+
+        const finalQuery = `${baseQuery}${statusParam}`;
+
+        // 🔍 Debug opcional
+        // console.log("🔎 Fetching extrato with:", { statusFilter, finalQuery });
+
         const [resBalance, resTx] = await Promise.all([
           axios.get("/api/balances"),
-          axios.get(`/api/list/pix?${query}`),
+          axios.get(`/api/list/pix?${finalQuery}`),
         ]);
 
         /* BALANCE */
@@ -118,7 +125,7 @@ export default function Extrato() {
 
         for (const t of list) {
           const st = (t.status || "").toLowerCase();
-          if (["paga", "paid", "approved"].includes(st)) {
+          if (["paga", "paid", "approved", "completed"].includes(st)) {
             if (t.credit) entradasTotal += Number(t.amount);
             else saidasTotal += Number(t.amount);
           }
@@ -149,13 +156,12 @@ export default function Extrato() {
   );
 
   /* ==========================================================
-     DEBOUNCE → dispara o fetch após 400ms
+     DEBOUNCE → dispara o fetch após 400ms (busca e filtro)
   ========================================================== */
   useEffect(() => {
     clearTimeout(debounceRef.current);
 
     debounceRef.current = setTimeout(() => {
-      // sempre que busca mudar → limpa cache da tabela
       localStorage.removeItem(TABLE_CACHE_KEY);
       fetchExtrato(false);
     }, 400);
@@ -183,7 +189,6 @@ export default function Extrato() {
 
       <div className="min-h-screen bg-[#0B0B0B] py-10 px-4 sm:px-6 lg:px-8 text-gray-100">
         <div className="max-w-6xl mx-auto space-y-8">
-          
           {/* HEADER */}
           <Suspense fallback={<SkeletonBlock height={160} />}>
             <ExtratoHeader
@@ -194,7 +199,7 @@ export default function Extrato() {
               setStatusFilter={setStatusFilter}
               searchTerm={searchTerm}
               setSearchTerm={setSearchTerm}
-              refresh={(isSearch) => refreshHandler(isSearch)}
+              refresh={refreshHandler}
             />
           </Suspense>
 
@@ -212,8 +217,8 @@ export default function Extrato() {
                 totalItems={totalItems}
                 perPage={perPage}
                 loading={loadingTable}
-                searchTerm={searchTerm}        // <-- IMPORTANTÍSSIMO
-                refresh={(p) => fetchExtrato(p)} // <-- PERMITE FORÇAR REFRESH
+                searchTerm={searchTerm}
+                refresh={fetchExtrato}
               />
             </Suspense>
           </div>
