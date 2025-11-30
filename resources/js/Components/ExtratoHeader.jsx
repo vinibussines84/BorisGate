@@ -47,8 +47,15 @@ export default function ExtractHeader({
       minimumFractionDigits: 2,
     });
 
+  const onKeyPress = (e) => {
+    if (e.key === "Enter") {
+      refresh(true); // Buscar ao pressionar ENTER
+    }
+  };
+
   return (
     <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[#0b0b0b]/95 p-6 sm:p-7 backdrop-blur-sm min-h-[180px]">
+
       {/* TOP */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div className="flex items-center gap-3">
@@ -62,7 +69,7 @@ export default function ExtractHeader({
         </div>
 
         <button
-          onClick={refresh}
+          onClick={() => refresh(false)}
           className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium 
             text-gray-200 border border-white/10 rounded-lg bg-[#0a0a0a]/90 hover:bg-[#141414] transition-colors"
         >
@@ -84,7 +91,6 @@ export default function ExtractHeader({
         </div>
 
         <div className="flex sm:flex-row flex-col gap-3 shrink-0">
-          {/* ENTRADAS */}
           <div className="flex items-center justify-between sm:justify-start gap-3 rounded-2xl px-5 py-3 bg-[#0a0a0a]/95 border border-[#1b1b1b] shadow-inner w-[180px]">
             <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-[#02fb5c]/20 border border-[#02fb5c]/40">
               <ArrowUpRight size={15} className="text-[#02fb5c]" />
@@ -97,7 +103,6 @@ export default function ExtractHeader({
             </div>
           </div>
 
-          {/* SAÍDAS */}
           <div className="flex items-center justify-between sm:justify-start gap-3 rounded-2xl px-5 py-3 bg-[#0a0a0a]/95 border border-[#1b1b1b] shadow-inner w-[180px]">
             <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-[#2b0000]/40 border border-[#ff3b5c]/40">
               <ArrowDownRight size={15} className="text-[#ff3b5c]" />
@@ -114,6 +119,8 @@ export default function ExtractHeader({
 
       {/* FILTERS */}
       <div className="mt-8 flex flex-col lg:flex-row gap-3 items-center justify-between">
+        
+        {/* STATUS */}
         <div className="flex items-center gap-2 w-full lg:w-auto">
           <span className="text-[11px] text-gray-400 flex items-center gap-1.5 shrink-0">
             <Filter size={12} /> Status:
@@ -143,20 +150,32 @@ export default function ExtractHeader({
           </div>
         </div>
 
-        {/* SEARCH */}
-        <label className="relative flex-1 max-w-full sm:max-w-[380px]">
-          <Search
-            size={14}
-            className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none"
-          />
-          <input
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Search by ID, reference, CPF/CNPJ, etc."
-            className="w-full pl-9 pr-3 py-2 text-xs rounded-lg bg-[#050505]/80 border border-[#1a1a1a]
-              text-gray-200 placeholder:text-gray-500 focus:ring-2 focus:ring-[#02fb5c]/40 transition-all duration-200"
-          />
-        </label>
+        {/* SEARCH + BOTÃO */}
+        <div className="relative flex items-center gap-2 w-full sm:max-w-[380px]">
+          <div className="relative flex-1">
+            <Search
+              size={14}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none"
+            />
+            <input
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              onKeyDown={onKeyPress}
+              placeholder="Search by E2E, Amount,.."
+              className="w-full pl-9 pr-3 py-2 text-xs rounded-lg bg-[#050505]/80 border border-[#1a1a1a]
+                text-gray-200 placeholder:text-gray-500 focus:ring-2 focus:ring-[#02fb5c]/40 transition-all duration-200"
+            />
+          </div>
+
+          {/* BOTÃO BUSCAR */}
+          <button
+            onClick={() => refresh(true)}
+            className="px-4 py-2 text-xs font-medium rounded-lg bg-[#02fb5c]/20 border border-[#02fb5c]/40 text-[#02fb5c] hover:bg-[#02fb5c]/30 transition-all"
+          >
+            Search
+          </button>
+        </div>
+
       </div>
     </div>
   );
