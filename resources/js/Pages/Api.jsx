@@ -84,21 +84,21 @@ function computeFee(enabled, fixed, percent) {
 /* ================= Components ================= */
 const Card = ({ children, className = "" }) => (
   <div
-    className={`bg-[#0b0b0b]/90 border border-white/10 rounded-3xl shadow-[0_0_30px_-10px_rgba(0,0,0,0.8)] ${className}`}
+    className={`bg-[#0b0b0b]/90 border border-white/10 rounded-3xl shadow-lg shadow-black/10 ${className}`}
   >
     {children}
   </div>
 );
 
 const HeaderCapsule = ({ children }) => (
-  <div className="w-full bg-[#0b0b0b]/95 border border-white/10 rounded-3xl shadow-[0_0_40px_-10px_rgba(0,0,0,0.8)] p-6 flex flex-col sm:flex-row items-center justify-between gap-3">
+  <div className="w-full bg-[#0b0b0b]/95 border border-white/10 rounded-3xl shadow-md shadow-black/10 p-6 flex flex-col sm:flex-row items-center justify-between gap-3">
     {children}
   </div>
 );
 
 const SectionTitle = ({ icon: Icon, title }) => (
   <div className="flex items-center gap-3 mb-4">
-    <div className="p-3 rounded-xl bg-[#111]/70 border border-white/10">
+    <div className="p-3 rounded-xl bg-[#111]/70 border border-white/10 shadow-sm shadow-black/10">
       <Icon size={18} className="text-[#02fb5c]" />
     </div>
     <h2 className="text-lg font-semibold text-white">{title}</h2>
@@ -117,12 +117,12 @@ const ApiKeyCard = ({ label, value, hidden, copiedKey, copyWarningKey, onCopy })
         <span className="font-mono text-white text-[13px] break-all">{display}</span>
         <button
           onClick={() => onCopy(value, label, hidden)}
-          className={`p-2 rounded-lg transition ${
+          className={`p-2 rounded-lg transition shadow-sm ${
             isCopied
-              ? "bg-[#02fb5c]/20 text-[#02fb5c] border border-[#02fb5c]/30"
+              ? "bg-[#02fb5c]/20 text-[#02fb5c] border border-[#02fb5c]/30 shadow-[#02fb5c]/20"
               : warning
-              ? "bg-yellow-500/20 text-yellow-300 border border-yellow-300/30"
-              : "text-gray-300 hover:bg-white/10"
+              ? "bg-yellow-500/20 text-yellow-300 border border-yellow-300/30 shadow-yellow-300/20"
+              : "text-gray-300 hover:bg-white/10 shadow-black/10"
           }`}
         >
           {isCopied ? <CheckCircle2 size={16} /> : <Copy size={16} />}
@@ -133,9 +133,9 @@ const ApiKeyCard = ({ label, value, hidden, copiedKey, copyWarningKey, onCopy })
 };
 
 const FeeRow = ({ icon: Icon, title, fee }) => (
-  <div className="flex items-center justify-between bg-[#111]/70 border border-white/10 rounded-xl p-4">
+  <div className="flex items-center justify-between bg-[#111]/70 border border-white/10 rounded-xl p-4 shadow-sm shadow-black/10">
     <div className="flex items-center gap-3">
-      <div className="p-2 rounded-lg bg-[#0b0b0b]/70 border border-white/10">
+      <div className="p-2 rounded-lg bg-[#0b0b0b]/70 border border-white/10 shadow-sm shadow-black/10">
         <Icon size={18} className="text-[#02fb5c]" />
       </div>
       <div>
@@ -158,14 +158,14 @@ const WebhookRow = ({ label, url, copied, onCopy, enabled }) => {
 
   return (
     <div
-      className={`flex items-center justify-between p-4 rounded-xl border ${
+      className={`flex items-center justify-between p-4 rounded-xl border shadow-sm shadow-black/10 ${
         enabled
           ? "border-white/10 bg-[#0b0b0b]/80"
           : "border-white/5 bg-white/[0.03] opacity-50"
       }`}
     >
       <div className="flex items-center gap-3 min-w-0">
-        <div className="p-2 rounded-lg bg-[#111]/70 border border-white/10">
+        <div className="p-2 rounded-lg bg-[#111]/70 border border-white/10 shadow-sm shadow-black/10">
           <WebhookIcon size={18} className="text-[#02fb5c]" />
         </div>
 
@@ -191,10 +191,10 @@ const WebhookRow = ({ label, url, copied, onCopy, enabled }) => {
         <button
           disabled={!enabled}
           onClick={() => hasUrl && enabled && onCopy(url, label)}
-          className={`p-2 rounded-lg transition ${
+          className={`p-2 rounded-lg transition shadow-sm ${
             isCopied
-              ? "bg-[#02fb5c]/20 text-[#02fb5c] border border-[#02fb5c]/30"
-              : "text-gray-300 hover:bg-white/10"
+              ? "bg-[#02fb5c]/20 text-[#02fb5c] border border-[#02fb5c]/30 shadow-[#02fb5c]/20"
+              : "text-gray-300 hover:bg-white/10 shadow-black/10"
           }`}
         >
           {isCopied ? <CheckCircle2 size={16} /> : <Copy size={16} />}
@@ -265,7 +265,7 @@ export default function Api() {
             <div className="flex flex-wrap items-center gap-3">
               <button
                 onClick={() => setHidden(!hidden)}
-                className="flex items-center gap-2 px-5 py-2 rounded-full bg-[#02fb5c] hover:bg-[#29ff78] text-[#0b0b0b] font-semibold transition shadow-[0_0_15px_rgba(2,251,92,0.3)]"
+                className="flex items-center gap-2 px-5 py-2 rounded-full bg-[#02fb5c] hover:bg-[#29ff78] text-[#0b0b0b] font-semibold transition shadow-sm shadow-[#02fb5c]/20"
               >
                 {hidden ? <Eye size={16} /> : <EyeOff size={16} />}
                 {hidden ? "Show Keys" : "Hide Keys"}
@@ -273,7 +273,7 @@ export default function Api() {
 
               <a
                 href="/api/docs"
-                className="flex items-center gap-2 px-5 py-2 rounded-full border border-[#02fb5c]/40 text-[#02fb5c] font-semibold hover:bg-[#02fb5c]/10 transition shadow-[0_0_10px_rgba(2,251,92,0.2)]"
+                className="flex items-center gap-2 px-5 py-2 rounded-full border border-[#02fb5c]/40 text-[#02fb5c] font-semibold hover:bg-[#02fb5c]/10 transition shadow-sm shadow-[#02fb5c]/20"
               >
                 <BookOpen size={16} />
                 Documentation
