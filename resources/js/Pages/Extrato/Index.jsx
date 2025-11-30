@@ -11,14 +11,14 @@ import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout";
 import { Head } from "@inertiajs/react";
 import axios from "axios";
 
-/* === Lazy load dos componentes pesados === */
+/* === Lazy load === */
 const ExtratoHeader = lazy(() => import("@/Components/ExtratoHeader"));
 const ExtratoTable = lazy(() => import("@/Components/ExtratoTable"));
 const TransactionDetailModal = lazy(() =>
   import("@/Components/TransactionDetailModal")
 );
 
-/* === Skeleton básico para placeholders === */
+/* === Skeleton === */
 const SkeletonBlock = ({ height = 200 }) => (
   <div
     className="rounded-2xl border border-white/10 bg-[#0b0b0b]/80 animate-pulse shadow-inner"
@@ -26,9 +26,6 @@ const SkeletonBlock = ({ height = 200 }) => (
   />
 );
 
-/* =====================================================================================
-   COMPONENTE PRINCIPAL — Extrato Page (otimizado)
-===================================================================================== */
 export default function Extrato() {
   const [saldo, setSaldo] = useState(0);
   const [entradas, setEntradas] = useState(0);
@@ -44,11 +41,28 @@ export default function Extrato() {
 
   const perPage = 10;
   const CACHE_KEY = "extrato_cache_v1";
+  const TABLE_CACHE_KEY = "extract_table_cache_v1";
+
   const debounceRef = useRef(null);
 
-  /* =====================================================================================
+  /* ==========================================================
+     REFRESH HANDLER (NOVO)
+  ========================================================== */
+  const refreshHandler = (isSearch = false) => {
+    // se for busca → página sempre volta para 1
+    if (isSearch) {
+      setPage(1);
+      sessionStorage.removeItem(CACHE_KEY);
+      localStorage.removeItem(TABLE_CACHE_KEY);
+    }
+
+    // sempre refazer a requisição
+    fetchExtrato(false);
+  };
+
+  /* ==========================================================
      FETCH DATA (com cache leve)
-  ====================================================================================== */
+  ========================================================== */
   const fetchExtrato = useCallback(
     async (useCache = false) => {
       setLoadingTable(true);
@@ -59,8 +73,8 @@ export default function Extrato() {
           try {
             const { saldo, entradas, saidas, transactions, totalItems, ts } =
               JSON.parse(cached);
+
             if (Date.now() - ts < 60000) {
-              // cache válido por 1 min
               setSaldo(saldo);
               setEntradas(entradas);
               setSaidas(saidas);
@@ -88,20 +102,23 @@ export default function Extrato() {
           axios.get(`/api/list/pix?${query}`),
         ]);
 
+        /* BALANCE */
         const b = resBalance?.data?.data || {};
         const saldoAtual = Number(b.amount_available ?? 0);
         setSaldo(saldoAtual);
 
+        /* LIST */
         const list = resTx?.data?.transactions || [];
         setTransactions(list);
         setTotalItems(resTx?.data?.total ?? 0);
 
+        /* CREDIT / DEBIT SUM */
         let entradasTotal = 0;
         let saidasTotal = 0;
 
         for (const t of list) {
-          const status = (t.status || "").toLowerCase();
-          if (["paga", "paid", "approved"].includes(status)) {
+          const st = (t.status || "").toLowerCase();
+          if (["paga", "paid", "approved"].includes(st)) {
             if (t.credit) entradasTotal += Number(t.amount);
             else saidasTotal += Number(t.amount);
           }
@@ -110,7 +127,7 @@ export default function Extrato() {
         setEntradas(entradasTotal);
         setSaidas(saidasTotal);
 
-        // salva no cache
+        /* salva no cache */
         sessionStorage.setItem(
           CACHE_KEY,
           JSON.stringify({
@@ -131,20 +148,24 @@ export default function Extrato() {
     [page, statusFilter, searchTerm]
   );
 
-  /* =====================================================================================
-     DEBOUNCE — evita requisições a cada digitação
-  ====================================================================================== */
+  /* ==========================================================
+     DEBOUNCE → dispara o fetch após 400ms
+  ========================================================== */
   useEffect(() => {
     clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => {
-      fetchExtrato();
-    }, 400);
-    return () => clearTimeout(debounceRef.current);
-  }, [fetchExtrato]);
 
-  /* =====================================================================================
-     MODAL HANDLERS
-  ====================================================================================== */
+    debounceRef.current = setTimeout(() => {
+      // sempre que busca mudar → limpa cache da tabela
+      localStorage.removeItem(TABLE_CACHE_KEY);
+      fetchExtrato(false);
+    }, 400);
+
+    return () => clearTimeout(debounceRef.current);
+  }, [searchTerm, statusFilter, page]);
+
+  /* ==========================================================
+     MODAL
+  ========================================================== */
   const openModal = (tx) => {
     setSelectedTransaction(tx);
     setIsModalOpen(true);
@@ -155,15 +176,14 @@ export default function Extrato() {
     setTimeout(() => setSelectedTransaction(null), 150);
   };
 
-  /* =====================================================================================
-     RENDER
-  ====================================================================================== */
+  /* ========================================================== */
   return (
     <AuthenticatedLayout>
       <Head title="Extrato" />
 
       <div className="min-h-screen bg-[#0B0B0B] py-10 px-4 sm:px-6 lg:px-8 text-gray-100">
         <div className="max-w-6xl mx-auto space-y-8">
+          
           {/* HEADER */}
           <Suspense fallback={<SkeletonBlock height={160} />}>
             <ExtratoHeader
@@ -174,7 +194,7 @@ export default function Extrato() {
               setStatusFilter={setStatusFilter}
               searchTerm={searchTerm}
               setSearchTerm={setSearchTerm}
-              refresh={() => fetchExtrato(false)}
+              refresh={(isSearch) => refreshHandler(isSearch)}
             />
           </Suspense>
 
@@ -192,13 +212,15 @@ export default function Extrato() {
                 totalItems={totalItems}
                 perPage={perPage}
                 loading={loadingTable}
+                searchTerm={searchTerm}        // <-- IMPORTANTÍSSIMO
+                refresh={(p) => fetchExtrato(p)} // <-- PERMITE FORÇAR REFRESH
               />
             </Suspense>
           </div>
         </div>
       </div>
 
-      {/* MODAL DETALHE */}
+      {/* MODAL */}
       <Suspense fallback={null}>
         {selectedTransaction && (
           <TransactionDetailModal

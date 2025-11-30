@@ -99,8 +99,8 @@ const OriginPill = React.memo(({ type }) => {
     <span
       className={`inline-flex items-center gap-1.5 px-2 py-0.5 text-[11px] rounded-lg border font-medium ${
         credit
-          ? "bg-[#02fb5c]/10 text-[#02fb5c] border-[#02fb5c]/30"
-          : "bg-[#ff3b5c]/10 text-[#ff3b5c] border-[#ff3b5c]/30"
+          ? " bg-[#02fb5c]/10 text-[#02fb5c] border-[#02fb5c]/30"
+          : " bg-[#ff3b5c]/10 text-[#ff3b5c] border-[#ff3b5c]/30"
       }`}
     >
       {credit ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}
@@ -111,13 +111,13 @@ const OriginPill = React.memo(({ type }) => {
 OriginPill.displayName = "OriginPill";
 
 /* =====================================================================================
-   CACHE SYSTEM
+   CACHE
 ===================================================================================== */
 const CACHE_KEY = "extract_table_cache_v1";
-const CACHE_TTL = 30 * 1000; // 30 seconds
+const CACHE_TTL = 30 * 1000;
 
 /* =====================================================================================
-   MAIN COMPONENT — ExtractTable
+   MAIN COMPONENT
 ===================================================================================== */
 export default function ExtractTable({
   transactions = [],
@@ -127,8 +127,8 @@ export default function ExtractTable({
   perPage = 10,
   totalItems = 0,
   loading = false,
-  fetchTransactions,
-  searchTerm = "", // <-- ADICIONEI AQUI PARA CAPTURAR O TERMO DE BUSCA
+  refresh,
+  searchTerm = "",
 }) {
   const totalPages = useMemo(
     () => Math.max(1, Math.ceil(totalItems / perPage)),
@@ -138,8 +138,14 @@ export default function ExtractTable({
   const canPrev = page > 1;
   const canNext = page < totalPages;
 
-  /* === Cache management === */
+  const isSearching = searchTerm.trim() !== "";
+
+  /* ------------------------------------------------------------------
+     NÃO SALVAR CACHE SE HOUVER BUSCA
+  ------------------------------------------------------------------ */
   useEffect(() => {
+    if (isSearching) return; // 🔥 bloqueia salvamento
+
     if (!loading && transactions.length > 0) {
       localStorage.setItem(
         CACHE_KEY,
@@ -151,21 +157,42 @@ export default function ExtractTable({
         })
       );
     }
-  }, [transactions, loading, page, totalItems]);
+  }, [transactions, loading, page, totalItems, isSearching]);
 
+  /* ------------------------------------------------------------------
+     APAGAR CACHE QUANDO SEARCH MUDA
+  ------------------------------------------------------------------ */
   useEffect(() => {
+    if (isSearching) {
+      localStorage.removeItem(CACHE_KEY);
+    }
+  }, [isSearching]);
+
+  /* ------------------------------------------------------------------
+     FETCH AUTOMÁTICO QUANDO CACHE EXPIRAR (APENAS SEM SEARCH)
+  ------------------------------------------------------------------ */
+  useEffect(() => {
+    if (isSearching) return;
+
     const cache = JSON.parse(localStorage.getItem(CACHE_KEY));
     if (!cache) return;
-    const expired = Date.now() - cache.timestamp > CACHE_TTL;
-    if (expired && typeof fetchTransactions === "function") {
-      fetchTransactions(page);
-    }
-  }, [page, fetchTransactions]);
 
-  /* === Load from cache if available === */
+    const expired = Date.now() - cache.timestamp > CACHE_TTL;
+
+    if (expired && typeof refresh === "function") {
+      refresh(false);
+    }
+  }, [page, isSearching]);
+
+  /* ------------------------------------------------------------------
+     CARREGAMENTO DO CACHE (APENAS SEM SEARCH)
+  ------------------------------------------------------------------ */
   const cached = useMemo(() => {
+    if (isSearching) return null;
+
     const c = localStorage.getItem(CACHE_KEY);
     if (!c) return null;
+
     try {
       const json = JSON.parse(c);
       const valid = Date.now() - json.timestamp < CACHE_TTL;
@@ -173,15 +200,11 @@ export default function ExtractTable({
     } catch {
       return null;
     }
-  }, []);
+  }, [isSearching]);
 
-  /* =====================================================================================
-     🚨 CORREÇÃO — NÃO USAR CACHE QUANDO SEARCH ESTIVER ATIVO
-  ====================================================================================== */
-  const shouldBypassCache = searchTerm && searchTerm.trim() !== "";
-
+  /* FINAL: se está buscando → usa sempre dados reais */
   const activeTransactions =
-    shouldBypassCache || !cached?.transactions?.length
+    isSearching || !cached?.transactions?.length
       ? transactions
       : cached.transactions;
 
@@ -189,12 +212,12 @@ export default function ExtractTable({
 
   return (
     <div className="bg-[#0b0b0b]/95 border border-white/10 rounded-3xl p-6 backdrop-blur-sm min-h-[520px] flex flex-col justify-between transition-all duration-300">
+
       {/* HEADER */}
       <div>
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-base font-semibold text-white">
-            Transaction History
-          </h3>
+          <h3 className="text-base font-semibold text-white">Transaction History</h3>
+
           <span className="text-[11px] text-gray-400">
             {loading
               ? "Loading..."
@@ -240,21 +263,27 @@ export default function ExtractTable({
                     <td className="py-2.5 px-4 font-mono text-xs text-gray-300">
                       #{t.id}
                     </td>
+
                     <td className="py-2.5 px-4">
                       <OriginPill type={t.credit ? "PIX" : "SAQUE"} />
                     </td>
+
                     <td className="py-2.5 px-4 text-right font-semibold text-gray-200">
                       {formatCurrency(t.amount)}
                     </td>
+
                     <td className="py-2.5 px-4">
                       <StatusPill status={mapStatus(t.status)} />
                     </td>
+
                     <td className="py-2.5 px-4 font-mono text-xs text-gray-400">
                       {t.e2e ?? "—"}
                     </td>
+
                     <td className="py-2.5 px-4 text-gray-400">
                       {fmtDate(t.paidAt || t.createdAt)}
                     </td>
+
                     <td className="py-2.5 px-4 text-center">
                       <button
                         onClick={(e) => {
@@ -266,6 +295,7 @@ export default function ExtractTable({
                         <FileText size={13} /> Details
                       </button>
                     </td>
+
                   </tr>
                 ))
               )}
