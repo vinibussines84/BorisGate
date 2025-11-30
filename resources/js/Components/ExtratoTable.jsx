@@ -28,14 +28,14 @@ const fmtDate = (iso) => {
 };
 
 /* =====================================================================================
-   STATUS
+   STATUS MAP
 ===================================================================================== */
 const mapStatus = (s) => {
   const normalized = String(s || "").trim().toLowerCase();
 
   const groups = {
     COMPLETED: ["paga", "paid", "approved", "completed"],
-    FAILED: ["falha", "failed", "erro", "error"],
+    FAILED: ["falha", "failed", "erro", "error", "cancelada"],
     PENDING: ["pendente", "pending", "processing", "under_review"],
   };
 
@@ -99,8 +99,8 @@ const OriginPill = React.memo(({ type }) => {
     <span
       className={`inline-flex items-center gap-1.5 px-2 py-0.5 text-[11px] rounded-lg border font-medium ${
         credit
-          ? " bg-[#02fb5c]/10 text-[#02fb5c] border-[#02fb5c]/30"
-          : " bg-[#ff3b5c]/10 text-[#ff3b5c] border-[#ff3b5c]/30"
+          ? "bg-[#02fb5c]/10 text-[#02fb5c] border-[#02fb5c]/30"
+          : "bg-[#ff3b5c]/10 text-[#ff3b5c] border-[#ff3b5c]/30"
       }`}
     >
       {credit ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}
@@ -111,10 +111,10 @@ const OriginPill = React.memo(({ type }) => {
 OriginPill.displayName = "OriginPill";
 
 /* =====================================================================================
-   CACHE CONFIG
+   CONFIG
 ===================================================================================== */
 const CACHE_KEY = "extract_table_cache_v1";
-const CACHE_TTL = 30 * 1000;
+const CACHE_TTL = 15 * 1000; // 15s
 
 /* =====================================================================================
    MAIN COMPONENT
@@ -140,11 +140,11 @@ export default function ExtractTable({
   const isSearching = searchTerm.trim() !== "";
 
   /* ------------------------------------------------------------------
-     CACHE LOGIC
+     CACHE — usado só quando NÃO estiver pesquisando
   ------------------------------------------------------------------ */
   useEffect(() => {
-    if (isSearching) return;
-    if (!loading && transactions.length > 0) {
+    if (isSearching || loading) return;
+    if (transactions.length > 0) {
       localStorage.setItem(
         CACHE_KEY,
         JSON.stringify({
@@ -157,26 +157,32 @@ export default function ExtractTable({
     }
   }, [transactions, loading, page, totalItems, isSearching]);
 
+  // 🔥 limpa cache ao pesquisar (evita mostrar dados velhos)
   useEffect(() => {
     if (isSearching) localStorage.removeItem(CACHE_KEY);
   }, [isSearching]);
 
+  // 🔥 se o cache expirar, força refresh automático
   useEffect(() => {
     if (isSearching) return;
-    const cache = JSON.parse(localStorage.getItem(CACHE_KEY));
+    const cache = localStorage.getItem(CACHE_KEY);
     if (!cache) return;
-    const expired = Date.now() - cache.timestamp > CACHE_TTL;
-    if (expired && typeof refresh === "function") refresh(false);
+    const parsed = JSON.parse(cache);
+    const expired = Date.now() - parsed.timestamp > CACHE_TTL;
+    if (expired) refresh?.(true);
   }, [page, isSearching]);
 
+  /* ------------------------------------------------------------------
+     Aplica cache só se não estiver pesquisando
+  ------------------------------------------------------------------ */
   const cached = useMemo(() => {
     if (isSearching) return null;
     try {
       const c = localStorage.getItem(CACHE_KEY);
       if (!c) return null;
-      const json = JSON.parse(c);
-      const valid = Date.now() - json.timestamp < CACHE_TTL;
-      return valid ? json : null;
+      const parsed = JSON.parse(c);
+      const valid = Date.now() - parsed.timestamp < CACHE_TTL;
+      return valid ? parsed : null;
     } catch {
       return null;
     }
@@ -195,7 +201,9 @@ export default function ExtractTable({
       {/* HEADER */}
       <div>
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-base font-semibold text-white">Transaction History</h3>
+          <h3 className="text-base font-semibold text-white">
+            Transaction History
+          </h3>
           <span className="text-[11px] text-gray-400">
             {loading
               ? "Loading..."
@@ -222,7 +230,7 @@ export default function ExtractTable({
               {loading ? (
                 [...Array(perPage)].map((_, i) => (
                   <tr key={i} className="border-b border-white/5 animate-pulse">
-                    <td colSpan={7} className="py-4">&nbsp;</td>
+                    <td colSpan={7} className="py-4" />
                   </tr>
                 ))
               ) : activeTransactions.length === 0 ? (
@@ -254,9 +262,9 @@ export default function ExtractTable({
                       <StatusPill status={mapStatus(t.status)} />
                     </td>
 
-                    {/* 🔧 Corrigido: exibe e2e ou endtoend */}
+                    {/* ✅ Corrigido — mostra e2e tanto em Pix quanto em Saque */}
                     <td className="py-2.5 px-4 font-mono text-xs text-gray-400">
-                      {t.e2e || t.endtoend || "—"}
+                      {t.e2e || t.endtoend || t.e2e_id || "—"}
                     </td>
 
                     <td className="py-2.5 px-4 text-gray-400">

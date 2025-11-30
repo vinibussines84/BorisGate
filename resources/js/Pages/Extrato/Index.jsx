@@ -1,4 +1,3 @@
-// resources/js/Pages/Extrato/Index.jsx
 import React, {
   useEffect,
   useState,
@@ -42,45 +41,28 @@ export default function Extrato() {
   const perPage = 10;
   const CACHE_KEY = "extrato_cache_v1";
   const TABLE_CACHE_KEY = "extract_table_cache_v1";
-
   const debounceRef = useRef(null);
 
   /* ==========================================================
-     REFRESH HANDLER
-  ========================================================== */
-  const refreshHandler = (isSearch = false) => {
-    // 🔹 se for busca → volta pra página 1 e limpa cache
-    if (isSearch) {
-      setPage(1);
-    }
-
-    // 🔹 sempre limpar caches antes de refazer a requisição
-    sessionStorage.removeItem(CACHE_KEY);
-    localStorage.removeItem(TABLE_CACHE_KEY);
-
-    fetchExtrato(false);
-  };
-
-  /* ==========================================================
-     FETCH DATA (com cache leve)
+     FUNÇÃO PRINCIPAL DE BUSCA
   ========================================================== */
   const fetchExtrato = useCallback(
-    async (useCache = false) => {
+    async (force = false) => {
       setLoadingTable(true);
 
-      if (useCache) {
+      // 🔹 Cache leve
+      if (!force) {
         const cached = sessionStorage.getItem(CACHE_KEY);
         if (cached) {
           try {
-            const { saldo, entradas, saidas, transactions, totalItems, ts } =
-              JSON.parse(cached);
-
-            if (Date.now() - ts < 60000) {
-              setSaldo(saldo);
-              setEntradas(entradas);
-              setSaidas(saidas);
-              setTransactions(transactions);
-              setTotalItems(totalItems);
+            const parsed = JSON.parse(cached);
+            const valid = Date.now() - parsed.ts < 60000;
+            if (valid) {
+              setSaldo(parsed.saldo);
+              setEntradas(parsed.entradas);
+              setSaidas(parsed.saidas);
+              setTransactions(parsed.transactions);
+              setTotalItems(parsed.totalItems);
               setLoadingTable(false);
               return;
             }
@@ -103,20 +85,17 @@ export default function Extrato() {
           axios.get(`/api/list/pix?${query}`),
         ]);
 
-        /* BALANCE */
-        const b = resBalance?.data?.data || {};
-        const saldoAtual = Number(b.amount_available ?? 0);
+        const balanceData = resBalance?.data?.data || {};
+        const saldoAtual = Number(balanceData.amount_available ?? 0);
         setSaldo(saldoAtual);
 
-        /* LIST */
         const list = resTx?.data?.transactions || [];
         setTransactions(list);
         setTotalItems(resTx?.data?.total ?? 0);
 
-        /* CREDIT / DEBIT SUM */
+        // 🔹 somatórios
         let entradasTotal = 0;
         let saidasTotal = 0;
-
         for (const t of list) {
           const st = (t.status || "").toLowerCase();
           if (["paga", "paid", "approved"].includes(st)) {
@@ -124,11 +103,10 @@ export default function Extrato() {
             else saidasTotal += Number(t.amount);
           }
         }
-
         setEntradas(entradasTotal);
         setSaidas(saidasTotal);
 
-        /* salva no cache */
+        // 🔹 salvar cache
         sessionStorage.setItem(
           CACHE_KEY,
           JSON.stringify({
@@ -150,24 +128,24 @@ export default function Extrato() {
   );
 
   /* ==========================================================
-     FETCH AUTOMÁTICO (debounce para busca)
+     ATUALIZAÇÃO REATIVA E SEM BUGS
   ========================================================== */
   useEffect(() => {
-    // 🔹 se for mudança de status → força reload imediato
-    if (debounceRef.current) clearTimeout(debounceRef.current);
+    // 🔥 limpa caches a cada mudança de filtro ou busca
+    sessionStorage.removeItem(CACHE_KEY);
+    localStorage.removeItem(TABLE_CACHE_KEY);
 
-    if (searchTerm.trim() === "") {
-      // ao mudar statusFilter, recarrega imediatamente
-      fetchExtrato(false);
+    clearTimeout(debounceRef.current);
+
+    if (searchTerm.trim() !== "") {
+      // debounce apenas para busca
+      debounceRef.current = setTimeout(() => fetchExtrato(true), 400);
     } else {
-      // busca → delay de 400ms
-      debounceRef.current = setTimeout(() => {
-        fetchExtrato(false);
-      }, 400);
+      fetchExtrato(true);
     }
 
     return () => clearTimeout(debounceRef.current);
-  }, [searchTerm, statusFilter, page]);
+  }, [statusFilter, searchTerm, page]);
 
   /* ==========================================================
      MODAL
@@ -176,7 +154,6 @@ export default function Extrato() {
     setSelectedTransaction(tx);
     setIsModalOpen(true);
   };
-
   const closeModal = () => {
     setIsModalOpen(false);
     setTimeout(() => setSelectedTransaction(null), 150);
@@ -186,10 +163,8 @@ export default function Extrato() {
   return (
     <AuthenticatedLayout>
       <Head title="Extrato" />
-
       <div className="min-h-screen bg-[#0B0B0B] py-10 px-4 sm:px-6 lg:px-8 text-gray-100">
         <div className="max-w-6xl mx-auto space-y-8">
-          
           {/* HEADER */}
           <Suspense fallback={<SkeletonBlock height={160} />}>
             <ExtratoHeader
@@ -199,11 +174,11 @@ export default function Extrato() {
               statusFilter={statusFilter}
               setStatusFilter={(val) => {
                 setStatusFilter(val);
-                refreshHandler(false); // 🔥 força atualização ao trocar filtro
+                setPage(1);
               }}
               searchTerm={searchTerm}
               setSearchTerm={setSearchTerm}
-              refresh={(isSearch) => refreshHandler(isSearch)}
+              refresh={() => fetchExtrato(true)}
             />
           </Suspense>
 
@@ -222,7 +197,7 @@ export default function Extrato() {
                 perPage={perPage}
                 loading={loadingTable}
                 searchTerm={searchTerm}
-                refresh={(p) => fetchExtrato(p)}
+                refresh={() => fetchExtrato(true)}
               />
             </Suspense>
           </div>
