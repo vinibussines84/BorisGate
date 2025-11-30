@@ -4,6 +4,7 @@ import {
   Filter,
   RefreshCw,
   Search,
+  XCircle,
   CreditCard,
   ArrowUpRight,
   ArrowDownRight,
@@ -30,20 +31,17 @@ export default function ExtratoHeader({
   const tabRefs = useRef([]);
 
   /* ==========================================================
-     ANIMAÇÃO DA PÍLULA VERDE DO FILTRO SELECIONADO
+     ATUALIZA A “PÍLULA” DO STATUS SELECIONADO
   ========================================================== */
   const calcPill = useCallback(() => {
     const idx = STATUS_TABS.findIndex((s) => s.key === statusFilter);
     const el = tabRefs.current[idx];
-    if (el) {
-      const { offsetLeft, offsetWidth } = el;
-      setPillStyle({ left: offsetLeft, width: offsetWidth });
-    }
+    if (el) setPillStyle({ left: el.offsetLeft, width: el.offsetWidth });
   }, [statusFilter]);
 
   useEffect(() => {
-    const timeout = setTimeout(calcPill, 80);
-    return () => clearTimeout(timeout);
+    const t = setTimeout(calcPill, 80);
+    return () => clearTimeout(t);
   }, [calcPill]);
 
   /* ==========================================================
@@ -61,12 +59,20 @@ export default function ExtratoHeader({
   };
 
   /* ==========================================================
+     RESETAR FILTROS
+  ========================================================== */
+  const handleResetFilters = () => {
+    setSearchTerm("");
+    setStatusFilter("all");
+    refresh(true); // 🔥 força recarregar do zero
+  };
+
+  /* ==========================================================
      RENDER
   ========================================================== */
   return (
     <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[#0b0b0b]/95 p-6 sm:p-7 backdrop-blur-sm min-h-[180px] transition-all duration-300">
-
-      {/* CABEÇALHO SUPERIOR */}
+      {/* HEADER SUPERIOR */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div className="flex items-center gap-3">
           <div className="p-3 rounded-2xl border border-white/10 bg-[#0a0a0a]/90 shrink-0">
@@ -82,14 +88,25 @@ export default function ExtratoHeader({
           </div>
         </div>
 
-        <button
-          onClick={() => refresh(false)}
-          className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium 
-            text-gray-200 border border-white/10 rounded-lg bg-[#0a0a0a]/90 hover:bg-[#141414] transition-colors"
-        >
-          <RefreshCw size={14} className="text-gray-300" />
-          Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => refresh(false)}
+            className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium 
+              text-gray-200 border border-white/10 rounded-lg bg-[#0a0a0a]/90 hover:bg-[#141414] transition-colors"
+          >
+            <RefreshCw size={14} className="text-gray-300" />
+            Refresh
+          </button>
+
+          {/* RESET FILTERS */}
+          <button
+            onClick={handleResetFilters}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium 
+              text-[#ff3b5c] border border-[#ff3b5c]/40 rounded-lg bg-[#2b0000]/40 hover:bg-[#3a0000]/60 transition-colors"
+          >
+            <XCircle size={13} /> Reset
+          </button>
+        </div>
       </div>
 
       {/* SALDOS */}
@@ -147,7 +164,6 @@ export default function ExtratoHeader({
               className="absolute h-[28px] rounded-lg bg-[#02fb5c]/10 border border-[#02fb5c]/40 transition-all duration-300 ease-out"
               style={{ width: pillStyle.width, left: pillStyle.left }}
             />
-
             <div className="flex flex-nowrap space-x-1">
               {STATUS_TABS.map((s, i) => (
                 <button
@@ -156,7 +172,7 @@ export default function ExtratoHeader({
                   onClick={() => {
                     if (s.key !== statusFilter) {
                       setStatusFilter(s.key);
-                      refresh(false); // 🔥 força reload imediato
+                      refresh(false);
                     }
                   }}
                   className={`relative z-10 px-4 py-1 text-[11px] rounded-lg whitespace-nowrap transition-colors ${
