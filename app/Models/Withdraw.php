@@ -8,19 +8,14 @@ use Illuminate\Support\Facades\Schema;
 
 class Withdraw extends Model
 {
-    // use SoftDeletes;
-
-    /** Tabela correta (plural irregular) */
     protected $table = 'withdraws';
 
-    /** Status padronizados para evitar typos */
+    /** Status */
     public const STATUS_PENDING    = 'pending';
     public const STATUS_PROCESSING = 'processing';
     public const STATUS_PAID       = 'paid';
     public const STATUS_FAILED     = 'failed';
     public const STATUS_CANCELED   = 'canceled';
-    // Observação: se quiser usar "error" no banco, inclua no ENUM ou troque a coluna para VARCHAR.
-    // No código, trate erros transientes como FAILED para compatibilidade com o schema atual.
 
     /**
      * amount        = líquido
@@ -42,7 +37,9 @@ class Withdraw extends Model
         'pixkey_type',
 
         'idempotency_key',
-        'external_id', // ✅ campo do pedido externo
+        'external_id',
+
+        'provider_reference',  // ✅ CORREÇÃO CRÍTICA
 
         'pin_encrypted',
 
@@ -51,7 +48,6 @@ class Withdraw extends Model
         'canceled_at',
 
         'meta',
-        // 'created_source',
     ];
 
     protected $casts = [
@@ -65,8 +61,8 @@ class Withdraw extends Model
         'updated_at'    => 'datetime',
 
         'meta'          => 'array',
-
-        'external_id'   => 'string', // ✅ garante tipo correto
+        'external_id'   => 'string',
+        'provider_reference' => 'string', // ✅ adicionado
     ];
 
     protected $hidden = [
@@ -80,7 +76,7 @@ class Withdraw extends Model
         'origin',
     ];
 
-    /** Blindagem: remove atributos que não existem na tabela ao salvar */
+    /** Blindagem */
     protected static function booted(): void
     {
         $stripUnknown = function (Withdraw $m) {
@@ -106,23 +102,19 @@ class Withdraw extends Model
         static::saving($stripUnknown);
     }
 
-    /* =======================================
-     |  Relacionamentos
-     =======================================*/
+    /* ===============================================================
+     |  RELACIONAMENTOS
+     ===============================================================*/
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
     }
 
-    /* =======================================
-     |  Accessors / Helpers
-     =======================================*/
+    /* ===============================================================
+     |  HELPERS / ACCESSORS
+     ===============================================================*/
 
-    /** Acesso seguro ao external_id */
-    public function getExternalIdAttribute($value): ?string
-    {
-        return $value ?: data_get($this->meta, 'external_id');
-    }
+    /** Removido accessor conflitante de external_id */
 
     /** Origem deduzida */
     public function getOriginAttribute(): string
@@ -152,7 +144,7 @@ class Withdraw extends Model
         $v = (string) ($this->attributes['pixkey'] ?? '');
         if ($v === '') return '••••••';
 
-        $type = $this->attributes['pixkey_type'] ?? null;
+        $type = strtolower($this->attributes['pixkey_type'] ?? '');
 
         return match ($type) {
             'cpf'   => substr($v, 0, 3) . '.***.***-' . substr($v, -2),
@@ -170,7 +162,7 @@ class Withdraw extends Model
         };
     }
 
-    /** Label de status */
+    /** Label do status */
     public function getStatusLabelAttribute(): string
     {
         return match ((string) ($this->attributes['status'] ?? '')) {
@@ -196,7 +188,7 @@ class Withdraw extends Model
         };
     }
 
-    /** Valor bruto para estorno (fallback em amount + fee) */
+    /** Valor bruto para estorno */
     public function getRefundGrossAttribute(): ?float
     {
         $gross = $this->getAttribute('gross_amount');
@@ -210,58 +202,5 @@ class Withdraw extends Model
         }
 
         return null;
-    }
-
-    /* =======================================
-     |  Scopes
-     =======================================*/
-    public function scopeOwnedBy($query, int $userId)
-    {
-        return $query->where('user_id', $userId);
-    }
-
-    public function scopeStatus($query, ?string $status)
-    {
-        return $status ? $query->where('status', $status) : $query;
-    }
-
-    public function scopeSearch($query, ?string $term)
-    {
-        if (!$term) return $query;
-
-        $s = "%{$term}%";
-        return $query->where(function ($q) use ($s) {
-            $q->where('description', 'like', $s)
-              ->orWhere('pixkey', 'like', $s)
-              ->orWhere('idempotency_key', 'like', $s)
-              ->orWhere('external_id', 'like', $s); // ✅ busca por external_id
-        });
-    }
-
-    /** Itens criados via API (idempotency_key ou meta->api_request=true) */
-    public function scopeFromApi($q)
-    {
-        $table = $q->getModel()->getTable();
-
-        return $q->whereNotNull("{$table}.idempotency_key")
-                 ->orWhere(function ($w) use ($table) {
-                     if (Schema::hasColumn($table, 'meta')) {
-                         $w->where("{$table}.meta->api_request", true);
-                     }
-                 });
-    }
-
-    /** Itens criados pelo painel (sem idempotency_key e meta->api_request=false/null) */
-    public function scopeFromPainel($q)
-    {
-        $table = $q->getModel()->getTable();
-
-        return $q->whereNull("{$table}.idempotency_key")
-                 ->where(function ($w) use ($table) {
-                     if (Schema::hasColumn($table, 'meta')) {
-                         $w->whereNull("{$table}.meta->api_request")
-                           ->orWhere("{$table}.meta->api_request", false);
-                     }
-                 });
     }
 }
