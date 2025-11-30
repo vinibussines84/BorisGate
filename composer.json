@@ -13,6 +13,7 @@
         "laravel/framework": "^12.0",
         "laravel/horizon": "^5.38",
         "laravel/nightwatch": "^1.15",
+        "laravel/pulse": "^1.4",
         "laravel/reverb": "^1.6",
         "laravel/sanctum": "^4.2",
         "laravel/telescope": "^5.15",
