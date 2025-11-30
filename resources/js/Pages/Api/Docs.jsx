@@ -143,14 +143,14 @@ X-Auth-Key: <your_auth_key>
 X-Secret-Key: <your_secret_key>
 
 {
-  "amount": 500,
-  "key": "john@example.com",
+  "amount": 5.00,
+  "key": "hubsendsssss7@gmail.com",
   "key_type": "EMAIL",
-  "description": "Withdraw via API",
-  "external_id": "SAQUE-98765",
+  "description": "Saque de teste",
+  "external_id": "meu2m1aa223",
   "details": {
-    "name": "John Doe",
-    "document": "12345678900"
+    "name": "Helen Kassia",
+    "document": "03658611111"
   }
 }
 
@@ -160,10 +160,10 @@ Response:
   "message": "Saque solicitado com sucesso!",
   "data": {
     "id": 45,
-    "external_id": "SAQUE-98765",
-    "amount": 500,
-    "liquid_amount": 495,
-    "pix_key": "john@example.com",
+    "external_id": "meu2m1aa223",
+    "amount": 5.00,
+    "liquid_amount": 5.00,
+    "pix_key": "hubsendsssss7@gmail.com",
     "pix_key_type": "email",
     "status": "pending",
     "reference": "LUMNIS123456"
@@ -193,7 +193,6 @@ Response:
   "success": true,
   "data": {
     "id": 12,
-    "txid": "1994816896526934639",
     "external_id": "PEDIDO-12345",
     "amount": 49.9,
     "fee": 0,
@@ -231,9 +230,7 @@ Response:
         {/* Authentication */}
         <Section>
           <div className="p-6">
-            <h2 className="text-lg text-white font-medium mb-2">
-              Authentication
-            </h2>
+            <h2 className="text-lg text-white font-medium mb-2">Authentication</h2>
             <p className="text-sm text-zinc-400 mb-3">
               Use these headers to authenticate every API request.
             </p>
@@ -277,10 +274,7 @@ Response:
             </div>
             <ChevronDown
               size={18}
-              className={cls(
-                "text-zinc-400 transition-transform",
-                openCreate ? "rotate-180" : "rotate-0"
-              )}
+              className={cls("text-zinc-400 transition-transform", openCreate ? "rotate-180" : "rotate-0")}
             />
           </button>
           <Collapsible open={openCreate}>
@@ -298,19 +292,14 @@ Response:
           >
             <div className="flex items-center gap-3 text-white">
               <Badge>GET</Badge>
-              <span className="font-medium">
-                Transaction Status (by External ID)
-              </span>
+              <span className="font-medium">Transaction Status (by External ID)</span>
               <span className="hidden sm:inline text-xs text-zinc-500">
                 /v1/transaction/status/external/{"{external_id}"}
               </span>
             </div>
             <ChevronDown
               size={18}
-              className={cls(
-                "text-zinc-400 transition-transform",
-                openStatusExternal ? "rotate-180" : "rotate-0"
-              )}
+              className={cls("text-zinc-400 transition-transform", openStatusExternal ? "rotate-180" : "rotate-0")}
             />
           </button>
           <Collapsible open={openStatusExternal}>
@@ -335,10 +324,7 @@ Response:
             </div>
             <ChevronDown
               size={18}
-              className={cls(
-                "text-zinc-400 transition-transform",
-                openWithdraw ? "rotate-180" : "rotate-0"
-              )}
+              className={cls("text-zinc-400 transition-transform", openWithdraw ? "rotate-180" : "rotate-0")}
             />
           </button>
           <Collapsible open={openWithdraw}>
@@ -363,10 +349,7 @@ Response:
             </div>
             <ChevronDown
               size={18}
-              className={cls(
-                "text-zinc-400 transition-transform",
-                openBalance ? "rotate-180" : "rotate-0"
-              )}
+              className={cls("text-zinc-400 transition-transform", openBalance ? "rotate-180" : "rotate-0")}
             />
           </button>
           <Collapsible open={openBalance}>
@@ -384,38 +367,29 @@ Response:
               <h2 className="text-lg font-medium">Webhooks</h2>
             </div>
             <p className="text-sm text-zinc-400 leading-relaxed mb-4">
-              Webhooks are triggered asynchronously when transactions or withdraws
-              change status. Your endpoint must respond with{" "}
-              <code className="bg-black/40 border border-white/10 rounded px-2 py-0.5">
-                200 OK
-              </code>{" "}
+              Webhooks are triggered asynchronously when transactions or withdraws change status.
+              Your endpoint must respond with{" "}
+              <code className="bg-black/40 border border-white/10 rounded px-2 py-0.5">200 OK</code>{" "}
               to acknowledge receipt.
             </p>
 
             <div className="mt-3">
-              <h3 className="text-sm font-medium text-white mb-2">
-                Withdraw Webhook Status Types
-              </h3>
+              <h3 className="text-sm font-medium text-white mb-2">Withdraw Webhook Status Types</h3>
               <ul className="text-sm text-zinc-400 space-y-1 border-l border-white/10 pl-4">
                 <li>
-                  <span className="text-zinc-300 font-medium">PENDING</span> —
-                  Withdraw request created and pending processing.
+                  <span className="text-zinc-300 font-medium">PENDING</span> — Withdraw request created and pending processing.
                 </li>
                 <li>
-                  <span className="text-zinc-300 font-medium">APPROVED</span> —
-                  Withdraw approved and processing.
+                  <span className="text-zinc-300 font-medium">APPROVED</span> — Withdraw approved and processing.
                 </li>
                 <li>
-                  <span className="text-zinc-300 font-medium">PAID</span> —
-                  Withdraw successfully completed.
+                  <span className="text-zinc-300 font-medium">PAID</span> — Withdraw successfully completed.
                 </li>
                 <li>
-                  <span className="text-zinc-300 font-medium">ERROR</span> —
-                  Processing failed; amount refunded to wallet.
+                  <span className="text-zinc-300 font-medium">ERROR</span> — Processing failed; amount refunded to wallet.
                 </li>
                 <li>
-                  <span className="text-zinc-300 font-medium">FAILED</span> —
-                  Withdraw failed permanently; refunded to wallet.
+                  <span className="text-zinc-300 font-medium">FAILED</span> — Withdraw failed permanently; refunded to wallet.
                 </li>
               </ul>
             </div>
