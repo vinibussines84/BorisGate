@@ -61,13 +61,21 @@ class PodPayWithdrawWebhookController extends Controller
             }
 
             /* ============================================================
-             * 5️⃣ Regras de status
+             * 5️⃣ REGRAS DE STATUS → detectar falha, processamento ou sucesso
              * ============================================================ */
-            $isCompleted = $status === 'COMPLETED';
+
+            // CANCELADO pela PodPay (duas grafias)
+            $isCanceled = in_array($status, ['CANCELLED', 'CANCELED']);
+
+            // Falhas reconhecidas
             $isFailed =
+                $isCanceled ||
                 str_starts_with($description, 'failed') ||
+                str_contains($description, 'cancel') ||
                 str_contains($historyMsg, 'não encontramos') ||
-                in_array($status, ['FAILED', 'ERROR', 'CANCELED']);
+                in_array($status, ['FAILED', 'ERROR']);
+
+            // PROCESSING → somente ignorar
             $isProcessing = $status === 'PROCESSING' && !$isFailed;
 
             if ($isProcessing) {
@@ -94,8 +102,14 @@ class PodPayWithdrawWebhookController extends Controller
                     ]);
                 });
 
-                // 🔄 Dispara job assíncrono (com IDs)
-                SendWebhookWithdrawUpdatedJob::dispatch($user->id, $withdraw->id, 'FAILED', $reference, $payload);
+                // Envia webhook OUT
+                SendWebhookWithdrawUpdatedJob::dispatch(
+                    $user->id,
+                    $withdraw->id,
+                    'FAILED',
+                    $reference,
+                    $payload
+                );
 
                 Log::error('❌ Saque PodPay marcado como FAILED', [
                     'withdraw_id' => $withdraw->id,
@@ -108,6 +122,8 @@ class PodPayWithdrawWebhookController extends Controller
             /* ============================================================
              * 7️⃣ CASO DE SUCESSO → COMPLETED = pago
              * ============================================================ */
+            $isCompleted = $status === 'COMPLETED';
+
             if ($isCompleted) {
                 $e2e = $this->generatePixE2E($withdraw);
 
@@ -128,12 +144,20 @@ class PodPayWithdrawWebhookController extends Controller
                     'e2e'         => $e2e,
                 ]);
 
-                // 🔄 Dispara job assíncrono (com IDs)
-                SendWebhookWithdrawUpdatedJob::dispatch($user->id, $withdraw->id, 'APPROVED', $reference, $payload);
+                SendWebhookWithdrawUpdatedJob::dispatch(
+                    $user->id,
+                    $withdraw->id,
+                    'APPROVED',
+                    $reference,
+                    $payload
+                );
 
                 return response()->json(['success' => true, 'status' => 'paid']);
             }
 
+            /* ============================================================
+             * 8️⃣ Se chegar aqui → status não reconhecido
+             * ============================================================ */
             Log::warning('⚠️ Webhook PodPay status desconhecido', ['status' => $status]);
             return response()->json(['ignored' => true]);
 
