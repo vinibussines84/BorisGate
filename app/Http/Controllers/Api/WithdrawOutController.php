@@ -47,6 +47,23 @@ class WithdrawOutController extends Controller
             $request->merge(['key_type' => strtolower($request->input('key_type'))]);
 
             /* ============================================================
+             * 📞 Normalizar telefone se vier como +55DDDNUMERO
+             * ============================================================ */
+            if ($request->input('key_type') === 'phone') {
+
+                // remover tudo que não for número
+                $phone = preg_replace('/\D/', '', $request->input('key'));
+
+                // remover prefixo 55 se existir
+                if (str_starts_with($phone, '55')) {
+                    $phone = substr($phone, 2);
+                }
+
+                // jogar de volta no $request
+                $request->merge(['key' => $phone]);
+            }
+
+            /* ============================================================
              * 🧾 Validação
              * ============================================================ */
             $data = $request->validate([
@@ -197,7 +214,7 @@ class WithdrawOutController extends Controller
             });
 
             /* ============================================================
-             * 5️⃣ Enviar Webhook via Job (com IDs)
+             * 5️⃣ Enviar Webhook via Job
              * ============================================================ */
             if ($user->webhook_enabled && $user->webhook_out_url) {
                 SendWebhookWithdrawCreatedJob::dispatch(
