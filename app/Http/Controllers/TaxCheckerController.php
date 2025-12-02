@@ -57,15 +57,17 @@ class TaxCheckerController extends Controller
         $stats = $this->getDailyStats($startOfDay, $endOfDay, $userId);
 
         // 👤 Lista de usuários (para filtro)
-        $users = User::select('id', 'name', 'email')->orderBy('name')->get();
+        $users = User::select('id', 'nome_completo as name', 'email')
+            ->orderBy('nome_completo')
+            ->get();
 
         // Retorno Inertia
         return Inertia::render('TaxChecker', [
-            'transactions' => $transactions,
-            'stats' => $stats,
-            'users' => $users,
-            'selected_user_id' => $userId,
-            'date_range' => [
+            'transactions'      => $transactions,
+            'stats'             => $stats,
+            'users'             => $users,
+            'selected_user_id'  => $userId,
+            'date_range'        => [
                 'start' => $startOfDay->toDateTimeString(),
                 'end'   => $endOfDay->toDateTimeString(),
             ],
@@ -91,10 +93,10 @@ class TaxCheckerController extends Controller
         $profit = $liquid - $client;
 
         return response()->json([
-            'bruto' => $amount,
-            'liquido_liquidante' => $liquid,
-            'liquido_cliente' => $client,
-            'lucro' => $profit,
+            'bruto'               => $amount,
+            'liquido_liquidante'  => $liquid,
+            'liquido_cliente'     => $client,
+            'lucro'               => $profit,
         ]);
     }
 
