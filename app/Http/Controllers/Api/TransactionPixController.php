@@ -8,7 +8,7 @@ use Illuminate\Support\Facades\Log;
 use App\Models\Transaction;
 use App\Models\Withdraw;
 use App\Enums\TransactionStatus;
-use App\Services\SharkBank\SharkBankService;
+use App\Services\Pluggou\PluggouService;
 use App\Models\User;
 use App\Jobs\SendWebhookPixCreatedJob;
 use Carbon\Carbon;
@@ -16,9 +16,9 @@ use Carbon\Carbon;
 class TransactionPixController extends Controller
 {
     /**
-     * 🧾 Criação de uma nova transação PIX (Cash In) — usando SharkBank
+     * 🧾 Criação de uma nova transação PIX (Cash In) — usando Pluggou
      */
-    public function store(Request $request, SharkBankService $sharkbank)
+    public function store(Request $request, PluggouService $pluggou)
     {
         // 🔐 Autenticação via headers
         $auth   = $request->header('X-Auth-Key');
@@ -33,24 +33,17 @@ class TransactionPixController extends Controller
             return response()->json(['success' => false, 'error' => 'Invalid credentials.'], 401);
         }
 
-        // 🧩 Validação de dados
+        // 🧩 Validação dos dados recebidos
         $data = $request->validate([
-            'amount'       => ['required', 'numeric', 'min:0.01'],
-            'name'         => ['sometimes', 'string', 'max:100'],
-            'email'        => ['sometimes', 'email', 'max:120'],
-            'phone'        => ['sometimes', 'string', 'max:20'],
-            'document'     => ['sometimes', 'string', 'max:20'],
-            'external_id'  => ['required', 'string', 'max:64', 'regex:/^[A-Za-z0-9\-_]+$/'],
+            'amount'      => ['required', 'numeric', 'min:0.01'],
+            'name'        => ['sometimes', 'string', 'max:100'],
+            'email'       => ['sometimes', 'email', 'max:120'],
+            'external_id' => ['required', 'string', 'max:64', 'regex:/^[A-Za-z0-9\-_]+$/'],
         ]);
 
         $amountReais = (float) $data['amount'];
         $amountCents = (int) round($amountReais * 100);
         $externalId  = $data['external_id'];
-
-        // 🔐 Limite preventivo
-        if ($amountReais > 3000) {
-            return response()->json(['success' => false, 'error' => 'The maximum allowed PIX amount is R$3000.'], 422);
-        }
 
         // ❌ Evitar duplicidade
         if (Transaction::where('user_id', $user->id)
@@ -58,26 +51,14 @@ class TransactionPixController extends Controller
             ->exists()) {
             return response()->json([
                 'success' => false,
-                'error'   => "The external_id '{$externalId}' already exists for this user."
+                'error'   => "The external_id '{$externalId}' already exists for this user.",
             ], 409);
         }
 
-        // 🔢 CPF
-        $cpf = preg_replace('/\D/', '', ($data['document'] ?? $user->cpf_cnpj ?? ''));
-        if (!$cpf || strlen($cpf) !== 11 || !$this->validateCpf($cpf)) {
-            return response()->json(['success' => false, 'error' => 'Invalid CPF.', 'field' => 'document'], 422);
-        }
-
-        // 📞 Telefone
-        $phone = preg_replace('/\D/', '', ($data['phone'] ?? $user->phone ?? ''));
-        if (!$phone || strlen($phone) < 11 || strlen($phone) > 12) {
-            return response()->json(['success' => false, 'error' => 'Invalid phone number.', 'field' => 'phone'], 422);
-        }
-
-        $name  = $data['name']  ?? $user->name ?? $user->nome_completo ?? 'Client';
+        $name  = $data['name']  ?? $user->name ?? 'Cliente';
         $email = $data['email'] ?? $user->email ?? 'no-email@placeholder.com';
 
-        // 🧮 Criar transação local (sem Observer)
+        // 🧮 Cria transação local
         $tx = Transaction::create([
             'tenant_id'          => $user->tenant_id,
             'user_id'            => $user->id,
@@ -85,49 +66,57 @@ class TransactionPixController extends Controller
             'status'             => TransactionStatus::PENDENTE,
             'currency'           => 'BRL',
             'method'             => 'pix',
-            'provider'           => 'SharkBank',
+            'provider'           => 'Pluggou',
             'amount'             => $amountReais,
             'fee'                => $this->computeFee($user, $amountReais),
             'external_reference' => $externalId,
-            'provider_payload'   => compact('name', 'email', 'cpf', 'phone'),
+            'provider_payload'   => compact('name', 'email'),
             'ip'                 => $request->ip(),
             'user_agent'         => $request->userAgent(),
         ]);
 
-        // 🔗 Payload SharkBank
+        // 🔗 Payload Pluggou
         $payload = [
-            'amount'      => $amountCents,
-            'currency'    => 'BRL',
+            'amount'        => $amountCents,
             'paymentMethod' => 'pix',
-            'customer'    => [
-                'name'     => $name,
-                'email'    => $email,
-                'phone'    => $phone,
-                'document' => $cpf,
+            'pix' => [
+                'expiresInDays' => 1,
             ],
+            'items' => [[
+                'title'     => 'Pix',
+                'unitPrice' => $amountCents,
+                'quantity'  => 1,
+                'tangible'  => false,
+            ]],
+            'customer' => [
+                'name'  => $name,
+                'email' => $email,
+                'document' => [
+                    'number' => '07814854016', // CPF fixo (pode mudar se quiser dinâmico)
+                    'type'   => 'cpf',
+                ],
+            ],
+            'postbackUrl' => route('webhooks.pluggou'),
             'externalRef' => $externalId,
-            'callbackUrl' => route('webhooks.sharkbank'),
-            'description' => 'PIX via API SharkBank',
         ];
 
-        // 🚀 Cria transação via API SharkBank
+        // 🚀 Envia requisição à API Pluggou
         try {
-            $response = $sharkbank->createPixTransaction($payload);
+            $response = $pluggou->createTransaction($payload);
 
             if (!in_array($response['status'], [200, 201])) {
                 throw new \Exception(json_encode($response['body']));
             }
 
-            $body         = $response['body'];
-            $transactionId = data_get($body, 'id');
-            $qrCodeText    = data_get($body, 'pix.qrcode') ?? data_get($body, 'qrcode');
+            $body          = $response['body'];
+            $transactionId = data_get($body, 'data.id');
+            $qrCodeText    = data_get($body, 'data.pix.qrcode') ?? data_get($body, 'data.qrcode');
 
             if (!$transactionId || !$qrCodeText) {
-                throw new \Exception('Invalid SharkBank response');
+                throw new \Exception('Invalid Pluggou response');
             }
-
         } catch (\Throwable $e) {
-            Log::error('SHARKBANK_PIX_CREATE_ERROR', [
+            Log::error('PLUGGOU_PIX_CREATE_ERROR', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
             ]);
@@ -135,20 +124,19 @@ class TransactionPixController extends Controller
             return response()->json(['success' => false, 'error' => 'Failed to create PIX transaction.'], 500);
         }
 
-        // ⏰ Ajuste de timezone
+        // 🕒 Ajuste de timezone
         $createdAtBr = Carbon::now('America/Sao_Paulo')->toDateTimeString();
 
-        // 🧩 Atualizar transação (sem Observer)
+        // 🧩 Atualiza transação (sem observer)
         $cleanRaw = [
             'id'           => $transactionId,
-            'total'        => data_get($body, 'amount'),
+            'total'        => data_get($body, 'data.amount'),
             'method'       => 'PIX',
             'qrcode'       => $qrCodeText,
-            'status'       => data_get($body, 'status', 'PENDING'),
-            'currency'     => data_get($body, 'currency', 'BRL'),
+            'status'       => data_get($body, 'data.status', 'PENDING'),
+            'currency'     => 'BRL',
             'customer'     => $payload['customer'],
             'created_at'   => $createdAtBr,
-            'identifier'   => data_get($body, 'pix.end2EndId'),
             'external_ref' => $externalId,
         ];
 
@@ -156,12 +144,11 @@ class TransactionPixController extends Controller
             'txid'                    => $transactionId,
             'provider_transaction_id' => $transactionId,
             'provider_payload'        => [
-                'name'          => $name,
-                'email'         => $email,
-                'document'      => $cpf,
-                'phone'         => $phone,
-                'qr_code_text'  => $qrCodeText,
-                'provider_raw'  => $cleanRaw,
+                'name'         => $name,
+                'email'        => $email,
+                'cpf'          => '07814854016',
+                'qr_code_text' => $qrCodeText,
+                'provider_raw' => $cleanRaw,
             ],
         ]);
 
@@ -183,9 +170,7 @@ class TransactionPixController extends Controller
         ]);
     }
 
-    /**
-     * 🔍 Consulta via external_id
-     */
+    // 🔍 Consulta via external_id
     public function statusByExternal(Request $request, string $externalId)
     {
         $auth   = $request->header('X-Auth-Key');
@@ -200,65 +185,32 @@ class TransactionPixController extends Controller
             return response()->json(['success' => false, 'error' => 'Invalid credentials.'], 401);
         }
 
-        // PIX-IN
         $tx = Transaction::where('external_reference', $externalId)
             ->where('user_id', $user->id)
             ->first();
 
-        if ($tx) {
-            $payload = is_array($tx->provider_payload)
-                ? $tx->provider_payload
-                : json_decode($tx->provider_payload ?? '{}', true);
-
-            return response()->json([
-                'success' => true,
-                'type'    => 'pix_in',
-                'data'    => [
-                    'id'              => $tx->id,
-                    'external_id'     => $tx->external_reference,
-                    'status'          => $tx->status,
-                    'amount'          => (float) $tx->amount,
-                    'fee'             => (float) $tx->fee,
-                    'txid'            => $tx->txid,
-                    'identifier'      => data_get($payload, 'provider_raw.identifier'),
-                    'created_at'      => $tx->created_at,
-                    'updated_at'      => $tx->updated_at,
-                    'paid_at'         => $tx->paid_at,
-                    'provider_payload'=> $payload,
-                ]
-            ]);
+        if (!$tx) {
+            return response()->json(['success' => false, 'error' => 'Transaction not found.'], 404);
         }
 
-        // PIX-OUT
-        $withdraw = Withdraw::where('external_id', $externalId)
-            ->where('user_id', $user->id)
-            ->first();
+        $payload = is_array($tx->provider_payload)
+            ? $tx->provider_payload
+            : json_decode($tx->provider_payload ?? '{}', true);
 
-        if ($withdraw) {
-            $meta = is_array($withdraw->meta) ? $withdraw->meta : [];
-
-            return response()->json([
-                'success' => true,
-                'type'    => 'pix_out',
-                'data'    => [
-                    'id'            => $withdraw->id,
-                    'external_id'   => $withdraw->external_id,
-                    'status'        => $withdraw->status,
-                    'amount'        => (float) $withdraw->amount,
-                    'gross_amount'  => (float) $withdraw->gross_amount,
-                    'fee_amount'    => (float) $withdraw->fee_amount,
-                    'pix_key'       => $withdraw->pixkey,
-                    'pix_key_type'  => $withdraw->pixkey_type,
-                    'provider_ref'  => $withdraw->provider_reference,
-                    'endtoend'      => $meta['e2e'] ?? null,
-                    'receiver_name' => $meta['receiver_name'] ?? null,
-                    'receiver_bank' => $meta['receiver_bank'] ?? null,
-                    'paid_at'       => $meta['paid_at'] ?? $withdraw->processed_at,
-                ]
-            ]);
-        }
-
-        return response()->json(['success' => false, 'error' => 'No transaction or withdraw found for this external_id.'], 404);
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'id'              => $tx->id,
+                'external_id'     => $tx->external_reference,
+                'status'          => $tx->status,
+                'amount'          => (float) $tx->amount,
+                'fee'             => (float) $tx->fee,
+                'txid'            => $tx->txid,
+                'provider_payload'=> $payload,
+                'created_at'      => $tx->created_at,
+                'updated_at'      => $tx->updated_at,
+            ],
+        ]);
     }
 
     // 🔧 Helpers
@@ -273,16 +225,5 @@ class TransactionPixController extends Controller
         $fixed   = (float) ($user->tax_in_fixed ?? 0);
         $percent = (float) ($user->tax_in_percent ?? 0);
         return round(max(0, min($fixed + ($amount * $percent / 100), $amount)), 2);
-    }
-
-    private function validateCpf($cpf): bool
-    {
-        if (preg_match('/(\d)\1{10}/', $cpf)) return false;
-        for ($t = 9; $t < 11; $t++) {
-            for ($d = 0, $c = 0; $c < $t; $c++) $d += $cpf[$c] * (($t + 1) - $c);
-            $d = ((10 * $d) % 11) % 10;
-            if ($cpf[$c] != $d) return false;
-        }
-        return true;
     }
 }
