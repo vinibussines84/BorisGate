@@ -63,6 +63,23 @@ class SendWebhookPixUpdateJob implements ShouldQueue
 
             /**
              * ---------------------------------------------------------
+             * LIMPAR provider_payload
+             * ---------------------------------------------------------
+             */
+            $provider = $tx->provider_payload ?? [];
+
+            unset(
+                $provider['postbackUrl'],
+                $provider['redirectUrl'],
+                $provider['installments'],
+                $provider['interestRate'],
+                $provider['refusedReason'],
+                $provider['refundedAmount'],
+                $provider['authorizationCode']
+            );
+
+            /**
+             * ---------------------------------------------------------
              * MONTAGEM DO PAYLOAD FINAL (formato 100% LIMPO E PADRÃO)
              * ---------------------------------------------------------
              */
@@ -89,11 +106,11 @@ class SendWebhookPixUpdateJob implements ShouldQueue
                 "paid_at"          => optional($tx->paid_at)->toISOString(),
                 "canceled_at"      => optional($tx->canceled_at)->toISOString(),
 
-                // APENAS O PAYLOAD DE CRIAÇÃO (limpo)
-                "provider_payload" => $tx->provider_payload,
+                // provider_payload LIMPO
+                "provider_payload" => $provider,
             ];
 
-            // Envio
+            // Envio do webhook
             $response = Http::timeout(10)->post($u->webhook_in_url, $payload);
 
             Log::info('✅ Webhook Pix Update enviado com sucesso', [
@@ -105,7 +122,7 @@ class SendWebhookPixUpdateJob implements ShouldQueue
         } catch (\Throwable $e) {
             Log::warning('⚠️ Falha ao enviar webhook Pix Update', [
                 'transaction_id' => $this->txId,
-                'error' => $e->getMessage(),
+                'error'          => $e->getMessage(),
             ]);
             throw $e;
         }
