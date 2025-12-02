@@ -12,26 +12,26 @@ use Carbon\Carbon;
 
 class TaxCheckerController extends Controller
 {
-    /**
-     * Exibe a página do validador de taxas (apenas transações do dia atual).
-     */
     public function index(Request $request)
     {
         $user = $request->user();
 
-        // 🔒 Gate adicional (ex: apenas usuários autorizados)
+        // 🔒 Verificação de permissão
         if (Gate::denies('view-taxes')) {
             abort(403, 'Acesso não autorizado.');
         }
 
-        // 🕒 Período do dia atual: 00:00 → 23:59
+        // 🕒 Intervalo do dia atual
         $startOfDay = Carbon::today()->startOfDay();
         $endOfDay   = Carbon::today()->endOfDay();
 
-        // 🔍 Filtro opcional por usuário
-        $userId = $request->input('user_id');
+        // 🔍 Filtro de usuário
+        $userId = $request->integer('user_id');
 
-        // 📦 Buscar transações do dia
+        // 🔢 Itens por página
+        $perPage = $request->integer('per_page', 50);
+
+        // 📦 Transações do dia
         $query = Transaction::query()
             ->cashIn()
             ->whereBetween('created_at', [$startOfDay, $endOfDay]);
@@ -42,10 +42,10 @@ class TaxCheckerController extends Controller
 
         $transactions = $query
             ->latest()
-            ->paginate(20)
+            ->paginate($perPage)
             ->withQueryString();
 
-        // 💰 Calcular lucro esperado
+        // 💰 Cálculos
         $transactions->getCollection()->transform(function ($t) {
             $t->expected_liquid = $this->calcLiquidante($t->amount);
             $t->expected_client = $this->calcCliente($t->amount);
@@ -53,15 +53,14 @@ class TaxCheckerController extends Controller
             return $t;
         });
 
-        // 📊 Estatísticas gerais do dia
+        // 📊 Estatísticas
         $stats = $this->getDailyStats($startOfDay, $endOfDay, $userId);
 
-        // 👤 Lista de usuários (para filtro)
+        // 👤 Usuários para filtro
         $users = User::select('id', 'nome_completo as name', 'email')
             ->orderBy('nome_completo')
             ->get();
 
-        // Retorno Inertia
         return Inertia::render('TaxChecker', [
             'transactions'      => $transactions,
             'stats'             => $stats,
@@ -74,9 +73,6 @@ class TaxCheckerController extends Controller
         ]);
     }
 
-    /**
-     * Endpoint AJAX/API para simular cálculo de taxas.
-     */
     public function simulate(Request $request)
     {
         if (Gate::denies('view-taxes')) {
@@ -100,9 +96,6 @@ class TaxCheckerController extends Controller
         ]);
     }
 
-    /**
-     * 📈 Estatísticas do dia (00h–23h59)
-     */
     private function getDailyStats(Carbon $start, Carbon $end, ?int $userId = null): array
     {
         $txBase = Transaction::query()
@@ -128,22 +121,16 @@ class TaxCheckerController extends Controller
         ];
     }
 
-    /**
-     * 💰 Calcula o líquido recebido da liquidante.
-     */
     private function calcLiquidante(float $amount): float
     {
-        $taxPerc  = 1.5;  // 1.5%
-        $taxFixed = 0.10; // R$0,10 fixo
+        $taxPerc  = 1.5;
+        $taxFixed = 0.10;
         return round($amount - ($amount * $taxPerc / 100) - $taxFixed, 2);
     }
 
-    /**
-     * 💸 Calcula o líquido entregue ao cliente (sua taxa de 4%).
-     */
     private function calcCliente(float $amount): float
     {
-        $tax = 4.0; // 4%
+        $tax = 4.0;
         return round($amount - ($amount * $tax / 100), 2);
     }
 }
