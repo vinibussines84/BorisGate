@@ -15,7 +15,7 @@ class SendWebhookPixUpdateJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public int $txId;
+    protected int $txId;
 
     public function __construct(int $txId)
     {
@@ -25,6 +25,7 @@ class SendWebhookPixUpdateJob implements ShouldQueue
 
     public function handle(): void
     {
+        // 🔄 Recarregar SEMPRE a transação do banco
         $tx = Transaction::with('user')->find($this->txId);
 
         if (!$tx || !$tx->user) {
@@ -34,6 +35,7 @@ class SendWebhookPixUpdateJob implements ShouldQueue
             return;
         }
 
+        // Webhook desabilitado
         if (!$tx->user->webhook_enabled || !$tx->user->webhook_in_url) {
             Log::info("ℹ️ Usuário não tem webhook IN ativo", [
                 'user_id' => $tx->user_id,
@@ -43,6 +45,7 @@ class SendWebhookPixUpdateJob implements ShouldQueue
         }
 
         try {
+
             $payload = [
                 "type"            => "Pix Update",
                 "event"           => "updated",
@@ -76,12 +79,12 @@ class SendWebhookPixUpdateJob implements ShouldQueue
 
         } catch (\Throwable $e) {
 
-            Log::warning("⚠️ Webhook Pix Update falhou", [
-                'tx_id' => $tx->id,
-                'error' => $e->getMessage(),
+            Log::warning("⚠️ Falha ao enviar webhook Pix Update", [
+                'transaction_id' => $tx->id,
+                'error'          => $e->getMessage(),
             ]);
 
-            throw $e;
+            throw $e; // requeue
         }
     }
 }
