@@ -15,6 +15,38 @@ import NotificationBell from "@/Components/NotificationBell";
 
 const normalizePath = (p) => (p || "/").replace(/\/+$/, "").toLowerCase();
 
+/* ---------- Modal de confirmação ---------- */
+function LogoutConfirmModal({ open, onCancel, onConfirm }) {
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 backdrop-blur-sm transition">
+      <div className="bg-neutral-900 border border-neutral-700 rounded-2xl p-6 w-[90%] max-w-sm shadow-xl">
+        <h2 className="text-lg font-semibold text-white">Confirm Logout</h2>
+        <p className="text-neutral-400 text-sm mt-2">
+          Are you sure you want to logout?
+        </p>
+
+        <div className="flex justify-end gap-2 mt-5">
+          <button
+            onClick={onCancel}
+            className="px-4 py-2 text-sm rounded-lg bg-neutral-800 text-neutral-300 hover:bg-neutral-700 transition"
+          >
+            Cancel
+          </button>
+
+          <button
+            onClick={onConfirm}
+            className="px-4 py-2 text-sm rounded-lg bg-red-600 hover:bg-red-700 text-white transition"
+          >
+            Logout
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ---------- Logo ---------- */
 function BrandLogo({ className = "block h-[28px] w-auto md:h-[32px]" }) {
   return (
@@ -28,22 +60,10 @@ function BrandLogo({ className = "block h-[28px] w-auto md:h-[32px]" }) {
   );
 }
 
-/* ---------- Avatar Menu (100% FIXED) ---------- */
-function UserFavicon({ initials, closeMobile }) {
+/* ---------- Avatar Menu (COM CONFIRMAÇÃO) ---------- */
+function UserFavicon({ initials, closeMobile, openConfirm }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
-
-  const handleLogout = () => {
-    setOpen(false);
-    closeMobile?.(); // close mobile menu if open
-
-    // 🚀 SAFE LOGOUT (NO ZIGGY, NO route(), NO ERRORS)
-    router.post("/logout", {}, {
-      onFinish: () => {
-        document.body.style.overflow = "auto";
-      }
-    });
-  };
 
   useEffect(() => {
     const handleClick = (e) => {
@@ -51,7 +71,6 @@ function UserFavicon({ initials, closeMobile }) {
         setOpen(false);
       }
     };
-
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
@@ -71,7 +90,11 @@ function UserFavicon({ initials, closeMobile }) {
         <div className="absolute right-0 mt-2 w-40 rounded-xl border 
         border-neutral-800/70 bg-neutral-950 shadow-xl z-50">
           <button
-            onClick={handleLogout}
+            onClick={() => {
+              setOpen(false);
+              closeMobile?.();
+              openConfirm(); // abre o modal
+            }}
             className="flex items-center gap-2 w-full px-4 py-2 text-sm text-neutral-300 
             hover:bg-neutral-900/80 transition-colors"
           >
@@ -83,15 +106,13 @@ function UserFavicon({ initials, closeMobile }) {
   );
 }
 
-/* ---------- Main Layout ---------- */
+/* ---------- Layout Principal ---------- */
 export default function AuthenticatedLayout({ header, children, boxed = false }) {
   const page = usePage();
   const user = page?.props?.auth?.user;
-  const currentPath = normalizePath(
-    typeof window !== "undefined" ? window.location.pathname : page?.url || "/"
-  );
-
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [confirmLogout, setConfirmLogout] = useState(false);
+
   const closeMobileMenu = () => setMobileOpen(false);
 
   const initials = useMemo(() => {
@@ -100,6 +121,10 @@ export default function AuthenticatedLayout({ header, children, boxed = false })
       ? n.split(/\s+/).slice(0, 2).map((s) => s[0]?.toUpperCase()).join("")
       : "U";
   }, [user?.name]);
+
+  const currentPath = normalizePath(
+    typeof window !== "undefined" ? window.location.pathname : page?.url || "/"
+  );
 
   const nav = useMemo(
     () => [
@@ -125,17 +150,22 @@ export default function AuthenticatedLayout({ header, children, boxed = false })
   const primaryLinks = nav.map((item) => ({
     ...item,
     active: item.isDropdown
-      ? item.children.some((c) =>
-          currentPath.startsWith(normalizePath(c.href))
-        )
+      ? item.children.some((c) => currentPath.startsWith(normalizePath(c.href)))
       : currentPath === normalizePath(item.href) ||
         currentPath.startsWith(normalizePath(item.href)),
   }));
 
   return (
-    <div className="min-h-screen bg-[#0B0B0B] text-gray-100 flex flex-col" data-dark-root>
+    <div className="min-h-screen bg-[#0B0B0B] text-gray-100 flex flex-col">
 
-      {/* ===== TOPBAR ===== */}
+      {/* MODAL DE CONFIRMAÇÃO */}
+      <LogoutConfirmModal
+        open={confirmLogout}
+        onCancel={() => setConfirmLogout(false)}
+        onConfirm={() => router.post("/logout")}
+      />
+
+      {/* TOPBAR */}
       <header className="sticky top-0 z-50 border-b border-neutral-800/60 bg-[#0B0B0B]/95 backdrop-blur">
         <div className="flex items-center justify-between px-5 py-3">
 
@@ -154,16 +184,20 @@ export default function AuthenticatedLayout({ header, children, boxed = false })
 
           <div className="flex items-center gap-4">
             <NotificationBell />
-            <UserFavicon initials={initials} closeMobile={closeMobileMenu} />
+            <UserFavicon
+              initials={initials}
+              closeMobile={closeMobileMenu}
+              openConfirm={() => setConfirmLogout(true)}
+            />
           </div>
 
         </div>
       </header>
 
-      {/* ===== SIDEBAR DESKTOP ===== */}
-      <aside className="fixed inset-y-0 left-0 z-40 hidden w-[282px] lg:flex lg:flex-col 
-      lg:border-r lg:border-neutral-800/60 lg:bg-neutral-950">
-        
+      {/* SIDEBAR DESKTOP */}
+      <aside className="fixed inset-y-0 left-0 z-40 hidden w-[282px] 
+      lg:flex lg:flex-col lg:border-r lg:border-neutral-800/60 lg:bg-neutral-950">
+
         <div className="flex items-center gap-3 px-6 py-5 border-b border-neutral-800/70">
           <Link href="/dashboard" className="flex items-center gap-3">
             <BrandLogo />
@@ -202,7 +236,8 @@ export default function AuthenticatedLayout({ header, children, boxed = false })
                 ) : (
                   <Link
                     href={item.href}
-                    className={`flex items-center gap-3.5 rounded-xl px-3 py-2.5 text-[14.5px] transition ${
+                    className={`flex items-center gap-3.5 rounded-xl px-3 py-2.5 
+                    text-[14.5px] transition ${
                       item.active
                         ? "bg-neutral-900/90 text-neutral-100 ring-1 ring-neutral-700/70"
                         : "text-neutral-400 hover:bg-neutral-900/80 hover:text-neutral-100"
@@ -218,20 +253,25 @@ export default function AuthenticatedLayout({ header, children, boxed = false })
         </nav>
 
         <div className="border-t border-neutral-800/70 p-5">
-          <UserFavicon initials={initials} closeMobile={closeMobileMenu} />
+          <UserFavicon
+            initials={initials}
+            closeMobile={closeMobileMenu}
+            openConfirm={() => setConfirmLogout(true)}
+          />
         </div>
       </aside>
 
-      {/* ===== MOBILE MENU ===== */}
+      {/* MOBILE MENU */}
       {mobileOpen && (
         <div className="lg:hidden fixed inset-0 z-40 bg-black/80 backdrop-blur-sm">
-          
+
           <div className="absolute left-0 top-0 h-full w-64 bg-neutral-950 
           border-r border-neutral-800/60 shadow-xl p-5 space-y-4 overflow-y-auto">
 
             {primaryLinks.map((item) =>
               item.isDropdown ? (
                 <div key={item.key} className="space-y-2">
+
                   <div className="flex items-center gap-2 text-sm text-neutral-300 font-medium">
                     <item.icon size={16} />
                     {item.label}
@@ -269,11 +309,11 @@ export default function AuthenticatedLayout({ header, children, boxed = false })
               )
             )}
 
-            {/* Logout added inside mobile area */}
+            {/* Mobile logout */}
             <button
               onClick={() => {
                 closeMobileMenu();
-                router.post("/logout");
+                setConfirmLogout(true);
               }}
               className="flex items-center gap-2 w-full px-2 py-2 text-sm 
               text-neutral-300 hover:bg-neutral-900/80 rounded-lg mt-4"
@@ -285,7 +325,7 @@ export default function AuthenticatedLayout({ header, children, boxed = false })
         </div>
       )}
 
-      {/* ===== MAIN ===== */}
+      {/* MAIN */}
       <div className="lg:pl-[282px] flex-1 flex flex-col min-w-0">
         
         <main className="flex-1 px-5 sm:px-7 lg:px-9 py-7">
@@ -307,6 +347,7 @@ export default function AuthenticatedLayout({ header, children, boxed = false })
         </footer>
 
       </div>
+
     </div>
   );
 }
