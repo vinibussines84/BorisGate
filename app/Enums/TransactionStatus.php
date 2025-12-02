@@ -4,27 +4,27 @@ namespace App\Enums;
 
 enum TransactionStatus: string
 {
-    case FALHA        = 'falha';
-    case ERRO         = 'erro';
+    case FALHA        = 'falha';        // falha financeira real
+    case ERRO         = 'erro';         // erro interno / técnico
     case PAGA         = 'paga';
     case PENDENTE     = 'pendente';
-    case MED          = 'med';            // legado
-    case UNDER_REVIEW = 'under_review';   // novo status oficial p/ análise manual
+    case MED          = 'med';          // legado (mediação)
+    case UNDER_REVIEW = 'under_review'; // análise manual
 
-    /** 🔤 Rótulo humano */
+    /** Rótulo humano */
     public function label(): string
     {
         return match ($this) {
             self::FALHA        => 'Falha',
-            self::ERRO         => 'Erro',
+            self::ERRO         => 'Erro Interno',
             self::PAGA         => 'Paga',
             self::PENDENTE     => 'Pendente',
-            self::MED          => 'Med',
+            self::MED          => 'Em Mediação',
             self::UNDER_REVIEW => 'Em Análise',
         };
     }
 
-    /** 🎨 Cores para front/Filament */
+    /** Cor para Filament */
     public function color(): string
     {
         return match ($this) {
@@ -33,30 +33,43 @@ enum TransactionStatus: string
             self::PAGA         => 'success',
             self::PENDENTE     => 'secondary',
             self::MED          => 'info',
-            self::UNDER_REVIEW => 'warning', // amarelo, padrão p/ análise manual
+            self::UNDER_REVIEW => 'warning',
         };
     }
 
     /**
-     * 🧠 Normalização inteligente de strings → enum válido
-     * Aceita variações em PT-BR e EN-US
+     * 🔥 Normalização inteligente e compatível com PodPay
      */
     public static function fromLoose(string $value): self
     {
         $v = strtolower(trim($value));
 
         return match ($v) {
-            'falha', 'failed', 'fail'             => self::FALHA,
-            'erro', 'error'                       => self::ERRO,
-            'paga', 'paid'                        => self::PAGA,
-            'pendente', 'pending'                 => self::PENDENTE,
-            'med', 'mediacao', 'mediation'        => self::MED,
+            // Falhas comuns de gateways
+            'failed', 'fail', 'canceled', 'cancelled',
+            'refused', 'denied', 'rejected',
+            'expired', 'returned'              => self::FALHA,
 
-            // novas variações reconhecidas
-            'under_review', 'em_analise', 'analise', 'review' 
-                => self::UNDER_REVIEW,
+            // Erros internos
+            'erro', 'error'                    => self::ERRO,
 
-            default => self::PENDENTE, // fallback seguro
+            // Pago
+            'paga', 'paid', 'approved', 'confirmed'
+                                                => self::PAGA,
+
+            // Pendente
+            'pendente', 'pending', 'waiting'    => self::PENDENTE,
+
+            // Mediação / processamento
+            'med', 'mediation', 'processing',
+            'created', 'authorized'            => self::MED,
+
+            // Análise manual
+            'under_review', 'em_analise', 'review'
+                                                => self::UNDER_REVIEW,
+
+            // Fallback SEGURO → MED
+            default                             => self::MED,
         };
     }
 }

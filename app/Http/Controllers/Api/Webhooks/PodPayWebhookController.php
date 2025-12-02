@@ -9,21 +9,21 @@ use Illuminate\Support\Facades\Log;
 use App\Models\Transaction;
 use App\Enums\TransactionStatus;
 use App\Jobs\SendWebhookPixUpdateJob;
+use App\Services\WalletService;
 
 class PodPayWebhookController extends Controller
 {
-    public function __invoke(Request $request)
+    public function __invoke(Request $request, WalletService $wallet)
     {
         try {
             /* ============================================================
              * 1️⃣ Normaliza payload
              * ============================================================ */
-            $raw = $request->json()->all();
-            if (!$raw) {
-                $raw = json_decode($request->getContent(), true) ?? [];
-            }
+            $raw = $request->json()->all() 
+                ?: json_decode($request->getContent(), true) 
+                ?: [];
 
-            Log::info("📩 Webhook PodPay recebido", $raw);
+            Log::info("📩 Webhook PodPay PIX recebido", ['payload' => $raw]);
 
             $data = data_get($raw, 'data', []);
 
@@ -36,7 +36,7 @@ class PodPayWebhookController extends Controller
             }
 
             /* ============================================================
-             * 2️⃣ Localiza transação (lock para evitar concorrência)
+             * 2️⃣ Buscar transação com LOCK
              * ============================================================ */
             $tx = Transaction::query()
                 ->when($externalRef, fn($q) => $q->where('external_reference', $externalRef))
@@ -45,7 +45,7 @@ class PodPayWebhookController extends Controller
                 ->first();
 
             if (!$tx) {
-                Log::warning("⚠️ TX não encontrada (PodPay)", [
+                Log::warning("⚠️ TX não encontrada para webhook PodPay", [
                     'externalRef' => $externalRef,
                     'txid'        => $txid,
                 ]);
@@ -53,109 +53,85 @@ class PodPayWebhookController extends Controller
             }
 
             /* ============================================================
-             * 3️⃣ Ignora duplicações (idempotência)
+             * 3️⃣ Idempotência — se já é final, não processa denovo
              * ============================================================ */
-            if ($tx->isPaga()) {
-                Log::info("ℹ️ Ignorado: transação já paga", ['tx_id' => $tx->id]);
-                return response()->json(['ignored' => true, 'reason' => 'already_paid']);
-            }
-
-            /* ============================================================
-             * 4️⃣ Extrai informações úteis
-             * ============================================================ */
-            $endToEnd    = data_get($data, 'pix.end2EndId');
-            $paidCents   = (int) data_get($data, 'paidAmount', 0);
-            $amountReais = round($paidCents / 100, 2);
-            $paidAt      = data_get($data, 'paidAt');
-
-            /* ============================================================
-             * 5️⃣ Ignora status intermediários
-             * ============================================================ */
-            $nonFinal = ['WAITING_PAYMENT', 'PENDING', 'CREATED', 'PROCESSING', 'AUTHORIZED'];
-            if (in_array($status, $nonFinal)) {
-                Log::info("⏸ Ignorado: status intermediário {$status}", [
+            if (in_array($tx->status, [
+                TransactionStatus::PAGA->value,
+                TransactionStatus::FALHOU->value
+            ])) {
+                Log::info("ℹ️ Webhook ignorado: TX já finalizada", [
                     'tx_id'  => $tx->id,
+                    'status' => $tx->status
+                ]);
+                return response()->json(['ignored' => true]);
+            }
+
+            /* ============================================================
+             * 4️⃣ Converte status PodPay → status interno
+             * ============================================================ */
+            $map = [
+                'WAITING_PAYMENT' => TransactionStatus::PENDENTE,
+                'PENDING'         => TransactionStatus::PENDENTE,
+                'CREATED'         => TransactionStatus::MED,
+                'PROCESSING'      => TransactionStatus::MED,
+                'AUTHORIZED'      => TransactionStatus::MED,
+                'PAID'            => TransactionStatus::PAGA,
+                'APPROVED'        => TransactionStatus::PAGA,
+                'CONFIRMED'       => TransactionStatus::PAGA,
+
+                // Falhas
+                'FAILED'          => TransactionStatus::FALHA,
+                'ERROR'           => TransactionStatus::FALHA,
+                'CANCELED'        => TransactionStatus::FALHA,
+                'CANCELLED'       => TransactionStatus::FALHA,
+                'DENIED'          => TransactionStatus::FALHA,
+                'REJECTED'        => TransactionStatus::FALHA,
+                'REFUSED'         => TransactionStatus::FALHA,
+                'RETURNED'        => TransactionStatus::FALHA,
+                'EXPIRED'         => TransactionStatus::FALHA,
+            ];
+
+            $newStatus = $map[$status] ?? null;
+
+            if (!$newStatus) {
+                Log::warning("⚠️ Status desconhecido recebido da PodPay", [
                     'status' => $status,
+                    'tx_id'  => $tx->id
                 ]);
-                return response()->json(['ignored' => true, 'reason' => 'non_final_status']);
+                return response()->json(['ignored' => true]);
             }
 
+            $oldStatus = TransactionStatus::tryFrom($tx->status);
+
             /* ============================================================
-             * 6️⃣ Status final: pago ou falhou
+             * 5️⃣ Ajustar carteira (wallet) conforme mudança de status
              * ============================================================ */
-            if (in_array($status, ['PAID', 'APPROVED', 'CONFIRMED'])) {
+            // MUITO IMPORTANTE: não atualize a TX antes do wallet
+            $wallet->applyStatusChange($tx, $oldStatus, $newStatus);
 
-                $cleanPayload = [
-                    "id"            => data_get($data, 'id'),
-                    "type"          => data_get($data, 'type', 'transaction'),
-                    "paymentMethod" => data_get($data, 'paymentMethod'),
-                    "status"        => data_get($data, 'status'),
-                    "paidAt"        => $paidAt,
-                    "paidAmount"    => $paidCents,
-                    "paidReais"     => $amountReais,
-                    "pix" => [
-                        "qrcode"    => data_get($data, 'pix.qrcode'),
-                        "end2EndId" => $endToEnd,
-                    ],
-                ];
+            /* ============================================================
+             * 6️⃣ Atualizar transação no banco
+             * ============================================================ */
+            $this->updateTransaction($tx, $newStatus, $data);
 
-                DB::transaction(function () use ($tx, $txid, $endToEnd, $cleanPayload, $amountReais, $paidAt) {
-                    $tx->update([
-                        'status'                  => TransactionStatus::PAGA->value,
-                        'paid_at'                 => $paidAt ? now() : now(),
-                        'e2e_id'                  => $endToEnd ?: $tx->e2e_id,
-                        'provider_transaction_id' => $txid,
-                        'amount'                  => $amountReais ?: $tx->amount,
-                        'provider_payload'        => $cleanPayload,
-                    ]);
-                });
-
-                Log::info("✅ PodPay: transação confirmada como PAGA", [
-                    'transaction_id' => $tx->id,
-                    'externalRef'    => $tx->external_reference,
-                    'valor_reais'    => $amountReais,
-                ]);
-
-                /* ✅ DESPACHA O JOB COM O MODELO DIRETO (NÃO COM ID) */
-                if ($tx->user?->webhook_enabled && $tx->user?->webhook_in_url) {
-                    SendWebhookPixUpdateJob::dispatch($tx);
-                }
-
-                return response()->json(['success' => true, 'status' => 'paid']);
+            /* ============================================================
+             * 7️⃣ PIX IN — Enviar Webhook PARA O CLIENTE se foi pago
+             * ============================================================ */
+            if ($newStatus === TransactionStatus::PAGA &&
+                $tx->user?->webhook_enabled &&
+                $tx->user?->webhook_in_url
+            ) {
+                SendWebhookPixUpdateJob::dispatch($tx);
             }
 
-            /* ============================================================
-             * 7️⃣ Falhou
-             * ============================================================ */
-            if (in_array($status, ['FAILED', 'ERROR', 'CANCELED'])) {
-                DB::transaction(function () use ($tx, $txid, $status, $data) {
-                    $tx->update([
-                        'status'                  => TransactionStatus::FALHOU->value,
-                        'provider_transaction_id' => $txid,
-                        'provider_payload'        => $data,
-                    ]);
-                });
-
-                Log::warning("❌ PodPay: transação marcada como FALHOU", [
-                    'transaction_id' => $tx->id,
-                    'status'         => $status,
-                ]);
-
-                return response()->json(['success' => true, 'status' => 'failed']);
-            }
-
-            /* ============================================================
-             * 8️⃣ Status desconhecido
-             * ============================================================ */
-            Log::warning("⚠️ Webhook PodPay com status desconhecido", [
-                'status' => $status,
-                'tx_id'  => $tx->id,
+            return response()->json([
+                'success' => true,
+                'status'  => $newStatus->value
             ]);
 
-            return response()->json(['ignored' => true, 'reason' => 'unknown_status']);
-
         } catch (\Throwable $e) {
-            Log::error("🚨 ERRO NO WEBHOOK PODPAY", [
+
+            Log::error("🚨 ERRO NO WEBHOOK PODPAY PIX", [
                 'error'   => $e->getMessage(),
                 'trace'   => $e->getTraceAsString(),
                 'payload' => $request->getContent(),
@@ -163,5 +139,29 @@ class PodPayWebhookController extends Controller
 
             return response()->json(['error' => 'internal_error'], 500);
         }
+    }
+
+    /**
+     * Atualiza a Transaction no banco de forma segura
+     */
+    private function updateTransaction(Transaction $tx, TransactionStatus $newStatus, array $data)
+    {
+        DB::transaction(function () use ($tx, $newStatus, $data) {
+
+            $paidCents   = (int) data_get($data, 'paidAmount', 0);
+            $amountReais = round($paidCents / 100, 2);
+            $endToEnd    = data_get($data, 'pix.end2EndId');
+            $providerId  = data_get($data, 'id');
+            $paidAt      = data_get($data, 'paidAt');
+
+            $tx->update([
+                'status'                  => $newStatus->value,
+                'paid_at'                 => $paidAt ?: $tx->paid_at,
+                'provider_transaction_id' => $providerId,
+                'e2e_id'                  => $endToEnd ?: $tx->e2e_id,
+                'amount'                  => $amountReais ?: $tx->amount,
+                'provider_payload'        => $data,
+            ]);
+        });
     }
 }

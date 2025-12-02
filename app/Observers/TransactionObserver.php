@@ -4,13 +4,11 @@ namespace App\Observers;
 
 use App\Enums\TransactionStatus;
 use App\Models\Transaction;
-use App\Models\WebhookLog;
 use App\Models\Notification;
 use App\Services\WalletService;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Http;
 
 class TransactionObserver
 {
@@ -52,84 +50,6 @@ class TransactionObserver
         }
     }
 
-    /**
-     * Envia webhook e registra log
-     */
-    private function sendWebhook(Transaction $t, string $event): void
-    {
-        $user = $t->user;
-
-        if (!$user || !$user->webhook_enabled || empty($user->webhook_in_url)) {
-            return;
-        }
-
-        // Limpando payload
-        $cleanPayload = $t->provider_payload;
-
-        if (is_array($cleanPayload)) {
-            unset($cleanPayload['provider_response']);
-            unset($cleanPayload['qr_code_text']);
-        }
-
-        if (is_object($cleanPayload)) {
-            unset($cleanPayload->provider_response);
-            unset($cleanPayload->qr_code_text);
-        }
-
-        $payload = [
-            'type'             => $event === 'created' ? 'Pix Create' : 'Pix Update',
-            'event'            => $event,
-            'transaction_id'   => $t->id,
-            'external_id'      => $t->external_reference ?? null, // ✅ incluído também nos updates
-            'user'             => $user->name,
-            'amount'           => $t->amount,
-            'fee'              => $t->fee,
-            'currency'         => $t->currency,
-            'status'           => $t->status,
-            'txid'             => $t->txid,
-            'e2e'              => $t->e2e_id,
-            'direction'        => $t->direction,
-            'method'           => $t->method,
-            'created_at'       => $t->created_at,
-            'updated_at'       => $t->updated_at,
-            'paid_at'          => $t->paid_at,
-            'canceled_at'      => $t->canceled_at,
-            'provider_payload' => $cleanPayload,
-        ];
-
-        try {
-            $response = Http::timeout(10)
-                ->withHeaders(['Content-Type' => 'application/json'])
-                ->post($user->webhook_in_url, $payload);
-
-            WebhookLog::create([
-                'user_id'        => $user->id,
-                'type'           => 'in',
-                'url'            => $user->webhook_in_url,
-                'payload'        => $payload,
-                'status'         => $response->successful() ? 'success' : 'error',
-                'response_code'  => $response->status(),
-                'response_body'  => $response->body(),
-            ]);
-        } catch (\Throwable $e) {
-            WebhookLog::create([
-                'user_id'        => $user->id,
-                'type'           => 'in',
-                'url'            => $user->webhook_in_url,
-                'payload'        => $payload,
-                'status'         => 'error',
-                'response_code'  => null,
-                'response_body'  => $e->getMessage(),
-            ]);
-
-            Log::error('Webhook failed', [
-                'tx_id' => $t->id,
-                'event' => $event,
-                'error' => $e->getMessage(),
-            ]);
-        }
-    }
-
     public function saving(Transaction $t): void
     {
         $old = $this->asEnum($t->getOriginal('status')) ?? TransactionStatus::PENDENTE;
@@ -142,10 +62,6 @@ class TransactionObserver
         $this->applyTimestamps($t, $old, $new);
     }
 
-    /**
-     * 🚫 Removido o envio de webhook duplicado ao criar transação.
-     * Mantém apenas lógica de notificação e carteira.
-     */
     public function created(Transaction $t): void
     {
         $new = $this->asEnum($t->status) ?? TransactionStatus::PENDENTE;
@@ -159,7 +75,7 @@ class TransactionObserver
             ]);
         }
 
-        // Wallet
+        // Atualização de carteira
         if (in_array($new, [TransactionStatus::PAGA, TransactionStatus::MED], true)) {
             try {
                 DB::transaction(function () use ($t, $new) {
@@ -175,8 +91,7 @@ class TransactionObserver
             }
         }
 
-        // ❌ Webhook removido daqui
-        // $this->sendWebhook($t, 'created');
+        // ❌ Webhook removido DEFINITIVAMENTE
     }
 
     public function updated(Transaction $t): void
@@ -207,7 +122,7 @@ class TransactionObserver
             ]);
         }
 
-        // Wallet
+        // Atualização de carteira
         try {
             DB::transaction(function () use ($t, $old, $new) {
                 $this->wallet->applyStatusChange($t, $old, $new);
@@ -221,7 +136,7 @@ class TransactionObserver
             ]);
         }
 
-        // ✅ Webhook só no updated (ex: quando status muda para PAGA)
-        $this->sendWebhook($t, 'updated');
+        // ❌ Webhook completamente removido do updated
+        // $this->sendWebhook($t, 'updated');
     }
 }

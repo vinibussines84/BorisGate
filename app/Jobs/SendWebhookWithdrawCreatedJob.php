@@ -21,9 +21,6 @@ class SendWebhookWithdrawCreatedJob implements ShouldQueue
     protected string $status;
     protected ?string $providerReference;
 
-    /**
-     * Cria uma nova instância do job.
-     */
     public function __construct(int $userId, int $withdrawId, string $status, ?string $providerReference = null)
     {
         $this->userId = $userId;
@@ -34,9 +31,6 @@ class SendWebhookWithdrawCreatedJob implements ShouldQueue
         $this->onQueue('webhooks');
     }
 
-    /**
-     * Executa o job.
-     */
     public function handle(): void
     {
         $user = User::find($this->userId);
@@ -50,17 +44,17 @@ class SendWebhookWithdrawCreatedJob implements ShouldQueue
             return;
         }
 
-        try {
-            if (!$user->webhook_enabled || !$user->webhook_out_url) {
-                Log::info("ℹ️ Webhook de saque ignorado: usuário sem webhook configurado.", [
-                    'user_id' => $user->id,
-                    'withdraw_id' => $withdraw->id,
-                ]);
-                return;
-            }
+        if (!$user->webhook_enabled || !$user->webhook_out_url) {
+            Log::info("ℹ️ Webhook ignorado: usuário sem webhook configurado.", [
+                'user_id' => $user->id,
+            ]);
+            return;
+        }
 
+        try {
             $payload = [
                 'event' => 'withdraw.created',
+                'event_id' => "withdraw_created_{$withdraw->id}",
                 'data' => [
                     'id'            => $withdraw->id,
                     'external_id'   => $withdraw->external_id,
@@ -70,19 +64,29 @@ class SendWebhookWithdrawCreatedJob implements ShouldQueue
                     'pix_key_type'  => $withdraw->pixkey_type,
                     'status'        => $this->status,
                     'reference'     => $this->providerReference,
-                ],
+                ]
             ];
 
-            $response = Http::timeout(10)->post($user->webhook_out_url, $payload);
+            // Assinatura para segurança
+            $signature = hash_hmac('sha256', json_encode($payload), $user->secretkey);
 
-            Log::info("✅ Webhook de saque enviado", [
+            $response = Http::timeout(5)
+                ->retry(3, 150) // tenta 3x
+                ->withHeaders([
+                    'X-Signature' => $signature,
+                    'X-Webhook-Event' => 'withdraw.created',
+                ])
+                ->post($user->webhook_out_url, $payload);
+
+            Log::info("✅ Webhook withdraw.created enviado", [
                 'user_id' => $user->id,
                 'withdraw_id' => $withdraw->id,
                 'status' => $response->status(),
                 'response' => $response->body(),
             ]);
+
         } catch (\Throwable $e) {
-            Log::warning("⚠️ Falha ao enviar webhook de saque", [
+            Log::error("❌ Falha ao enviar webhook withdraw.created", [
                 'user_id' => $user->id,
                 'withdraw_id' => $withdraw->id,
                 'error' => $e->getMessage(),

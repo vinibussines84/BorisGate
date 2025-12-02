@@ -5,152 +5,185 @@ namespace App\Services;
 use App\Enums\TransactionStatus;
 use App\Models\Transaction;
 use App\Models\User;
+use Illuminate\Support\Facades\DB;
 
 class WalletService
 {
     /**
-     * Aplica efeitos de carteira quando o status muda.
-     *
-     * Regras principais pedidas:
-     * - Entrou em MED => tirar do available EXATAMENTE 1x o valor BRUTO e bloquear o BRUTO.
-     * - MED → PENDENTE => desbloqueia (blocked -= bruto aplicado) e NÃO devolve ao available.
-     * - MED → PAGA     => libera bloqueio e credita APENAS o líquido em available.
-     * - MED → ERRO/FALHA => não altera carteira.
-     *
-     * Saldos podem negativar.
+     * Aplica alterações de saldo de forma SEGURA e ATÔMICA.
+     * Compatível com todos os status atualizados.
      */
     public function applyStatusChange(Transaction $t, ?TransactionStatus $old, TransactionStatus $new): void
     {
-        /** @var User|null $u */
-        $u = $t->user()->lockForUpdate()->first();
-        if (! $u) return;
+        DB::transaction(function () use ($t, $old, $new) {
 
-        $isCashIn = ($t->direction === 'in');
+            /** Lock no usuário */
+            $u = User::where('id', $t->user_id)
+                ->lockForUpdate()
+                ->first();
 
-        $gross = (float) $t->amount;
-        $net   = $isCashIn ? $this->calcNetForUser($u, $gross) : $gross;
-
-        $prevAppliedAvail = (float) ($t->applied_available_amount ?? 0.0);
-        $prevAppliedBlock = (float) ($t->applied_blocked_amount   ?? 0.0);
-
-        // ============================
-        // ENTRADA EM MED (1ª vez)
-        // ============================
-        if ($isCashIn && $new === TransactionStatus::MED && $prevAppliedBlock <= 0.0) {
-            // Regra: retirar do available UMA ÚNICA VEZ o BRUTO e bloquear BRUTO
-            $u->amount_available = (float) $u->amount_available - $gross;
-            $u->blocked_amount   = (float) $u->blocked_amount   + $gross;
-            $u->save();
-
-            // Atualiza rastro: agora há BRUTO bloqueado; nada aplicado em available por esta transação
-            $t->applied_available_amount = 0.0;
-            $t->applied_blocked_amount   = $gross;
-            return;
-        }
-
-        // ============================
-        // CASOS ESPECIAIS: MED -> ...
-        // ============================
-        if ($isCashIn && $old === TransactionStatus::MED) {
-
-            // MED → PENDENTE: tirar do blocked e NÃO devolver ao available (valor “some”)
-            if ($new === TransactionStatus::PENDENTE) {
-                $u->blocked_amount = (float) $u->blocked_amount - $prevAppliedBlock;
-                $u->save();
-
-                $t->applied_available_amount = 0.0;
-                $t->applied_blocked_amount   = 0.0;
+            if (!$u) {
                 return;
             }
 
-            // MED → PAGA: liberar bloqueio (bruto) e creditar LÍQUIDO em available
-            if ($new === TransactionStatus::PAGA) {
-                $u->blocked_amount   = (float) $u->blocked_amount - $prevAppliedBlock;
-                $u->amount_available = (float) $u->amount_available + $net;
-                $u->save();
-
-                $t->applied_available_amount = $net;
-                $t->applied_blocked_amount   = 0.0;
-                return;
+            /** Direção válida */
+            if (!in_array($t->direction, ['in', 'out'])) {
+                throw new \Exception("Invalid transaction direction: {$t->direction}");
             }
 
-            // MED → ERRO / FALHA: não mexe na carteira
-            if (in_array($new, [TransactionStatus::ERRO, TransactionStatus::FALHA], true)) {
-                return;
-            }
-            // Outras transições a partir de MED caem na regra padrão mais abaixo
-        }
+            $isCashIn = ($t->direction === 'in');
 
-        // ============================
-        // CASO ESPECIAL: PAGA → MED (já vinha pago)
-        // ============================
-        if ($isCashIn && $old === TransactionStatus::PAGA && $new === TransactionStatus::MED) {
-            // Regra do cliente: ao bloquear, retirar do available o BRUTO 1x e bloquear BRUTO
-            // IMPORTANTE: não subtrair "de novo" nada além do BRUTO, nem remover o líquido previamente.
-            if ($prevAppliedBlock <= 0.0) {
-                $u->amount_available = (float) $u->amount_available - $gross;
-                $u->blocked_amount   = (float) $u->blocked_amount   + $gross;
+            /** Valores */
+            $gross = round((float) $t->amount, 2);
+            $net   = $isCashIn ? $this->calcNetForUser($u, $gross) : $gross;
+
+            /** Rastro anterior */
+            $prevAppliedAvail = round((float) $t->applied_available_amount ?? 0, 2);
+            $prevAppliedBlock = round((float) $t->applied_blocked_amount   ?? 0, 2);
+
+            /**
+             * ============================================================
+             * STATUS ESPECIAL: UNDER_REVIEW 🟡
+             * - Funciona EXATAMENTE como MED
+             * ============================================================
+             */
+            if ($new === TransactionStatus::UNDER_REVIEW) {
+                $new = TransactionStatus::MED;
+            }
+
+
+            /**
+             * ============================================================
+             * ENTRADA EM MED (1ª vez)  → bloqueia BRUTO uma vez
+             * ============================================================
+             */
+            if ($isCashIn && $new === TransactionStatus::MED && $prevAppliedBlock <= 0) {
+
+                $u->amount_available = round($u->amount_available - $gross, 2);
+                $u->blocked_amount   = round($u->blocked_amount + $gross, 2);
                 $u->save();
 
-                $t->applied_available_amount = 0.0;
+                $t->applied_available_amount = 0;
                 $t->applied_blocked_amount   = $gross;
+                $t->save();
+                return;
             }
-            return;
-        }
 
-        // ============================
-        // REGRA PADRÃO (demais casos)
-        // ============================
-        $targetAppliedAvail = 0.0;
-        $targetAppliedBlock = 0.0;
 
-        if ($isCashIn) {
-            switch ($new) {
-                case TransactionStatus::PAGA:
-                    // credita LÍQUIDO
-                    $targetAppliedAvail = $net;
-                    $targetAppliedBlock = 0.0;
-                    break;
+            /**
+             * ============================================================
+             * MED → alguma coisa
+             * ============================================================
+             */
+            if ($isCashIn && $old === TransactionStatus::MED) {
 
-                case TransactionStatus::MED:
-                    // Se caiu aqui é porque já havia bloqueio aplicado; não reaplica
-                    $targetAppliedAvail = 0.0;
-                    $targetAppliedBlock = $prevAppliedBlock > 0.0 ? $prevAppliedBlock : 0.0;
-                    break;
+                // MED → PENDENTE
+                if ($new === TransactionStatus::PENDENTE) {
 
-                case TransactionStatus::PENDENTE:
-                case TransactionStatus::FALHA:
-                case TransactionStatus::ERRO:
-                default:
-                    $targetAppliedAvail = 0.0;
-                    $targetAppliedBlock = 0.0;
-                    break;
+                    $u->blocked_amount = round($u->blocked_amount - $prevAppliedBlock, 2);
+                    $u->save();
+
+                    $t->applied_available_amount = 0;
+                    $t->applied_blocked_amount   = 0;
+                    $t->save();
+                    return;
+                }
+
+                // MED → PAGA
+                if ($new === TransactionStatus::PAGA) {
+
+                    $u->blocked_amount   = round($u->blocked_amount - $prevAppliedBlock, 2);
+                    $u->amount_available = round($u->amount_available + $net, 2);
+                    $u->save();
+
+                    $t->applied_available_amount = $net;
+                    $t->applied_blocked_amount   = 0;
+                    $t->save();
+                    return;
+                }
+
+                // MED → ERRO ou FALHA → não modifica carteira
+                if (in_array($new, [TransactionStatus::ERRO, TransactionStatus::FALHA], true)) {
+                    return;
+                }
             }
-        } else {
-            // cash-out: personalize conforme sua regra
+
+
+            /**
+             * ============================================================
+             * PAGA → MED (Reversão rara)
+             * ============================================================
+             */
+            if ($isCashIn && $old === TransactionStatus::PAGA && $new === TransactionStatus::MED) {
+
+                // Bloqueia novamente o bruto apenas 1x
+                if ($prevAppliedBlock <= 0) {
+                    $u->amount_available = round($u->amount_available - $gross, 2);
+                    $u->blocked_amount   = round($u->blocked_amount + $gross, 2);
+                    $u->save();
+
+                    $t->applied_available_amount = 0;
+                    $t->applied_blocked_amount   = $gross;
+                    $t->save();
+                }
+
+                return;
+            }
+
+
+            /**
+             * ============================================================
+             * REGRA PADRÃO PARA CASH-IN
+             * ============================================================
+             */
             $targetAppliedAvail = 0.0;
             $targetAppliedBlock = 0.0;
-        }
 
-        // deltas padrão (bloqueio consome available quando aumenta)
-        $deltaBlock = $targetAppliedBlock - $prevAppliedBlock;
-        $deltaAvail = ($targetAppliedAvail - $prevAppliedAvail) - $deltaBlock;
+            if ($isCashIn) {
+                switch ($new) {
 
-        $u->amount_available = (float) $u->amount_available + $deltaAvail;
-        $u->blocked_amount   = (float) $u->blocked_amount   + $deltaBlock;
-        $u->save();
+                    case TransactionStatus::PAGA:
+                        $targetAppliedAvail = $net;
+                        break;
 
-        $t->applied_available_amount = $targetAppliedAvail;
-        $t->applied_blocked_amount   = $targetAppliedBlock;
+                    case TransactionStatus::MED:
+                        if ($prevAppliedBlock > 0) {
+                            $targetAppliedBlock = $prevAppliedBlock;
+                        }
+                        break;
+
+                    case TransactionStatus::PENDENTE:
+                    case TransactionStatus::ERRO:
+                    case TransactionStatus::FALHA:
+                    default:
+                        break;
+                }
+            }
+
+            /** Deltas financeiros */
+            $deltaBlock = round($targetAppliedBlock - $prevAppliedBlock, 2);
+            $deltaAvail = round(($targetAppliedAvail - $prevAppliedAvail) - $deltaBlock, 2);
+
+            /** Atualiza saldos */
+            $u->amount_available = round($u->amount_available + $deltaAvail, 2);
+            $u->blocked_amount   = round($u->blocked_amount + $deltaBlock, 2);
+            $u->save();
+
+            /** Atualiza rastro */
+            $t->applied_available_amount = $targetAppliedAvail;
+            $t->applied_blocked_amount   = $targetAppliedBlock;
+            $t->save();
+        });
     }
 
+
+
     /**
-     * Calcula o líquido (gross - taxa do usuário) para CASH-IN.
-     * Suporta: tax_in_enabled, tax_in_mode ('fixo'|'percentual'), tax_in_fixed, tax_in_percent.
+     * Calcula o líquido do usuário (cash-in)
      */
     private function calcNetForUser(User $u, float $gross): float
     {
-        if (! $u->tax_in_enabled) {
+        if (!$u->tax_in_enabled) {
             return round($gross, 2);
         }
 
@@ -160,10 +193,9 @@ class WalletService
             $fee = (float) ($u->tax_in_fixed ?? 0);
         } else {
             $pct = (float) ($u->tax_in_percent ?? 0);
-            $fee = $pct > 0 ? ($gross * ($pct / 100)) : 0.0;
+            $fee = $pct > 0 ? ($gross * ($pct / 100)) : 0;
         }
 
-        $net = $gross - $fee;
-        return round($net, 2);
+        return round($gross - $fee, 2);
     }
 }

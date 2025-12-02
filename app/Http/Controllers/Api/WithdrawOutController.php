@@ -8,15 +8,16 @@ use App\Models\User;
 use App\Models\Withdraw;
 use App\Services\Pix\KeyValidator;
 use App\Services\PodPay\PodPayCashoutService;
+use App\Services\Withdraw\WithdrawService;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
 
 class WithdrawOutController extends Controller
 {
     public function __construct(
-        private readonly PodPayCashoutService $podpay
+        private readonly PodPayCashoutService $podpay,
+        private readonly WithdrawService      $withdrawService,
     ) {}
 
     public function store(Request $request)
@@ -47,19 +48,16 @@ class WithdrawOutController extends Controller
             $request->merge(['key_type' => strtolower($request->input('key_type'))]);
 
             /* ============================================================
-             * 📞 Normalizar telefone se vier como +55DDDNUMERO
+             * 📞 Normalizar telefone
              * ============================================================ */
             if ($request->input('key_type') === 'phone') {
 
-                // remover tudo que não for número
                 $phone = preg_replace('/\D/', '', $request->input('key'));
 
-                // remover prefixo 55 se existir
                 if (str_starts_with($phone, '55')) {
                     $phone = substr($phone, 2);
                 }
 
-                // jogar de volta no $request
                 $request->merge(['key' => $phone]);
             }
 
@@ -87,7 +85,7 @@ class WithdrawOutController extends Controller
              * 🔎 Validar chave PIX
              * ============================================================ */
             if (!KeyValidator::validate($data['key'], strtoupper($data['key_type']))) {
-                return $this->error('Chave PIX inválida para o tipo informado.');
+                return $this->error('Chave PIX inválida.');
             }
 
             if (!$user->tax_out_enabled) {
@@ -95,7 +93,7 @@ class WithdrawOutController extends Controller
             }
 
             /* ============================================================
-             * 💰 Cálculo de Taxas
+             * 💰 Cálculo de taxas
              * ============================================================ */
             $fee = round(($user->tax_out_fixed ?? 0) + ($gross * ($user->tax_out_percent ?? 0) / 100), 2);
             $net = round($gross - $fee, 2);
@@ -105,7 +103,7 @@ class WithdrawOutController extends Controller
             }
 
             /* ============================================================
-             * 🔢 External ID
+             * 🔢 External ID + Idempotência
              * ============================================================ */
             $externalId = $data['external_id'] ??
                 'WD_' . now()->timestamp . '_' . random_int(1000, 9999);
@@ -114,49 +112,27 @@ class WithdrawOutController extends Controller
                 return $this->error('External ID duplicado.');
             }
 
-            /* ============================================================
-             * 🧾 Criar saque local + debitar saldo
-             * ============================================================ */
             $internalRef = 'withdraw_' . now()->timestamp . '_' . random_int(1000, 9999);
 
-            $result = DB::transaction(function () use ($user, $gross, $net, $fee, $data, $externalId, $internalRef) {
-
-                $u = User::where('id', $user->id)->lockForUpdate()->first();
-
-                if ($u->amount_available < $gross) {
-                    return ['error' => 'Saldo insuficiente.'];
-                }
-
-                $u->amount_available -= $gross;
-                $u->save();
-
-                $withdraw = Withdraw::create([
-                    'user_id'         => $u->id,
-                    'amount'          => $net,
-                    'gross_amount'    => $gross,
-                    'fee_amount'      => $fee,
-                    'pixkey'          => $data['key'],
-                    'pixkey_type'     => strtolower($data['key_type']),
-                    'status'          => 'pending',
-                    'provider'        => 'podpay',
-                    'external_id'     => $externalId,
-                    'idempotency_key' => $internalRef,
-                    'meta' => [
-                        'internal_reference' => $internalRef,
-                        'tax_fixed'   => $u->tax_out_fixed,
-                        'tax_percent' => $u->tax_out_percent,
-                        'api_request' => true,
-                    ],
-                ]);
-
-                return ['withdraw' => $withdraw];
-            });
-
-            if (isset($result['error'])) {
-                return $this->error($result['error']);
+            /* ============================================================
+             * 🧾 Criar saque local + debitar saldo via SERVICE
+             * ============================================================ */
+            try {
+                $withdraw = $this->withdrawService->create(
+                    $user,
+                    $gross,
+                    $net,
+                    $fee,
+                    [
+                        'key'         => $data['key'],
+                        'key_type'    => strtolower($data['key_type']),
+                        'external_id' => $externalId,
+                        'internal_ref'=> $internalRef
+                    ]
+                );
+            } catch (\Throwable $e) {
+                return $this->error($e->getMessage());
             }
-
-            $withdraw = $result['withdraw'];
 
             /* ============================================================
              * 2️⃣ Criar saque na PodPay
@@ -173,55 +149,51 @@ class WithdrawOutController extends Controller
             $resp = $this->podpay->createWithdrawal($payload);
 
             if (!$resp['success']) {
-                $this->refund($user, $gross, $withdraw, $resp);
-                return $this->error('Falha ao criar saque.');
+                $this->withdrawService->refundLocal($withdraw, 'provider_error');
+                return $this->error('Erro ao criar saque no provedor.');
             }
 
             /* ============================================================
-             * 3️⃣ Capturar ID do provider
+             * 3️⃣ Obter referência do provider
              * ============================================================ */
-            $providerReference = data_get($resp, 'data.id');
+            $providerRef = data_get($resp, 'data.id');
 
-            if (!$providerReference) {
-                $this->refund($user, $gross, $withdraw, 'missing_provider_id');
-                return $this->error('Erro ao obter referência do saque.');
+            if (!$providerRef) {
+                $this->withdrawService->refundLocal($withdraw, 'missing_provider_id');
+                return $this->error('Não foi possível obter referência do provedor.');
             }
 
             /* ============================================================
-             * 🟦 NORMALIZAR STATUS DA PODPAY
+             * 4️⃣ Normalizar status inicial
              * ============================================================ */
             $providerStatus = strtoupper(data_get($resp, 'data.status', 'PENDING'));
 
             $status = match ($providerStatus) {
-                'PENDING', 'PENDING_QUEUE' => 'pending',
-                'PROCESSING', 'SENDING WITHDRAW REQUEST', 'SENT TO PROVIDER' => 'processing',
                 'PAID', 'COMPLETED' => 'paid',
-                'FAILED', 'ERROR', 'CANCELED' => 'failed',
+                'FAILED', 'ERROR', 'CANCELED', 'CANCELLED' => 'failed',
+                'PROCESSING', 'SENDING WITHDRAW REQUEST', 'SENT TO PROVIDER' => 'processing',
                 default => 'pending',
             };
 
             /* ============================================================
-             * 4️⃣ Atualizar saque no banco
+             * 5️⃣ Atualizar saque com provider_reference via SERVICE
              * ============================================================ */
-            DB::transaction(function () use ($withdraw, $providerReference, $status, $resp) {
-                $withdraw->update([
-                    'provider_reference' => $providerReference,
-                    'status'             => $status,
-                    'meta' => array_merge($withdraw->meta ?? [], [
-                        'podpay_response' => $resp,
-                    ]),
-                ]);
-            });
+            $this->withdrawService->updateProviderReference(
+                $withdraw,
+                $providerRef,
+                $status,
+                $resp
+            );
 
             /* ============================================================
-             * 5️⃣ Enviar Webhook via Job
+             * 6️⃣ Enviar webhook OUT
              * ============================================================ */
             if ($user->webhook_enabled && $user->webhook_out_url) {
                 SendWebhookWithdrawCreatedJob::dispatch(
                     $user->id,
                     $withdraw->id,
                     $status,
-                    $providerReference
+                    $providerRef
                 );
             }
 
@@ -239,7 +211,7 @@ class WithdrawOutController extends Controller
                     'pix_key'       => $withdraw->pixkey,
                     'pix_key_type'  => $withdraw->pixkey_type,
                     'status'        => $status,
-                    'reference'     => $providerReference,
+                    'reference'     => $providerRef,
                 ],
             ]);
 
@@ -250,42 +222,10 @@ class WithdrawOutController extends Controller
                 'trace' => $e->getTraceAsString(),
             ]);
 
-            if (isset($withdraw)) {
-                $this->refund($user ?? null, $gross ?? 0, $withdraw, $e->getMessage());
-            }
-
             return $this->error('Erro interno ao processar saque.');
         }
     }
 
-    /**
-     * 🔁 Reembolso + marca falha
-     */
-    private function refund(?User $user, float $gross, Withdraw $withdraw, $error = null)
-    {
-        if ($user) {
-            DB::transaction(function () use ($user, $gross) {
-                $u = User::where('id', $user->id)->lockForUpdate()->first();
-                $u->amount_available += $gross;
-                $u->save();
-            });
-        }
-
-        $withdraw->update([
-            'status' => 'failed',
-            'meta'   => array_merge($withdraw->meta ?? [], ['error' => $error]),
-        ]);
-
-        Log::warning('💸 Reembolso após falha no saque ', [
-            'user_id'     => $user?->id,
-            'withdraw_id' => $withdraw->id,
-            'reason'      => $error,
-        ]);
-    }
-
-    /**
-     * 🧩 Resposta padrão
-     */
     private function error(string $message)
     {
         return response()->json([
