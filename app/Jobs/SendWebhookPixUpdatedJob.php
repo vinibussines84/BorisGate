@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Models\Transaction;
 use Illuminate\Bus\Queueable;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -14,51 +15,76 @@ class SendWebhookPixUpdatedJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public $tx;
+    protected int $txId;
 
-    public function __construct($tx)
+    public function __construct(int $txId)
     {
-        $this->tx = $tx;
+        $this->txId = $txId;
         $this->onQueue('webhooks');
     }
 
     public function handle(): void
     {
+        // Recarrega sempre a transação
+        $tx = Transaction::with('user')->find($this->txId);
+
+        if (!$tx || !$tx->user) {
+            Log::warning("⚠️ Webhook Pix Update ignorado — TX ou User não encontrados", [
+                'tx_id' => $this->txId
+            ]);
+            return;
+        }
+
+        // Verifica se webhook está habilitado
+        if (!$tx->user->webhook_enabled || !$tx->user->webhook_in_url) {
+            Log::info("ℹ️ Usuário não tem webhook IN ativo", [
+                'user_id' => $tx->user_id,
+                'tx_id'   => $tx->id,
+            ]);
+            return;
+        }
+
         try {
 
-            $response = Http::post($this->tx->user->webhook_in_url, [
+            $payload = [
                 "type"            => "Pix Update",
                 "event"           => "updated",
-                "transaction_id"  => $this->tx->id,
-                "external_id"     => $this->tx->external_reference,
-                "user"            => $this->tx->user->name,
-                "amount"          => number_format($this->tx->amount, 2, '.', ''),
-                "fee"             => number_format($this->tx->fee, 2, '.', ''),
-                "currency"        => $this->tx->currency,
-                "status"          => "paga",
-                "txid"            => $this->tx->txid,
-                "e2e"             => $this->tx->e2e_id,
-                "direction"       => $this->tx->direction,
-                "method"          => $this->tx->method,
-                "created_at"      => $this->tx->created_at,
-                "updated_at"      => $this->tx->updated_at,
-                "paid_at"         => $this->tx->paid_at,
-                "provider_payload"=> $this->tx->provider_payload
-            ]);
+                "transaction_id"  => $tx->id,
+                "external_id"     => $tx->external_reference,
+                "user"            => $tx->user->name,
+                "amount"          => $tx->amount,
+                "fee"             => $tx->fee,
+                "currency"        => $tx->currency,
+                "status"          => $tx->status,
+                "txid"            => $tx->txid,
+                "e2e"             => $tx->e2e_id,
+                "direction"       => $tx->direction,
+                "method"          => $tx->method,
+                "created_at"      => optional($tx->created_at)->toISOString(),
+                "updated_at"      => optional($tx->updated_at)->toISOString(),
+                "paid_at"         => optional($tx->paid_at)->toISOString(),
+                "provider_payload"=> $tx->provider_payload
+            ];
 
-            Log::info("Webhook Pix Update enviado", [
+            $response = Http::timeout(10)->post(
+                $tx->user->webhook_in_url,
+                $payload
+            );
+
+            Log::info("✅ Webhook Pix Update enviado", [
+                'tx_id'  => $tx->id,
                 'status' => $response->status(),
-                'tx_id'  => $this->tx->id,
+                'response' => $response->body(),
             ]);
 
         } catch (\Throwable $e) {
 
-            Log::warning("Webhook Pix Update falhou", [
-                'tx_id' => $this->tx->id,
+            Log::warning("⚠️ Webhook Pix Update falhou", [
+                'tx_id' => $tx->id,
                 'error' => $e->getMessage(),
             ]);
 
-            throw $e;
+            throw $e; // Permite retry da fila
         }
     }
 }
