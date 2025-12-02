@@ -37,14 +37,21 @@ class TransactionPixController extends Controller
             'amount'      => ['required', 'numeric', 'min:0.01'],
             'name'        => ['sometimes', 'string', 'max:100'],
             'email'       => ['sometimes', 'email', 'max:120'],
+            'document'    => ['required', 'string', 'min:11', 'max:18'], // CPF ou CNPJ
+            'phone'       => ['sometimes', 'string', 'max:20'],
             'external_id' => ['required', 'string', 'max:64', 'regex:/^[A-Za-z0-9\-_]+$/'],
         ]);
 
         $amountReais = (float) $data['amount'];
         $amountCents = (int) round($amountReais * 100);
+
         $externalId  = $data['external_id'];
-        $name        = $data['name'] ?? $user->name ?? 'Cliente';
-        $email       = $data['email'] ?? $user->email ?? 'no-email@placeholder.com';
+        $name        = $data['name']     ?? $user->name     ?? 'Cliente';
+        $email       = $data['email']    ?? $user->email    ?? 'no-email@placeholder.com';
+        $phone       = $data['phone']    ?? $user->phone    ?? '11999999999';
+
+        // NORMALIZA DOCUMENTO
+        $document = preg_replace('/\D/', '', $data['document']); // remove pontos e traços
 
         // ❌ Evitar duplicidade
         if (Transaction::where('user_id', $user->id)
@@ -68,7 +75,7 @@ class TransactionPixController extends Controller
             'amount'             => $amountReais,
             'fee'                => $this->computeFee($user, $amountReais),
             'external_reference' => $externalId,
-            'provider_payload'   => compact('name', 'email'),
+            'provider_payload'   => compact('name', 'email', 'document'),
             'ip'                 => $request->ip(),
             'user_agent'         => $request->userAgent(),
         ]);
@@ -77,13 +84,13 @@ class TransactionPixController extends Controller
         $payload = [
             'amount'      => $amountCents,
             'externalRef' => $externalId,
-'postback' => route('webhooks.lumnis'),
+            'postback'    => route('webhooks.lumnis'),
 
             'customer' => [
                 'name'     => $name,
                 'email'    => $email,
-                'phone'    => $user->phone ?? '11 99999-9999',
-                'document' => $user->document ?? '000.000.000-00',
+                'phone'    => $phone,
+                'document' => $document,
 
                 'address'  => [
                     'street'  => $user->address_street  ?? 'N/A',
@@ -105,11 +112,18 @@ class TransactionPixController extends Controller
             'method' => 'PIX',
         ];
 
+        Log::info('LUMNIS_ENVIANDO_PAYLOAD', $payload);
+
         // 🚀 Enviar à API Lumnis
         try {
             $response = $lumnis->createTransaction($payload);
 
             if (!in_array($response['status'], [200, 201])) {
+                Log::error('LUMNIS_ERRO_RESPOSTA', [
+                    'status'  => $response['status'],
+                    'body'    => $response['body'],
+                    'payload' => $payload,
+                ]);
                 throw new \Exception(json_encode($response['body']));
             }
 
@@ -125,7 +139,7 @@ class TransactionPixController extends Controller
         } catch (\Throwable $e) {
 
             Log::error('LUMNIS_PIX_CREATE_ERROR', [
-                'error' => $e->getMessage(),
+                'error'    => $e->getMessage(),
                 'response' => $response['body'] ?? null,
             ]);
 
@@ -159,6 +173,7 @@ class TransactionPixController extends Controller
             'provider_payload'        => [
                 'name'         => $name,
                 'email'        => $email,
+                'document'     => $document,
                 'qr_code_text' => $qrCodeText,
                 'provider_raw' => $cleanRaw,
             ],
