@@ -77,7 +77,7 @@ class TransactionPixController extends Controller
         $payload = [
             'amount'      => $amountCents,
             'externalRef' => $externalId,
-            'postback'    => route('webhooks.lumnis.pix'),
+'postback' => route('webhooks.lumnis'),
 
             'customer' => [
                 'name'     => $name,
