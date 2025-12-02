@@ -22,8 +22,8 @@ class AdminPanelProvider extends PanelProvider
             |--------------------------------------------------------------------------
             */
             ->default()
-            ->id('pxinadm')
-            ->path('pxinadm')
+            ->id('equitadm')
+            ->path('equitadm')
 
             /*
             |--------------------------------------------------------------------------
