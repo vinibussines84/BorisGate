@@ -24,6 +24,7 @@ use App\Http\Controllers\CobrancaController;
 use App\Http\Controllers\ApproverLogController;
 use App\Http\Controllers\WebhookController;
 use App\Http\Controllers\MetricsController;
+use App\Http\Controllers\TaxCheckerController; // ✅ novo controlador
 
 // Controllers (Auth)
 use App\Http\Controllers\Auth\RegisteredUserController;
@@ -165,8 +166,6 @@ Route::middleware(['auth', 'check.user.status', 'ensure.active', 'throttle:60,1'
     Route::get('/api/balances', [DashboardController::class, 'balances'])
         ->name('api.balances');
 
-    // (REMOVIDO: /balance/available)
-
     // Páginas
     Route::get('/extrato', fn () => Inertia::render('Extrato/Index'))->name('extrato');
     Route::get('/transferencia', fn () => Inertia::render('Transferencia/Index'))->name('transferencia');
@@ -224,6 +223,21 @@ Route::middleware(['auth', 'check.user.status', 'ensure.active', 'throttle:60,1'
             ->withoutMiddleware([Csrf::class]);
         Route::delete('/{type}', [WebhookController::class, 'destroy'])->name('webhooks.destroy');
     });
+
+    /*
+    |--------------------------------------------------------------------------
+    | 💰 Simulador e Validador de Taxas — somente dashrash == 1
+    |--------------------------------------------------------------------------
+    */
+    Route::middleware(['dashrash.one'])->group(function () {
+        Route::get('/tax-checker', [TaxCheckerController::class, 'index'])
+            ->name('tax-checker.index')
+            ->middleware('can:view-taxes');
+
+        Route::post('/tax-checker/simulate', [TaxCheckerController::class, 'simulate'])
+            ->name('tax-checker.simulate')
+            ->middleware('can:view-taxes');
+    });
 });
 
 /*
@@ -272,7 +286,7 @@ Route::prefix('api')
         Route::get('/charges/{cobranca}', [CobrancaController::class, 'show'])->name('api.charges.show');
 
         // 📊 Métricas
-        Route::get('/metrics/day', [MetricsController::class, 'day'])->name('api.metrics.day'); // ✅ nova rota
+        Route::get('/metrics/day', [MetricsController::class, 'day'])->name('api.metrics.day');
         Route::get('/metrics/month', [MetricsController::class, 'month'])->name('api.metrics.month');
         Route::put('/metrics/goal', [MetricsController::class, 'updateGoal'])->name('api.metrics.goal');
         Route::get('/metrics/paid-feed', [MetricsController::class, 'paidFeed'])->name('api.metrics.paid-feed');
