@@ -11,6 +11,7 @@ use App\Enums\TransactionStatus;
 use App\Services\PodPay\PodPayService;
 use App\Models\User;
 use App\Jobs\SendWebhookPixCreatedJob;
+use Carbon\Carbon;
 
 class TransactionPixController extends Controller
 {
@@ -136,6 +137,13 @@ class TransactionPixController extends Controller
             return response()->json(['success' => false, 'error' => 'Failed to create PIX transaction.'], 500);
         }
 
+        /**
+         * ⏰ CORREÇÃO DO TIMEZONE (UTC → America/Sao_Paulo)
+         */
+        $createdAtBr = Carbon::parse(data_get($body, 'createdAt'))
+            ->tz('America/Sao_Paulo')
+            ->toDateTimeString();
+
         // 🧩 Atualizar transação local
         $cleanRaw = [
             'id'          => data_get($body, 'id'),
@@ -150,7 +158,7 @@ class TransactionPixController extends Controller
                 'phone'    => data_get($body, 'customer.phone'),
                 'document' => data_get($body, 'customer.document.number'),
             ],
-            'created_at'  => data_get($body, 'createdAt'),
+            'created_at'  => $createdAtBr, // 👈 FUSO HORÁRIO CORRIGIDO
             'identifier'  => data_get($body, 'pix.end2EndId'),
             'external_ref'=> data_get($body, 'externalRef'),
         ];
