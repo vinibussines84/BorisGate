@@ -4,133 +4,142 @@ namespace App\Http\Controllers\Api\Webhooks;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use App\Models\Transaction;
 use App\Enums\TransactionStatus;
+use App\Jobs\SendWebhookPixUpdateJob;
+use App\Services\WalletService;
 
 class LumnisWebhookController extends Controller
 {
-    public function __invoke(Request $request)
+    public function __invoke(Request $request, WalletService $wallet)
     {
         try {
-            /** ==========================================================
-             *  1) Normaliza payload (raw + JSON)
-             *  ========================================================== */
-            $data = $request->json()->all();
-            if (empty($data)) {
-                $data = json_decode($request->getContent(), true) ?? [];
-            }
 
-            Log::info('📩 Webhook Lumnis recebido', $data);
+            /*
+            |--------------------------------------------------------------------------
+            | 1) Normaliza payload
+            |--------------------------------------------------------------------------
+            */
+            $raw = $request->json()->all()
+                ?: json_decode($request->getContent(), true)
+                ?: [];
 
-            /** ==========================================================
-             *  2) Captura referências permitidas
-             *  ========================================================== */
-            $externalRef = trim((string)(
-                data_get($data, 'external_ref')
-                ?? data_get($data, 'externalRef')
-                ?? data_get($data, 'external_reference')
-            ));
+            Log::info("📩 Webhook Lumnis PIX recebido", ['payload' => $raw]);
 
-            $txid = trim((string)(
-                data_get($data, 'id')
-                ?? data_get($data, 'transaction_id')
-                ?? data_get($data, 'txid')
-            ));
+            /*
+            |--------------------------------------------------------------------------
+            | 2) Extrai campos conhecidos da Lumnis
+            |--------------------------------------------------------------------------
+            */
+            $externalRef = data_get($raw, 'external_ref')
+                ?? data_get($raw, 'externalRef')
+                ?? data_get($raw, 'external_reference');
 
-            $status = strtoupper((string)data_get($data, 'status'));
+            $txid   = data_get($raw, 'id') ?? data_get($raw, 'txid');
+            $status = strtolower(data_get($raw, 'status', 'unknown'));
 
             if (!$externalRef && !$txid) {
-                return response()->json(['error' => 'Missing external_ref or txid'], 422);
+                return response()->json(['error' => 'missing_reference'], 422);
             }
 
-            /** ==========================================================
-             *  3) Busca transação de forma segura
-             *  ========================================================== */
+            /*
+            |--------------------------------------------------------------------------
+            | 3) Busca transação com LOCK
+            |--------------------------------------------------------------------------
+            */
             $tx = Transaction::query()
                 ->when($externalRef, fn($q) => $q->where('external_reference', $externalRef))
                 ->when(!$externalRef && $txid, fn($q) => $q->where('txid', $txid))
+                ->lockForUpdate()
                 ->first();
 
             if (!$tx) {
-                Log::warning('⚠️ Transação não encontrada', [
-                    'external_ref' => $externalRef,
-                    'txid'         => $txid,
+                Log::warning("⚠️ TX não encontrada no webhook Lumnis", [
+                    'externalRef' => $externalRef,
+                    'txid'        => $txid,
                 ]);
-
                 return response()->json(['error' => 'Transaction not found'], 404);
             }
 
-            /** ==========================================================
-             *  4) Idempotência — ignora se já paga
-             *  ========================================================== */
-            if ($tx->isPaga()) {
-                return response()->json([
-                    'received' => true,
-                    'ignored'  => true,
-                    'reason'   => 'already_paid',
-                ]);
+            /*
+            |--------------------------------------------------------------------------
+            | 4) Idempotência
+            |--------------------------------------------------------------------------
+            */
+            if (in_array($tx->status, [
+                TransactionStatus::PAGA->value,
+                TransactionStatus::FALHA->value
+            ])) {
+                return response()->json(['ignored' => true]);
             }
 
-            /** ==========================================================
-             *  5) Mapeia os dados enviados pela Lumnis
-             *  ========================================================== */
-            $payerName     = data_get($data, 'payer_name');
-            $payerDocument = data_get($data, 'payer_document');
-            $endToEnd      = data_get($data, 'endtoend');
-            $providerId    = data_get($data, 'identifier') ?? data_get($data, 'id');
+            /*
+            |--------------------------------------------------------------------------
+            | 5) MAPA REAL DE STATUS (Lumnis → Sistema)
+            |--------------------------------------------------------------------------
+            */
+            $map = [
+                'approved'  => TransactionStatus::PAGA,
+                'paid'      => TransactionStatus::PAGA,
+                'confirmed' => TransactionStatus::PAGA,
 
-            /** ==========================================================
-             *  6) Atualiza somente quando o status for aprovado
-             *  ========================================================== */
-            if (in_array($status, ['APPROVED', 'PAID', 'CONFIRMED'])) {
+                'pending'   => TransactionStatus::PENDENTE,
+                'waiting'   => TransactionStatus::PENDENTE,
 
-                $tx->update([
-                    'status'                 => TransactionStatus::PAGA->value,
-                    'paid_at'                => now(),
-                    'e2e_id'                 => $endToEnd ?: $tx->e2e_id,
-                    'payer_name'             => $payerName ?: $tx->payer_name,
-                    'payer_document'         => $payerDocument ?: $tx->payer_document,
-                    'provider_transaction_id'=> $providerId,
-                    'provider_payload'       => $data, // salva JSON puro
-                ]);
+                'processing' => TransactionStatus::MED,
 
-                Log::info('✅ Transação atualizada com sucesso!', [
-                    'transaction_id' => $tx->id,
-                    'status'         => $tx->status,
-                    'external_ref'   => $tx->external_reference,
-                    'txid'           => $tx->txid,
-                ]);
+                'failed'     => TransactionStatus::FALHA,
+                'error'      => TransactionStatus::FALHA,
+                'denied'     => TransactionStatus::FALHA,
+                'canceled'   => TransactionStatus::FALHA,
+                'expired'    => TransactionStatus::FALHA,
+            ];
 
-                return response()->json([
-                    'received'  => true,
-                    'updated'   => true,
-                    'status'    => 'paga',
-                    'e2e_id'    => $tx->e2e_id,
-                    'payer'     => [
-                        'name'     => $tx->payer_name,
-                        'document' => $tx->payer_document,
-                    ],
-                ]);
+            $newStatus = $map[$status] ?? null;
+
+            if (!$newStatus) {
+                return response()->json(['ignored' => true]);
             }
 
-            /** ==========================================================
-             *  7) Demais status apenas são logados
-             *  ========================================================== */
-            Log::info('ℹ️ Webhook recebido com status não final', [
-                'status' => $status,
-                'external_ref' => $externalRef,
-            ]);
+            $oldStatus = TransactionStatus::tryFrom($tx->status);
+
+            /*
+            |--------------------------------------------------------------------------
+            | 6) Aplica lógica financeira no wallet
+            |--------------------------------------------------------------------------
+            */
+            $wallet->applyStatusChange($tx, $oldStatus, $newStatus);
+
+            /*
+            |--------------------------------------------------------------------------
+            | 7) Atualiza transação silenciosamente
+            |--------------------------------------------------------------------------
+            */
+            $this->updateTransactionQuietly($tx, $newStatus, $raw);
+
+            /*
+            |--------------------------------------------------------------------------
+            | 8) Dispara webhook IN para o cliente (somente quando PAGO)
+            |--------------------------------------------------------------------------
+            */
+            if (
+                $newStatus === TransactionStatus::PAGA &&
+                $tx->user?->webhook_enabled &&
+                $tx->user?->webhook_in_url
+            ) {
+                SendWebhookPixUpdateJob::dispatch($tx->id);
+            }
 
             return response()->json([
-                'received' => true,
-                'ignored'  => true,
-                'reason'   => 'status_not_approved',
+                'success' => true,
+                'status'  => $newStatus->value,
             ]);
 
         } catch (\Throwable $e) {
 
-            Log::error('❌ ERRO AO PROCESSAR WEBHOOK LUMNIS', [
+            Log::error("🚨 ERRO NO WEBHOOK LUMNIS PIX", [
                 'error'   => $e->getMessage(),
                 'trace'   => $e->getTraceAsString(),
                 'payload' => $request->getContent(),
@@ -138,5 +147,27 @@ class LumnisWebhookController extends Controller
 
             return response()->json(['error' => 'internal_error'], 500);
         }
+    }
+
+
+    /**
+     * Atualiza TX sem observer
+     */
+    private function updateTransactionQuietly(Transaction $tx, TransactionStatus $newStatus, array $raw)
+    {
+        $payerName     = data_get($raw, 'payer_name');
+        $payerDocument = data_get($raw, 'payer_document');
+        $endToEnd      = data_get($raw, 'endtoend');
+        $providerId    = data_get($raw, 'identifier') ?? data_get($raw, 'id');
+
+        $tx->updateQuietly([
+            'status'                  => $newStatus->value,
+            'paid_at'                 => now(),
+            'provider_transaction_id' => $providerId,
+            'payer_name'              => $payerName ?: $tx->payer_name,
+            'payer_document'          => $payerDocument ?: $tx->payer_document,
+            'e2e_id'                  => $endToEnd ?: $tx->e2e_id,
+            'provider_payload'        => $raw,
+        ]);
     }
 }
