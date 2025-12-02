@@ -28,16 +28,17 @@ function BrandLogo({ className = "block h-[28px] w-auto md:h-[32px]" }) {
   );
 }
 
-/* ---------- Avatar Menu (CORRIGIDO) ---------- */
+/* ---------- Avatar Menu (100% FIXED) ---------- */
 function UserFavicon({ initials, closeMobile }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
   const handleLogout = () => {
     setOpen(false);
-    closeMobile?.(); // fecha menu mobile se aberto
+    closeMobile?.(); // close mobile menu if open
 
-    router.post(route("logout"), {}, {
+    // 🚀 SAFE LOGOUT (NO ZIGGY, NO route(), NO ERRORS)
+    router.post("/logout", {}, {
       onFinish: () => {
         document.body.style.overflow = "auto";
       }
@@ -82,7 +83,7 @@ function UserFavicon({ initials, closeMobile }) {
   );
 }
 
-/* ---------- Layout Principal ---------- */
+/* ---------- Main Layout ---------- */
 export default function AuthenticatedLayout({ header, children, boxed = false }) {
   const page = usePage();
   const user = page?.props?.auth?.user;
@@ -91,17 +92,12 @@ export default function AuthenticatedLayout({ header, children, boxed = false })
   );
 
   const [mobileOpen, setMobileOpen] = useState(false);
-
   const closeMobileMenu = () => setMobileOpen(false);
 
   const initials = useMemo(() => {
     const n = (user?.name || "").trim();
     return n
-      ? n
-          .split(/\s+/)
-          .slice(0, 2)
-          .map((s) => s[0]?.toUpperCase() || "")
-          .join("")
+      ? n.split(/\s+/).slice(0, 2).map((s) => s[0]?.toUpperCase()).join("")
       : "U";
   }, [user?.name]);
 
@@ -129,7 +125,9 @@ export default function AuthenticatedLayout({ header, children, boxed = false })
   const primaryLinks = nav.map((item) => ({
     ...item,
     active: item.isDropdown
-      ? item.children.some((c) => currentPath.startsWith(normalizePath(c.href)))
+      ? item.children.some((c) =>
+          currentPath.startsWith(normalizePath(c.href))
+        )
       : currentPath === normalizePath(item.href) ||
         currentPath.startsWith(normalizePath(item.href)),
   }));
@@ -140,6 +138,7 @@ export default function AuthenticatedLayout({ header, children, boxed = false })
       {/* ===== TOPBAR ===== */}
       <header className="sticky top-0 z-50 border-b border-neutral-800/60 bg-[#0B0B0B]/95 backdrop-blur">
         <div className="flex items-center justify-between px-5 py-3">
+
           <div className="flex items-center gap-3">
             <button
               onClick={() => setMobileOpen((v) => !v)}
@@ -157,11 +156,13 @@ export default function AuthenticatedLayout({ header, children, boxed = false })
             <NotificationBell />
             <UserFavicon initials={initials} closeMobile={closeMobileMenu} />
           </div>
+
         </div>
       </header>
 
-      {/* ===== SIDEBAR (DESKTOP) ===== */}
-      <aside className="fixed inset-y-0 left-0 z-40 hidden w-[282px] lg:flex lg:flex-col lg:border-r lg:border-neutral-800/60 lg:bg-neutral-950">
+      {/* ===== SIDEBAR DESKTOP ===== */}
+      <aside className="fixed inset-y-0 left-0 z-40 hidden w-[282px] lg:flex lg:flex-col 
+      lg:border-r lg:border-neutral-800/60 lg:bg-neutral-950">
         
         <div className="flex items-center gap-3 px-6 py-5 border-b border-neutral-800/70">
           <Link href="/dashboard" className="flex items-center gap-3">
@@ -175,6 +176,7 @@ export default function AuthenticatedLayout({ header, children, boxed = false })
               <li key={item.key}>
                 {item.isDropdown ? (
                   <div className="space-y-1.5">
+
                     <div className="flex items-center gap-3 text-sm font-medium text-neutral-400 px-3">
                       <item.icon size={17} /> {item.label}
                     </div>
@@ -195,6 +197,7 @@ export default function AuthenticatedLayout({ header, children, boxed = false })
                         </li>
                       ))}
                     </ul>
+
                   </div>
                 ) : (
                   <Link
@@ -222,7 +225,10 @@ export default function AuthenticatedLayout({ header, children, boxed = false })
       {/* ===== MOBILE MENU ===== */}
       {mobileOpen && (
         <div className="lg:hidden fixed inset-0 z-40 bg-black/80 backdrop-blur-sm">
-          <div className="absolute left-0 top-0 h-full w-64 bg-neutral-950 border-r border-neutral-800/60 shadow-xl p-5 space-y-4 overflow-y-auto">
+          
+          <div className="absolute left-0 top-0 h-full w-64 bg-neutral-950 
+          border-r border-neutral-800/60 shadow-xl p-5 space-y-4 overflow-y-auto">
+
             {primaryLinks.map((item) =>
               item.isDropdown ? (
                 <div key={item.key} className="space-y-2">
@@ -230,11 +236,12 @@ export default function AuthenticatedLayout({ header, children, boxed = false })
                     <item.icon size={16} />
                     {item.label}
                   </div>
+
                   {item.children.map((c) => (
                     <Link
                       key={c.key}
                       href={c.href}
-                      onClick={() => setMobileOpen(false)}
+                      onClick={closeMobileMenu}
                       className={`block pl-6 py-1 text-sm rounded-lg ${
                         currentPath.startsWith(normalizePath(c.href))
                           ? "text-emerald-400 bg-emerald-600/10"
@@ -249,7 +256,7 @@ export default function AuthenticatedLayout({ header, children, boxed = false })
                 <Link
                   key={item.key}
                   href={item.href}
-                  onClick={() => setMobileOpen(false)}
+                  onClick={closeMobileMenu}
                   className={`flex items-center gap-3 rounded-lg px-2 py-2 text-[14px] ${
                     item.active
                       ? "bg-neutral-900 text-white ring-1 ring-neutral-700/70"
@@ -261,15 +268,30 @@ export default function AuthenticatedLayout({ header, children, boxed = false })
                 </Link>
               )
             )}
+
+            {/* Logout added inside mobile area */}
+            <button
+              onClick={() => {
+                closeMobileMenu();
+                router.post("/logout");
+              }}
+              className="flex items-center gap-2 w-full px-2 py-2 text-sm 
+              text-neutral-300 hover:bg-neutral-900/80 rounded-lg mt-4"
+            >
+              <LogOut size={17} className="text-neutral-400" /> Logout
+            </button>
+
           </div>
         </div>
       )}
 
       {/* ===== MAIN ===== */}
       <div className="lg:pl-[282px] flex-1 flex flex-col min-w-0">
+        
         <main className="flex-1 px-5 sm:px-7 lg:px-9 py-7">
           {boxed ? (
-            <div className="rounded-3xl border border-neutral-800/70 bg-neutral-950/95 p-5 shadow-[0_20px_60px_-30px_rgba(0,0,0,0.7)] sm:p-7">
+            <div className="rounded-3xl border border-neutral-800/70 bg-neutral-950/95 
+            p-5 shadow-[0_20px_60px_-30px_rgba(0,0,0,0.7)] sm:p-7">
               {children}
             </div>
           ) : (
@@ -278,10 +300,12 @@ export default function AuthenticatedLayout({ header, children, boxed = false })
         </main>
 
         <footer className="mt-auto pb-10 text-center text-[13px] text-neutral-500">
-          <span className="inline-block rounded-full bg-neutral-900 px-3 py-1 text-neutral-300 ring-1 ring-inset ring-neutral-800/70 tracking-wide">
+          <span className="inline-block rounded-full bg-neutral-900 px-3 py-1 
+          text-neutral-300 ring-1 ring-inset ring-neutral-800/70 tracking-wide">
             © {new Date().getFullYear()} EquitPay — All rights reserved
           </span>
         </footer>
+
       </div>
     </div>
   );
