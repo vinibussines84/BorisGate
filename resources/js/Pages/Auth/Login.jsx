@@ -8,7 +8,7 @@ import axios from "axios";
    🔧 Global Axios Configuration
    =========================================================== */
 axios.defaults.withCredentials = true;
-axios.defaults.baseURL = "https://equitpay.app";
+axios.defaults.baseURL = "https://app.pixionpay.com/";
 axios.defaults.headers.common["X-Requested-With"] = "XMLHttpRequest";
 
 export default function Login() {
