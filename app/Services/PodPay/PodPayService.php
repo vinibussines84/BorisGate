@@ -15,18 +15,16 @@ class PodPayService
     {
         $this->baseUrl   = "https://api.podpay.co/v1";
 
-        // Pegando via config (correto para produção)
         $this->publicKey = config('podpay.public_key', '');
         $this->secretKey = config('podpay.secret_key', '');
 
-        // Segurança: validar antes de continuar
         if (empty($this->publicKey) || empty($this->secretKey)) {
-            Log::critical("❌ PodPay keys are missing. Check your .env or config/podpay.php.");
+            Log::critical("❌ PodPay keys missing. Configure podpay.public_key and podpay.secret_key.");
         }
     }
 
     /**
-     * 📌 Autenticação Basic
+     * Basic auth header
      */
     private function authHeader(): string
     {
@@ -34,66 +32,121 @@ class PodPayService
     }
 
     /**
-     * 🧾 Criação de transação PIX
+     * 🔥 SAFE JSON decode (evita crash)
+     */
+    private function safeJson($response)
+    {
+        try {
+            return $response->json();
+        } catch (\Throwable $e) {
+            return ['raw' => $response->body()];
+        }
+    }
+
+    /**
+     * 🧾 Criar transação PIX na PodPay
      */
     public function createPixTransaction(array $payload): array
     {
         try {
+
             $response = Http::withHeaders([
-                "Authorization" => $this->authHeader(),
-                "Accept"        => "application/json",
-                "Content-Type"  => "application/json",
-            ])
-            ->timeout(20)
-            ->post("{$this->baseUrl}/transactions", $payload);
+                    "Authorization" => $this->authHeader(),
+                    "Accept"        => "application/json",
+                    "Content-Type"  => "application/json",
+                ])
+                ->timeout(25)
+                ->retry(3, 300) // retry inteligente
+                ->post("{$this->baseUrl}/transactions", $payload);
+
+            $status = $response->status();
+            $json   = $this->safeJson($response);
+
+            Log::info("📤 PODPAY PIX REQUEST", [
+                'payload' => $payload,
+                'response_status' => $status,
+                'response_body'   => $json,
+            ]);
+
+            // Se falhou HTTP, retorna erro
+            if ($status < 200 || $status >= 300) {
+                return [
+                    'success' => false,
+                    'status'  => $status,
+                    'body'    => $json,
+                ];
+            }
+
+            // Se PodPay retornou JSON sem ID, é erro
+            if (!data_get($json, 'id')) {
+                return [
+                    'success' => false,
+                    'status'  => $status,
+                    'body'    => $json,
+                ];
+            }
 
             return [
-                "status" => $response->status(),
-                "body"   => $response->json(),
+                'success' => true,
+                'status'  => $status,
+                'body'    => $json,
             ];
 
         } catch (\Throwable $e) {
 
-            Log::error("PODPAY_PIX_CREATE_ERROR", [
+            Log::error("❌ PODPAY_PIX_CREATE_EXCEPTION", [
                 "exception" => $e->getMessage(),
                 "payload"   => $payload
             ]);
 
             return [
-                "status" => 500,
-                "body"   => ["error" => $e->getMessage()],
+                "success" => false,
+                "status"  => 500,
+                "body"    => ["error" => $e->getMessage()],
             ];
         }
     }
 
     /**
-     * 🔎 Consultar transação por ID
+     * 🔎 Consultar transação Por ID
      */
     public function getTransaction(string $id): array
     {
         try {
             $response = Http::withHeaders([
-                "Authorization" => $this->authHeader(),
-                "Accept"        => "application/json",
-            ])
-            ->timeout(20)
-            ->get("{$this->baseUrl}/transactions/{$id}");
+                    "Authorization" => $this->authHeader(),
+                    "Accept"        => "application/json",
+                ])
+                ->timeout(20)
+                ->retry(3, 300)
+                ->get("{$this->baseUrl}/transactions/{$id}");
+
+            $status = $response->status();
+            $json   = $this->safeJson($response);
+
+            Log::info("📥 PODPAY GET TRANSACTION", [
+                'id'               => $id,
+                'response_status'  => $status,
+                'response_body'    => $json,
+            ]);
 
             return [
-                "status" => $response->status(),
-                "body"   => $response->json(),
+                'success' => ($status >= 200 && $status < 300),
+                'status'  => $status,
+                'body'    => $json,
             ];
 
         } catch (\Throwable $e) {
 
-            Log::error("PODPAY_GET_TRANSACTION_ERROR", [
-                "exception" => $e->getMessage(),
+            Log::error("❌ PODPAY_GET_TRANSACTION_EXCEPTION", [
                 "id"        => $id,
+                "exception" => $e->getMessage(),
             ]);
 
             return [
-                "status" => 500,
-                "body"   => ["error" => $e->getMessage()],
+                "success" => false,
+                "status"  => 500,
+                "body"    => ["error" => $e->getMessage()],
             ];
         }
     }
