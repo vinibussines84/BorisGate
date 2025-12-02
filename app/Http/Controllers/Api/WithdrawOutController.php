@@ -152,7 +152,7 @@ class WithdrawOutController extends Controller
                 "key_type"     => strtoupper($data['key_type']),
                 "description"  => $data['description'] ?? '',
                 "external_ref" => $externalId,
-                "postback"     => route('lumnis.withdraw'),
+"postback" => route('webhooks.lumnis.withdraw'),
 
                 // 🔥 MANTÉM EXATAMENTE COMO VEIO NO BODY
                 "details"      => [
