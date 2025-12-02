@@ -24,24 +24,40 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        // ⚡ Pré-carregamento do Vite
+        /**
+         * ⚡ Pré-carregamento do Vite
+         */
         Vite::prefetch(concurrency: 3);
 
-        // 👀 Observador de transações
+        /**
+         * 👀 Observador de transações
+         */
         Transaction::observe(TransactionObserver::class);
 
-        // 🔐 Libera acesso ao Pulse apenas para o seu e-mail
+        /**
+         * 🔐 Libera acesso ao Pulse apenas para o seu e-mail
+         */
         Gate::define('viewPulse', function (User $user) {
             return in_array($user->email, [
                 'hubsend7@gmail.com',
             ]);
         });
 
-        // 🔐 Libera acesso ao Horizon apenas para o seu e-mail
+        /**
+         * 🔐 Libera acesso ao Horizon apenas para o seu e-mail
+         */
         Gate::define('viewHorizon', function ($user = null) {
             return in_array(optional($user)->email, [
                 'hubsend7@gmail.com',
             ]);
+        });
+
+        /**
+         * 💰 Permissão para acessar o Tax Checker (Validador de Taxas)
+         * Somente usuários com dashrash == 1 podem acessar
+         */
+        Gate::define('view-taxes', function (User $user) {
+            return (int) ($user->dashrash ?? 0) === 1;
         });
     }
 }
