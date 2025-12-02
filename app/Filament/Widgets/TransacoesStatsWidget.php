@@ -30,7 +30,7 @@ class TransacoesStatsWidget extends BaseWidget
         $tenantId = auth()->user()?->tenant_id;
 
         /* ============================================================
-           🔄 CASH IN PAGAS HOJE  (CORRIGIDO)
+           🔄 CASH IN PAGAS HOJE
         ============================================================ */
         $baseHojePagasIn = Transaction::query()
             ->when($tenantId, fn($q) => $q->where('tenant_id', $tenantId))
@@ -40,6 +40,11 @@ class TransacoesStatsWidget extends BaseWidget
 
         $cashInTotal = (float)(clone $baseHojePagasIn)->sum('amount');
         $cashInCount =        (clone $baseHojePagasIn)->count();
+
+        /* 👇 DESCONTO SOMENTE VISUAL: 1.5% + R$0,10 POR TRANSAÇÃO */
+        $descontoPercentual = $cashInTotal * 0.015;
+        $descontoFixo = $cashInCount * 0.10;
+        $cashInTotalLiquidoVisual = $cashInTotal - ($descontoPercentual + $descontoFixo);
 
         /* CASH OUT HOJE */
         $baseHojeCriadasOut = Withdraw::query()
@@ -82,8 +87,7 @@ class TransacoesStatsWidget extends BaseWidget
             ->whereBetween('processed_at', [$inicioHojeUtc, $amanhaUtc])
             ->count();
 
-        /* PIX GERADOS (não alterado) */
-        // Este continua mostrando gerados/emitidos no dia
+        /* PIX GERADOS */
         $pixGeradosHojeValor = (float)Transaction::query()
             ->when($tenantId, fn($q) => $q->where('tenant_id', $tenantId))
             ->where('direction', Transaction::DIR_IN)
@@ -156,6 +160,7 @@ class TransacoesStatsWidget extends BaseWidget
 
         return [
 
+            /* 🔥 AGORA EXIBINDO O VALOR LÍQUIDO VISUAL */
             Stat::make('TRANSAÇÕES DE HOJE', '')
                 ->icon('heroicon-o-currency-dollar')
                 ->chart([
@@ -164,7 +169,7 @@ class TransacoesStatsWidget extends BaseWidget
                 ])
                 ->color($cashInTotal >= $cashOutTotal ? 'success' : 'danger')
                 ->description(
-                    "IN: {$brl($cashInTotal)} ({$entradasCriadasHoje}) | OUT: {$brl($cashOutTotal)} ({$saquesCriadosHoje})"
+                    "IN: {$brl($cashInTotalLiquidoVisual)} ({$entradasCriadasHoje}) | OUT: {$brl($cashOutTotal)} ({$saquesCriadosHoje})"
                 ),
 
             Stat::make('Gerado Hoje', $brl($pixGeradosHojeValor))
