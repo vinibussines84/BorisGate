@@ -14,12 +14,9 @@ use Carbon\Carbon;
 
 class TransactionPixController extends Controller
 {
-    /**
-     * 🧾 Criação de nova transação PIX usando Lumnis
-     */
     public function store(Request $request, LumnisService $lumnis)
     {
-        // 🔐 Autenticação via headers
+        // 🔐 Auth
         $auth   = $request->header('X-Auth-Key');
         $secret = $request->header('X-Secret-Key');
 
@@ -37,7 +34,7 @@ class TransactionPixController extends Controller
             'amount'      => ['required', 'numeric', 'min:0.01'],
             'name'        => ['sometimes', 'string', 'max:100'],
             'email'       => ['sometimes', 'email', 'max:120'],
-            'document'    => ['required', 'string', 'min:11', 'max:18'], // CPF ou CNPJ
+            'document'    => ['required', 'string', 'min:11', 'max:18'],
             'phone'       => ['sometimes', 'string', 'max:20'],
             'external_id' => ['required', 'string', 'max:64', 'regex:/^[A-Za-z0-9\-_]+$/'],
         ]);
@@ -49,11 +46,9 @@ class TransactionPixController extends Controller
         $name        = $data['name']     ?? $user->name     ?? 'Cliente';
         $email       = $data['email']    ?? $user->email    ?? 'no-email@placeholder.com';
         $phone       = $data['phone']    ?? $user->phone    ?? '11999999999';
+        $document    = preg_replace('/\D/', '', $data['document']);
 
-        // NORMALIZA DOCUMENTO
-        $document = preg_replace('/\D/', '', $data['document']); // remove pontos e traços
-
-        // ❌ Evitar duplicidade
+        // ❌ Duplicidade
         if (Transaction::where('user_id', $user->id)
             ->where('external_reference', $externalId)
             ->exists()) {
@@ -80,7 +75,7 @@ class TransactionPixController extends Controller
             'user_agent'         => $request->userAgent(),
         ]);
 
-        // 📦 Payload Lumnis (100% conforme documentação oficial)
+        // 📦 Payload oficial da Lumnis
         $payload = [
             'amount'      => $amountCents,
             'externalRef' => $externalId,
@@ -91,7 +86,6 @@ class TransactionPixController extends Controller
                 'email'    => $email,
                 'phone'    => $phone,
                 'document' => $document,
-
                 'address'  => [
                     'street'  => $user->address_street  ?? 'N/A',
                     'number'  => $user->address_number  ?? '0',
@@ -114,7 +108,7 @@ class TransactionPixController extends Controller
 
         Log::info('LUMNIS_ENVIANDO_PAYLOAD', $payload);
 
-        // 🚀 Enviar à API Lumnis
+        // 🚀 Envia para Lumnis
         try {
             $response = $lumnis->createTransaction($payload);
 
@@ -129,8 +123,9 @@ class TransactionPixController extends Controller
 
             $body = $response['body'];
 
-            $transactionId = data_get($body, 'data.id');
-            $qrCodeText    = data_get($body, 'data.pix.qrcode');
+            // 🔥 Aqui é a correção:
+            $transactionId = data_get($body, 'id');
+            $qrCodeText    = data_get($body, 'qrcode');
 
             if (!$transactionId || !$qrCodeText) {
                 throw new \Exception("Invalid Lumnis response");
@@ -151,18 +146,18 @@ class TransactionPixController extends Controller
             ], 500);
         }
 
-        // 🕒 Ajuste de timezone
+        // 🕒 Data BR
         $createdAtBr = Carbon::now('America/Sao_Paulo')->toDateTimeString();
 
-        // 🧩 Atualizar transação local
+        // 🧩 Atualiza local
         $cleanRaw = [
             'id'           => $transactionId,
             'qrcode'       => $qrCodeText,
             'total'        => $amountCents,
             'currency'     => 'BRL',
             'method'       => 'PIX',
-            'status'       => 'PENDING',
-            'customer'     => $payload['customer'],
+            'status'       => $body['status'] ?? 'PENDING',
+            'customer'     => $body['customer'] ?? [],
             'external_ref' => $externalId,
             'created_at'   => $createdAtBr,
         ];
@@ -179,12 +174,12 @@ class TransactionPixController extends Controller
             ],
         ]);
 
-        // 📡 Webhook Pix Criado
+        // 📡 Webhook de criação
         if ($user->webhook_enabled && $user->webhook_in_url) {
             SendWebhookPixCreatedJob::dispatch($user->id, $tx->id);
         }
 
-        // 🎯 Retorno final
+        // 🟦 Retorno FINAL — o mesmo que você já usa
         return response()->json([
             'success'        => true,
             'transaction_id' => $tx->id,
@@ -197,9 +192,7 @@ class TransactionPixController extends Controller
         ]);
     }
 
-    /**
-     * 🔍 Consulta via external_id
-     */
+
     public function statusByExternal(Request $request, string $externalId)
     {
         $auth   = $request->header('X-Auth-Key');
@@ -242,7 +235,7 @@ class TransactionPixController extends Controller
         ]);
     }
 
-    // 🔧 Helpers
+    // Helpers
     private function resolveUser(string $auth, string $secret)
     {
         return User::where('authkey', $auth)
