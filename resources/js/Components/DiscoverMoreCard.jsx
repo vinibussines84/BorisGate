@@ -1,5 +1,4 @@
-// resources/js/Components/DiscoverMoreCard.jsx
-import React, { useEffect, useState, useCallback, useRef } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import {
   ArrowUpRight,
   ArrowDownRight,
@@ -7,7 +6,6 @@ import {
   CalendarDays,
   AlertTriangle,
   Zap,
-  Filter,
 } from "lucide-react";
 
 /* =============== Utils =============== */
@@ -29,6 +27,12 @@ const BRL = (v) => {
     minimumFractionDigits: 2,
   });
 };
+
+const todayDate = new Date().toLocaleDateString("pt-BR", {
+  day: "numeric",
+  month: "long",
+  year: "numeric",
+});
 
 /* =============== KPI Tile =============== */
 function KpiTile({
@@ -74,55 +78,15 @@ export default function DiscoverMoreCard() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState(null);
-  const [filter, setFilter] = useState("month");
-  const [openFilter, setOpenFilter] = useState(false);
 
-  const filterRef = useRef();
-
-  const routeOr = (name, fallback) =>
-    typeof window !== "undefined" && window.route
-      ? window.route(name)
-      : fallback;
-
-  /* =============== Close dropdown on outside click =============== */
-  useEffect(() => {
-    const handler = (e) => {
-      if (filterRef.current && !filterRef.current.contains(e.target)) {
-        setOpenFilter(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
-
-  /* =============== Build API URL based on filter =============== */
-  const buildQueryURL = () => {
-    const base = routeOr("api.metrics.month", "/api/metrics/month");
-
-    const makeDate = (offsetDays = 0) => {
-      const d = new Date();
-      d.setDate(d.getDate() - offsetDays);
-      return d.toISOString().slice(0, 10);
-    };
-
-    if (filter === "today") return `${base}?day=${makeDate(0)}`;
-    if (filter === "yesterday") return `${base}?day=${makeDate(1)}`;
-    if (filter === "5days") return `${base}?day=${makeDate(5)}`;
-    if (filter === "7days") return `${base}?day=${makeDate(7)}`;
-
-    return base; // monthly default
-  };
-
-  /* =============== Fetch metrics =============== */
   const fetchData = useCallback(async () => {
     setLoading(true);
     setErr(null);
 
     try {
-      const url = buildQueryURL();
-
-      const res = await fetch(url, {
+      const res = await fetch("/api/metrics/day", {
         headers: { Accept: "application/json" },
+        credentials: "include",
       });
 
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -130,100 +94,46 @@ export default function DiscoverMoreCard() {
       const json = await res.json();
       setData(json?.data ?? {});
     } catch (e) {
-      setErr(e?.message || "Failed to load metrics.");
+      setErr(e?.message || "Falha ao carregar métricas.");
     } finally {
       setLoading(false);
     }
-  }, [filter]);
+  }, []);
 
-  /* =============== Auto fetch =============== */
   useEffect(() => {
     fetchData();
   }, [fetchData]);
 
-  /* =============== Derived values =============== */
-  const incoming = BRL(toNumber(data?.entradaMes) || 0);
-  const outgoing = BRL(toNumber(data?.saidaMes) || 0);
-  const pending = toNumber(data?.pendentes) || 0;
-  const chargebacks = toNumber(data?.chargebacksMes) || 0;
-  const pixVolume = BRL(toNumber(data?.volumePix) || 0);
-  const period = data?.periodo ?? "Period";
+  const entradaBruto = BRL(toNumber(data?.valorBrutoDia) || 0);
+  const entradaLiquido = BRL(toNumber(data?.valorLiquidoDia) || 0);
+  const saidaDia = BRL(toNumber(data?.saidasDia) || 0);
+  const volumePixMes = BRL(toNumber(data?.volumePixMes) || 0);
+  const qtdPagasDia = data?.qtdPagasDia ?? 0;
+  const periodo = data?.periodo ?? todayDate;
 
-  /* =============== Filter labels =============== */
-  const filterLabel = {
-    month: "Monthly",
-    today: "Today",
-    yesterday: "Yesterday",
-    "5days": "5 days ago",
-    "7days": "7 days ago",
-  }[filter];
-
-  /* =============== Render =============== */
   return (
     <section className="w-full mx-auto max-w-5xl">
-
       {/* HEADER */}
       <div className="mb-4 flex items-center justify-between">
         <h3 className="text-sm sm:text-base font-semibold text-neutral-100">
-          Indicators
+          Indicadores do Dia
         </h3>
-
-        {/* FILTER DROPDOWN */}
-        <div className="relative" ref={filterRef}>
-          <button
-            onClick={() => setOpenFilter(!openFilter)}
-            className="flex items-center gap-1 px-3 py-1.5 text-xs rounded-lg 
-                       bg-neutral-900 border border-neutral-700 text-neutral-300 
-                       hover:border-neutral-500 transition"
-          >
-            <Filter size={14} />
-            {filterLabel}
-          </button>
-
-          {openFilter && (
-            <div
-              className="absolute right-0 mt-2 w-44 rounded-xl overflow-hidden 
-                         bg-neutral-900 border border-neutral-700 shadow-lg z-20"
-            >
-              {[
-                ["today", "Today"],
-                ["yesterday", "Yesterday"],
-                ["5days", "5 days ago"],
-                ["7days", "7 days ago"],
-                ["month", "Monthly"],
-              ].map(([key, label]) => (
-                <button
-                  key={key}
-                  onClick={() => {
-                    setFilter(key);
-                    setOpenFilter(false);
-                  }}
-                  className={`w-full text-left px-3 py-2 text-sm 
-                              hover:bg-neutral-800 transition 
-                              ${filter === key ? "bg-neutral-800 text-white" : "text-neutral-300"}`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
       </div>
 
-      {/* PERIOD */}
-      <span className="flex items-center text-[11px] text-neutral-400 mb-3">
+      {/* PERÍODO */}
+      <span className="flex items-center text-[11px] text-neutral-400 mb-3 capitalize">
         <CalendarDays size={12} className="inline mr-1 opacity-80" />
-        {period}
+        {periodo}
       </span>
 
-      {/* ERR */}
+      {/* ERRO */}
       {err && (
         <div className="mb-3 text-sm text-red-300 border border-red-800/50 rounded-lg p-2 bg-red-950/30">
           {err}
         </div>
       )}
 
-      {/* LOADER */}
+      {/* LOADING */}
       {loading ? (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           {[1, 2, 3].map((i) => (
@@ -235,40 +145,35 @@ export default function DiscoverMoreCard() {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 auto-rows-[1fr]">
-
           <KpiTile
             icon={ArrowUpRight}
-            label="Incoming"
-            value={incoming}
+            label="Entradas Brutas"
+            value={entradaBruto}
+            hint={`Total de ${qtdPagasDia} transações`}
             iconColor="text-green-500"
           />
 
           <KpiTile
             icon={ArrowDownRight}
-            label="Outgoing"
-            value={outgoing}
+            label="Saídas (Hoje)"
+            value={saidaDia}
             iconColor="text-red-500"
           />
 
           <KpiTile
             icon={Zap}
-            label="Pix Volume"
-            value={pixVolume}
-            hint="Total Pix processed"
+            label="Volume PIX (Mês)"
+            value={volumePixMes}
+            hint="Total Pix processado no mês"
             iconColor="text-sky-400"
           />
 
           <KpiTile
-            icon={AlertTriangle}
-            label="Chargebacks"
-            value={String(chargebacks)}
-            iconColor="text-yellow-400"
-          />
-
-          <KpiTile
             icon={ListChecks}
-            label="Pending"
-            value={String(pending)}
+            label="Entradas Líquidas"
+            value={entradaLiquido}
+            hint="Após taxas aplicadas"
+            iconColor="text-emerald-400"
             className="md:col-span-2 md:col-start-2"
           />
         </div>
