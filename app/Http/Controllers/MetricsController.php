@@ -12,8 +12,8 @@ use Illuminate\Support\Carbon;
 class MetricsController extends Controller
 {
     /**
-     * GET /api/metrics/month
-     * Retorna métricas do mês corrente para o usuário autenticado.
+     * GET /api/metrics/month?day=YYYY-MM-DD
+     * Retorna métricas do mês OU do dia, com taxa aplicada.
      */
     public function month(Request $request)
     {
@@ -23,13 +23,40 @@ class MetricsController extends Controller
         }
 
         $tz = 'America/Sao_Paulo';
-        $startTz  = Carbon::now($tz)->startOfMonth();
-        $endTz    = Carbon::now($tz)->endOfDay();
-        $startUtc = $startTz->clone()->utc();
-        $endUtc   = $endTz->clone()->utc();
 
-        // 🔹 Entradas (Pix pagas)
-        $entradasMes = Transaction::query()
+        if ($request->filled('day')) {
+
+            // 🔹 Modo FILTRO POR DIA
+            try {
+                $dayStart = Carbon::parse($request->day, $tz)->startOfDay();
+                $dayEnd   = Carbon::parse($request->day, $tz)->endOfDay();
+            } catch (\Exception $e) {
+                return response()->json(['success' => false, 'message' => 'Data inválida'], 422);
+            }
+
+            $startUtc = $dayStart->clone()->utc();
+            $endUtc   = $dayEnd->clone()->utc();
+
+            $periodo = $dayStart->locale('pt_BR')->translatedFormat('d \\d\\e F, Y');
+
+        } else {
+
+            // 🔹 Modo MENSAL
+            $startTz = Carbon::now($tz)->startOfMonth()->startOfDay();
+            $endTz   = Carbon::now($tz)->endOfDay();
+
+            $startUtc = $startTz->clone()->utc();
+            $endUtc   = $endTz->clone()->utc();
+
+            $periodo = sprintf(
+                '%s – %s',
+                $startTz->locale('pt_BR')->translatedFormat('d \\d\\e F'),
+                now($tz)->locale('pt_BR')->translatedFormat('d \\d\\e F, Y')
+            );
+        }
+
+        // 🔹 Entradas brutas (PIX pagas)
+        $entradasBruto = (float) Transaction::query()
             ->where('user_id', $u->id)
             ->where('direction', Transaction::DIR_IN)
             ->where('method', 'pix')
@@ -37,23 +64,46 @@ class MetricsController extends Controller
             ->whereBetween('created_at', [$startUtc, $endUtc])
             ->sum('amount');
 
-        // 🔹 Volume total (todas Pix criadas)
-        $volumePix = Transaction::query()
+        // ======================================
+        // 🔥 APLICAÇÃO SEGURA DA TAXA DE CASH-IN
+        // ======================================
+        $entradasLiquido = $entradasBruto;
+
+        if ($u->tax_in_enabled) {
+
+            $percent = max(0, (float) ($u->tax_in_percent ?? 0));
+            $fixed   = max(0, (float) ($u->tax_in_fixed ?? 0));
+
+            if ($percent > 0) {
+                $entradasLiquido -= ($entradasBruto * ($percent / 100));
+            }
+
+            if ($fixed > 0) {
+                $entradasLiquido -= $fixed;
+            }
+
+            if ($entradasLiquido < 0) {
+                $entradasLiquido = 0;
+            }
+        }
+
+        // 🔹 Volume total Pix
+        $volumePix = (float) Transaction::query()
             ->where('user_id', $u->id)
             ->where('direction', Transaction::DIR_IN)
             ->where('method', 'pix')
             ->whereBetween('created_at', [$startUtc, $endUtc])
             ->sum('amount');
 
-        // 🔹 Saídas (saques pagos)
-        $saidasMes = Withdraw::query()
+        // 🔹 Saídas
+        $saidasMes = (float) Withdraw::query()
             ->where('user_id', $u->id)
             ->where('status', 'paid')
             ->whereBetween('created_at', [$startUtc, $endUtc])
             ->sum('amount');
 
         // 🔹 Pendentes
-        $pendentes = Transaction::query()
+        $pendentes = (int) Transaction::query()
             ->where('user_id', $u->id)
             ->where('direction', Transaction::DIR_IN)
             ->where('method', 'pix')
@@ -61,41 +111,34 @@ class MetricsController extends Controller
             ->whereBetween('created_at', [$startUtc, $endUtc])
             ->count();
 
-        // 🔹 Chargebacks (fallback)
+        // 🔹 Chargebacks
         $statusChargeback = defined(TransactionStatus::class . '::CHARGEBACK')
             ? TransactionStatus::CHARGEBACK
             : 'chargeback';
 
-        $chargebacksMes = Transaction::query()
+        $chargebacksMes = (int) Transaction::query()
             ->where('user_id', $u->id)
             ->where('method', 'pix')
             ->where('status', $statusChargeback)
             ->whereBetween('created_at', [$startUtc, $endUtc])
             ->count();
 
-        // 🔹 Período formatado
-        $periodo = sprintf(
-            '%s – %s',
-            $startTz->locale('pt_BR')->translatedFormat('d \\d\\e F'),
-            now($tz)->locale('pt_BR')->translatedFormat('d \\d\\e F, Y')
-        );
-
         return response()->json([
             'success' => true,
             'data' => [
-                'entradaMes'     => (float) $entradasMes,
-                'saidaMes'       => (float) $saidasMes,
-                'pendentes'      => (int) $pendentes,
-                'volumePix'      => (float) $volumePix,
-                'chargebacksMes' => (int) $chargebacksMes,
-                'periodo'        => $periodo,
+                'entradaMes'      => $entradasLiquido,
+                'entradaBruto'    => $entradasBruto,
+                'saidaMes'        => $saidasMes,
+                'pendentes'       => $pendentes,
+                'volumePix'       => $volumePix,
+                'chargebacksMes'  => $chargebacksMes,
+                'periodo'         => $periodo,
             ],
         ]);
     }
 
     /**
      * PUT /api/metrics/goal
-     * Atualiza meta mensal (se usada no painel)
      */
     public function updateGoal(Request $request)
     {
@@ -120,7 +163,6 @@ class MetricsController extends Controller
 
     /**
      * GET /api/metrics/paid-feed
-     * Lista unificada das últimas transações pagas (PIX e SAQUES)
      */
     public function paidFeed(Request $request)
     {
@@ -166,7 +208,6 @@ class MetricsController extends Controller
             ->map(fn ($w) => [
                 'kind'        => 'SAQUE',
                 'id'          => (int) $w->id,
-                // ✅ Inclui o E2E salvo no meta JSON
                 'e2e'         => data_get($w->meta, 'e2e') ?? data_get($w->meta, 'endtoend'),
                 'amount'      => (float) ($w->gross_amount ?? $w->amount),
                 'fee'         => (float) ($w->fee_amount ?? 0),
@@ -178,7 +219,6 @@ class MetricsController extends Controller
                 'credit'      => false,
             ]);
 
-        // 🔹 Unifica e ordena
         $merged = $pix->merge($saques)
             ->sortByDesc(fn ($i) => $i['paidAt'] ?? $i['createdAt'])
             ->values()
