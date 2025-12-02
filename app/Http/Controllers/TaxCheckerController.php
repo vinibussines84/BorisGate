@@ -12,21 +12,24 @@ use Carbon\Carbon;
 
 class TaxCheckerController extends Controller
 {
+    /**
+     * Página principal do validador de taxas.
+     */
     public function index(Request $request)
     {
         $user = $request->user();
 
-        // 🔐 Permissão: apenas dashrash == 1
+        // 🔒 Permissão restrita: apenas dashrash == 1
         if ((int) ($user->dashrash ?? 0) !== 1) {
             abort(403, 'Acesso negado: sua conta não possui permissão.');
         }
 
-        // 🔒 Gate adicional (segurança)
+        // 🔐 Gate adicional (segurança extra)
         if (Gate::denies('view-taxes')) {
             abort(403, 'Acesso não autorizado.');
         }
 
-        // 🕒 Intervalo de datas (padrão: dia atual)
+        // 🕒 Intervalo de datas (padrão: hoje)
         $start = $request->filled('start_date')
             ? Carbon::parse($request->input('start_date'))->startOfDay()
             : Carbon::today()->startOfDay();
@@ -35,38 +38,43 @@ class TaxCheckerController extends Controller
             ? Carbon::parse($request->input('end_date'))->endOfDay()
             : Carbon::today()->endOfDay();
 
-        // 👤 Filtro por usuário (se enviado)
+        // 👤 Filtro por usuário (opcional)
         $userId = $request->input('user_id');
 
-        // 🔍 Transações filtradas por data e usuário
+        // 🔍 Buscar apenas transações PAGAS dentro do período
         $query = Transaction::query()
             ->cashIn()
+            ->where('status', 'paga')
             ->whereBetween('created_at', [$start, $end])
             ->with('user');
 
-        if ($request->filled('user_id')) {
+        if ($userId) {
             $query->where('user_id', $userId);
         }
 
+        // 🔢 Paginação
         $transactions = $query
             ->latest()
             ->paginate(30)
             ->withQueryString();
 
-        // 💰 Cálculo de lucro individual
+        // 💰 Calcula campos auxiliares (líquido, cliente, lucro unitário)
         $transactions->getCollection()->transform(function ($t) {
             $t->expected_liquid = $this->calcLiquidante($t->amount);
             $t->expected_client = $this->calcCliente($t->amount);
-            $t->expected_profit = $t->expected_liquid - $t->expected_client;
+            $t->expected_profit = $t->expected_liquid - $t->expected_client; // lucro unitário
             return $t;
         });
 
-        // 📊 Estatísticas gerais filtradas
+        // 📊 Estatísticas agregadas (só pagas)
         $stats = $this->getStats($start, $end, $userId);
 
-        // 👥 Lista de usuários (para o select)
-        $users = User::select('id', 'email', 'nome_completo')->orderBy('nome_completo')->get();
+        // 👥 Lista de usuários para o select
+        $users = User::select('id', 'email', 'nome_completo')
+            ->orderBy('nome_completo')
+            ->get();
 
+        // Retorna para o Inertia
         return Inertia::render('TaxChecker', [
             'transactions' => $transactions,
             'stats' => $stats,
@@ -80,52 +88,55 @@ class TaxCheckerController extends Controller
     }
 
     /**
-     * 📈 Estatísticas consolidadas (respeitando user_id)
+     * 📈 Estatísticas consolidadas (apenas transações pagas)
      */
     private function getStats(Carbon $start, Carbon $end, ?int $userId = null): array
     {
-        // Transações filtradas
+        // Transações pagas (entradas)
         $txBase = Transaction::query()
             ->cashIn()
+            ->where('status', 'paga')
             ->whereBetween('created_at', [$start, $end]);
 
-        // Saques pagos filtrados
+        // Saques pagos
         $wdBase = Withdraw::query()
-            ->whereBetween('created_at', [$start, $end])
-            ->where('status', 'pago');
+            ->where('status', 'pago')
+            ->whereBetween('created_at', [$start, $end]);
 
         if ($userId) {
             $txBase->where('user_id', $userId);
             $wdBase->where('user_id', $userId);
         }
 
-        // Pedidos pagos (status exato)
-        $paidOrdersCount = (clone $txBase)->where('status', 'paga')->count();
-
-        // Entradas (cash-in)
+        // 📊 Dados brutos
+        $paidOrdersCount = (clone $txBase)->count();
         $totalBruto = (clone $txBase)->sum('amount');
-        $transactionCount = (clone $txBase)->count();
+        $transactionCount = $paidOrdersCount;
 
-        // Saques pagos
         $withdrawCount = (clone $wdBase)->count();
         $withdrawTotal = (clone $wdBase)->sum('gross_amount');
 
-        // 🧾 Taxas e lucro
-        $taxaLiquidanteEntradas = ($totalBruto * 0.015) + ($transactionCount * 0.10);
+        // 🧮 Cálculos de taxas
+        $taxaLiquidanteEntradas = ($totalBruto * 0.015) + ($transactionCount * 0.10); // 1.5% + 0.10
+        $valorLiquidoLiquidante = $totalBruto - $taxaLiquidanteEntradas;
+
+        $taxaIntermediario = $totalBruto * 0.04; // 4% cobrado do cliente
+        $valorLiquidoCliente = $totalBruto - $taxaIntermediario;
+
+        // 🧾 Bruto Interno (lucro total = diferença entre os dois líquidos)
+        $brutoInterno = $valorLiquidoLiquidante - $valorLiquidoCliente;
+
+        // 🏦 Taxa de saque (R$ 0,10 por saque pago)
         $taxaLiquidanteSaques = $withdrawCount * 0.10;
-
-        $valorLiquidoLiquidante = round($totalBruto - $taxaLiquidanteEntradas, 2);
-        $taxaIntermediario = $totalBruto * 0.025;
-
-        $lucro = round($valorLiquidoLiquidante - $taxaIntermediario, 2);
 
         return [
             'paid_orders_count'        => $paidOrdersCount,
             'withdraw_count'           => $withdrawCount,
             'withdraw_total'           => round($withdrawTotal, 2),
             'total_bruto'              => round($totalBruto, 2),
-            'valor_liquido_liquidante' => $valorLiquidoLiquidante,
-            'lucro'                    => $lucro,
+            'valor_liquido_liquidante' => round($valorLiquidoLiquidante, 2),
+            'valor_liquido_cliente'    => round($valorLiquidoCliente, 2),
+            'bruto_interno'            => round($brutoInterno, 2),
             'taxa_liquidante_saques'   => round($taxaLiquidanteSaques, 2),
         ];
     }

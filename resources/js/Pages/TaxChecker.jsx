@@ -8,6 +8,7 @@ import {
   Banknote,
   TrendingUp,
   PiggyBank,
+  Coins,
 } from "lucide-react";
 import {
   BarChart,
@@ -86,7 +87,8 @@ export default function TaxChecker({
       name: "Valores (R$)",
       Bruto: stats?.total_bruto ?? 0,
       Liquidante: stats?.valor_liquido_liquidante ?? 0,
-      Lucro: stats?.lucro ?? 0,
+      Cliente: stats?.valor_liquido_cliente ?? 0,
+      "Bruto Interno": stats?.bruto_interno ?? 0,
     },
   ];
 
@@ -108,7 +110,7 @@ export default function TaxChecker({
                   Validador de Taxas
                 </h1>
                 <p className="text-zinc-400 text-sm mt-1">
-                  Filtre transações, calcule taxas e visualize o lucro real.
+                  Analise as entradas pagas, taxas da liquidante e lucro interno.
                 </p>
               </div>
             </div>
@@ -171,9 +173,9 @@ export default function TaxChecker({
           {stats?.total_bruto > 0 && (
             <>
               {/* CARDS FINANCEIROS */}
-              <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-5 gap-4">
                 <Card
-                  title="Total Bruto de Entradas"
+                  title="Total Bruto (Pagas)"
                   value={BRL(stats?.total_bruto ?? 0)}
                   color="text-blue-400"
                   icon={Banknote}
@@ -185,15 +187,21 @@ export default function TaxChecker({
                   icon={TrendingUp}
                 />
                 <Card
-                  title="Lucro do Período"
-                  value={BRL(stats?.lucro ?? 0)}
+                  title="Líquido do Cliente"
+                  value={BRL(stats?.valor_liquido_cliente ?? 0)}
+                  color="text-amber-400"
+                  icon={Calculator}
+                />
+                <Card
+                  title="Bruto Interno (Lucro)"
+                  value={BRL(stats?.bruto_interno ?? 0)}
                   color="text-emerald-400"
-                  icon={PiggyBank}
+                  icon={Coins}
                 />
                 <Card
                   title="Pedidos Pagos"
                   value={stats?.paid_orders_count ?? 0}
-                  color="text-amber-400"
+                  color="text-gray-300"
                   icon={CheckCircle}
                 />
               </div>
@@ -201,7 +209,7 @@ export default function TaxChecker({
               {/* GRÁFICO */}
               <div className="bg-[#0b0b0b]/80 border border-white/10 rounded-3xl p-6 backdrop-blur-sm">
                 <h3 className="text-white text-base font-semibold mb-4">
-                  Comparativo Financeiro (Bruto × Líquido × Lucro)
+                  Comparativo Financeiro (Bruto × Líquidos × Lucro Interno)
                 </h3>
                 <div className="h-72">
                   <ResponsiveContainer width="100%" height="100%">
@@ -209,18 +217,12 @@ export default function TaxChecker({
                       <CartesianGrid strokeDasharray="3 3" stroke="#1f1f1f" />
                       <XAxis dataKey="name" stroke="#aaa" />
                       <YAxis stroke="#aaa" />
-                      <Tooltip
-                        cursor={{ fill: "#222" }}
-                        formatter={(v) => BRL(v)}
-                      />
+                      <Tooltip cursor={{ fill: "#222" }} formatter={(v) => BRL(v)} />
                       <Legend />
                       <Bar dataKey="Bruto" fill="#3b82f6" radius={[8, 8, 0, 0]} />
-                      <Bar
-                        dataKey="Liquidante"
-                        fill="#02fb5c"
-                        radius={[8, 8, 0, 0]}
-                      />
-                      <Bar dataKey="Lucro" fill="#10b981" radius={[8, 8, 0, 0]} />
+                      <Bar dataKey="Liquidante" fill="#02fb5c" radius={[8, 8, 0, 0]} />
+                      <Bar dataKey="Cliente" fill="#f59e0b" radius={[8, 8, 0, 0]} />
+                      <Bar dataKey="Bruto Interno" fill="#10b981" radius={[8, 8, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -262,7 +264,7 @@ export default function TaxChecker({
                         <th className="py-2">Valor Bruto</th>
                         <th className="py-2">Líquido Liquidante</th>
                         <th className="py-2">Líquido Cliente</th>
-                        <th className="py-2">Lucro</th>
+                        <th className="py-2">Lucro Interno</th>
                         <th className="py-2">Status</th>
                         <th className="py-2">Data</th>
                       </tr>
@@ -274,9 +276,7 @@ export default function TaxChecker({
                             key={t.id}
                             className="border-b border-white/5 hover:bg-white/5 transition"
                           >
-                            <td className="py-3 text-gray-300 font-mono">
-                              #{t.id}
-                            </td>
+                            <td className="py-3 text-gray-300 font-mono">#{t.id}</td>
                             <td className="py-3 text-gray-300">
                               {t.user?.nome_completo || t.user?.email || "—"}
                             </td>
@@ -292,9 +292,7 @@ export default function TaxChecker({
                             <td className="py-3 text-emerald-400 font-bold">
                               {BRL(t.expected_profit)}
                             </td>
-                            <td className="py-3 text-gray-300">
-                              {t.status_label}
-                            </td>
+                            <td className="py-3 text-gray-300">{t.status_label}</td>
                             <td className="py-3 text-gray-400 font-mono text-xs">
                               {fmtDateTime(t.created_at)}
                             </td>
@@ -302,10 +300,7 @@ export default function TaxChecker({
                         ))
                       ) : (
                         <tr>
-                          <td
-                            colSpan="8"
-                            className="text-center py-6 text-zinc-500"
-                          >
+                          <td colSpan="8" className="text-center py-6 text-zinc-500">
                             Nenhuma transação encontrada.
                           </td>
                         </tr>
