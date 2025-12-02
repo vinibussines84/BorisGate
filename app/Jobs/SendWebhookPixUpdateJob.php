@@ -4,98 +4,84 @@ namespace App\Jobs;
 
 use App\Models\Transaction;
 use Illuminate\Bus\Queueable;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
-use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Log;
 
 class SendWebhookPixUpdateJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    protected Transaction $transaction;
+    public int $txId;
 
-    /**
-     * Cria uma nova instância do Job.
-     */
-    public function __construct(Transaction $transaction)
+    public function __construct(int $txId)
     {
-        $this->transaction = $transaction;
-
-        // Coloca na fila específica
+        $this->txId = $txId;
         $this->onQueue('webhooks');
     }
 
-    /**
-     * Executa o Job.
-     */
     public function handle(): void
     {
+        $tx = Transaction::with('user')->find($this->txId);
+
+        if (!$tx || !$tx->user) {
+            Log::warning("⚠️ Webhook Pix Update ignorado — TX ou User não encontrados", [
+                'tx_id' => $this->txId
+            ]);
+            return;
+        }
+
+        if (!$tx->user->webhook_enabled || !$tx->user->webhook_in_url) {
+            Log::info("ℹ️ Usuário não tem webhook IN ativo", [
+                'user_id' => $tx->user_id,
+                'tx_id'   => $tx->id,
+            ]);
+            return;
+        }
+
         try {
-            // Sempre pega a transação mais atualizada (para garantir consistência)
-            $tx = $this->transaction->fresh(['user']);
-
-            if (!$tx) {
-                Log::warning('⚠️ Job Pix Update ignorado — transação não encontrada.', [
-                    'transaction_id' => $this->transaction->id ?? null,
-                ]);
-                return;
-            }
-
-            $user = $tx->user;
-
-            if (!$user || !$user->webhook_enabled || !$user->webhook_in_url) {
-                Log::info('ℹ️ Webhook de Pix ignorado (usuário sem webhook configurado).', [
-                    'transaction_id' => $tx->id,
-                ]);
-                return;
-            }
-
-            // 🚫 Idempotência: se o status não for PAGA, ignora
-            if (!$tx->isPaga()) {
-                Log::info('ℹ️ Webhook de Pix ignorado (status não é pago).', [
-                    'transaction_id' => $tx->id,
-                    'status' => $tx->status,
-                ]);
-                return;
-            }
-
-            // Monta o payload
             $payload = [
-                "type"             => "Pix Update",
-                "event"            => "updated",
-                "transaction_id"   => $tx->id,
-                "external_id"      => $tx->external_reference,
-                "user"             => $user->name,
-                "amount"           => number_format($tx->amount, 2, '.', ''),
-                "fee"              => number_format($tx->fee, 2, '.', ''),
-                "currency"         => $tx->currency,
-                "status"           => "paga",
-                "txid"             => $tx->txid,
-                "e2e"              => $tx->e2e_id,
-                "direction"        => $tx->direction,
-                "method"           => $tx->method,
-                "created_at"       => $tx->created_at,
-                "updated_at"       => $tx->updated_at,
-                "paid_at"          => $tx->paid_at,
-                "canceled_at"      => $tx->canceled_at,
-                "provider_payload" => $tx->provider_payload,
+                "type"            => "Pix Update",
+                "event"           => "updated",
+                "transaction_id"  => $tx->id,
+                "external_id"     => $tx->external_reference,
+                "user"            => $tx->user->name,
+                "amount"          => $tx->amount,
+                "fee"             => $tx->fee,
+                "currency"        => $tx->currency,
+                "status"          => $tx->status,
+                "txid"            => $tx->txid,
+                "e2e"             => $tx->e2e_id,
+                "direction"       => $tx->direction,
+                "method"          => $tx->method,
+                "created_at"      => optional($tx->created_at)->toISOString(),
+                "updated_at"      => optional($tx->updated_at)->toISOString(),
+                "paid_at"         => optional($tx->paid_at)->toISOString(),
+                "provider_payload"=> $tx->provider_payload
             ];
 
-            // Envia webhook
-            $response = Http::timeout(10)->post($user->webhook_in_url, $payload);
+            $response = Http::timeout(10)->post(
+                $tx->user->webhook_in_url,
+                $payload
+            );
 
-            Log::info('✅ Webhook Pix Update enviado com sucesso', [
-                'transaction_id' => $tx->id,
-                'status'         => $response->status(),
+            Log::info("✅ Webhook Pix Update enviado", [
+                'tx_id'    => $tx->id,
+                'status'   => $response->status(),
+                'response' => $response->body(),
             ]);
+
         } catch (\Throwable $e) {
-            Log::warning('⚠️ Falha ao enviar webhook Pix Update', [
-                'transaction_id' => $this->transaction->id ?? null,
+
+            Log::warning("⚠️ Webhook Pix Update falhou", [
+                'tx_id' => $tx->id,
                 'error' => $e->getMessage(),
             ]);
+
+            throw $e;
         }
     }
 }
