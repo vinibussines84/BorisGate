@@ -35,14 +35,14 @@ class Transaction extends Model
         'txid',
         'e2e_id',
 
-        // 🧾 Dados do pagador (payer)
+        // 🧾 Dados do pagador
         'payer_name',
         'payer_document',
 
-        // 🔍 RAW JSON vindo do provider
+        // 🔍 JSON provider
         'provider_payload',
 
-        // 🔎 Metadados
+        // 🔎 Meta
         'description',
         'authorized_at',
         'paid_at',
@@ -77,7 +77,8 @@ class Transaction extends Model
         'pix_expired',
     ];
 
-    // ================= RELAÇÕES =================
+    /* ================= RELAÇÕES ================= */
+
     public function tenant()
     {
         return $this->belongsTo(\App\Models\Tenant::class);
@@ -88,16 +89,18 @@ class Transaction extends Model
         return $this->belongsTo(\App\Models\User::class);
     }
 
-    // ================= HELPERS =================
+    /* ================= STATUS ENUM ================= */
+
     protected function statusEnum(): ?TransactionStatus
     {
         $raw = $this->attributes['status'] ?? null;
-        if ($raw === null) return null;
 
-        return TransactionStatus::fromLoose((string) $raw);
+        // 👇 Aqui NÃO usamos fromLoose() porque causa problemas.
+        return $raw ? TransactionStatus::tryFrom($raw) : null;
     }
 
-    // ================= SCOPES =================
+    /* ================= SCOPES ================= */
+
     public function scopePaga($q)
     {
         return $q->where('status', TransactionStatus::PAGA->value);
@@ -123,6 +126,11 @@ class Transaction extends Model
         return $q->where('status', TransactionStatus::MED->value);
     }
 
+    public function scopeUnderReview($q)
+    {
+        return $q->where('status', TransactionStatus::UNDER_REVIEW->value);
+    }
+
     public function scopeCashIn($q)
     {
         return $q->where('direction', self::DIR_IN);
@@ -133,12 +141,8 @@ class Transaction extends Model
         return $q->where('direction', self::DIR_OUT);
     }
 
-    public function scopeDeCobranca($q)
-    {
-        return $q->where('external_reference', 'like', 'cobranca:%');
-    }
+    /* ================= ACCESSORS ================= */
 
-    // ================= ACCESSORS =================
     protected function statusLabel(): Attribute
     {
         return Attribute::get(fn () =>
@@ -165,11 +169,10 @@ class Transaction extends Model
 
     protected function pixExpire(): Attribute
     {
-        return Attribute::get(function () {
-            return data_get($this->provider_payload, 'expire')
-                ?? data_get($this->provider_payload, 'data.expire')
-                ?? null;
-        });
+        return Attribute::get(fn () =>
+            data_get($this->provider_payload, 'expire')
+            ?? data_get($this->provider_payload, 'data.expire')
+        );
     }
 
     protected function pixExpiresAt(): Attribute
@@ -187,20 +190,21 @@ class Transaction extends Model
     protected function pixExpired(): Attribute
     {
         return Attribute::get(fn () =>
-            $this->pix_expires_at ? $this->pix_expires_at < now() : false
+            $this->pix_expires_at ? $this->pix_expires_at->lt(now()) : false
         );
     }
 
-    // ================= MUTATORS =================
+    /* ================= MUTATORS ================= */
+
     public function setStatusAttribute($value): void
     {
-        // Aceita Enum diretamente
+        // Enum direto
         if ($value instanceof TransactionStatus) {
             $this->attributes['status'] = $value->value;
             return;
         }
 
-        // Aceita strings e valores soltos
+        // Normalização segura
         $this->attributes['status'] = TransactionStatus::fromLoose((string) $value)->value;
     }
 
@@ -228,11 +232,12 @@ class Transaction extends Model
 
     public function setE2eIdAttribute($value): void
     {
-        $v = preg_replace('/[^A-Za-z0-9]/', '', (string) $value) ?? null;
+        $v = preg_replace('/[^A-Za-z0-9\-\.]/', '', (string) $value) ?? null;
         $this->attributes['e2e_id'] = $v ? substr($v, 0, 100) : null;
     }
 
-    // ================= BOOLEAN HELPERS =================
+    /* ================= BOOLEAN HELPERS ================= */
+
     public function isPaga(): bool
     {
         return $this->status === TransactionStatus::PAGA->value;
@@ -268,7 +273,8 @@ class Transaction extends Model
         return $this->status === $status->value;
     }
 
-    // ================= HELPERS =================
+    /* ================= HELPERS ================= */
+
     public function markPaid(?\DateTimeInterface $when = null): void
     {
         $this->status  = TransactionStatus::PAGA;
@@ -276,11 +282,17 @@ class Transaction extends Model
         $this->save();
     }
 
-    // ================= DEFAULTS =================
+    /* ================= DEFAULTS ================= */
+
     protected static function booted(): void
     {
         static::creating(function (self $m) {
-            $m->direction = $m->direction ?: self::DIR_IN;
+
+            // Só aplica defaults se não foi setado
+            if (!$m->direction) {
+                $m->direction = self::DIR_IN;
+            }
+
             $m->currency  = $m->currency  ?: 'BRL';
             $m->method    = $m->method    ?: 'pix';
 
