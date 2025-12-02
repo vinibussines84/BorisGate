@@ -47,12 +47,12 @@ class TransactionPixController extends Controller
         $amountCents = (int) round($amountReais * 100);
         $externalId  = $data['external_id'];
 
-        // Limite preventivo
+        // 🔐 Limite preventivo
         if ($amountReais > 3000) {
             return response()->json(['success' => false, 'error' => 'The maximum allowed PIX amount is R$3000.'], 422);
         }
 
-        // Evitar duplicidade
+        // ❌ Evitar duplicidade de external_id
         if (Transaction::where('user_id', $user->id)
             ->where('external_reference', $externalId)
             ->exists()) {
@@ -62,13 +62,13 @@ class TransactionPixController extends Controller
             ], 409);
         }
 
-        // CPF
+        // 🔢 CPF
         $cpf = preg_replace('/\D/', '', ($data['document'] ?? $user->cpf_cnpj ?? ''));
         if (!$cpf || strlen($cpf) !== 11 || !$this->validateCpf($cpf)) {
             return response()->json(['success' => false, 'error' => 'Invalid CPF.', 'field' => 'document'], 422);
         }
 
-        // Telefone
+        // 📞 Telefone
         $phone = preg_replace('/\D/', '', ($data['phone'] ?? $user->phone ?? ''));
         if (!$phone || strlen($phone) < 11 || strlen($phone) > 12) {
             return response()->json(['success' => false, 'error' => 'Invalid phone number.', 'field' => 'phone'], 422);
@@ -120,6 +120,7 @@ class TransactionPixController extends Controller
         // 🚀 Envio à PodPay
         try {
             $response = $podpay->createPixTransaction($payload);
+
             if (!in_array($response["status"], [200, 201])) {
                 throw new \Exception(json_encode($response["body"]));
             }
@@ -131,15 +132,14 @@ class TransactionPixController extends Controller
             if (!$transactionId || !$qrCodeText) {
                 throw new \Exception("Invalid PodPay response");
             }
+
         } catch (\Throwable $e) {
             Log::error("PODPAY_PIX_CREATE_ERROR", ['error' => $e->getMessage()]);
-            $tx->update(['status' => TransactionStatus::FALHADO]);
+            $tx->update(['status' => TransactionStatus::FALHA]);
             return response()->json(['success' => false, 'error' => 'Failed to create PIX transaction.'], 500);
         }
 
-        /**
-         * ⏰ CORREÇÃO DO TIMEZONE (UTC → America/Sao_Paulo)
-         */
+        // ⏰ Ajuste timezone
         $createdAtBr = Carbon::parse(data_get($body, 'createdAt'))
             ->tz('America/Sao_Paulo')
             ->toDateTimeString();
@@ -158,7 +158,7 @@ class TransactionPixController extends Controller
                 'phone'    => data_get($body, 'customer.phone'),
                 'document' => data_get($body, 'customer.document.number'),
             ],
-            'created_at'  => $createdAtBr, // 👈 FUSO HORÁRIO CORRIGIDO
+            'created_at'  => $createdAtBr,
             'identifier'  => data_get($body, 'pix.end2EndId'),
             'external_ref'=> data_get($body, 'externalRef'),
         ];
@@ -176,9 +176,9 @@ class TransactionPixController extends Controller
             ],
         ]);
 
-        // 📡 Enviar webhook (Job rastreável pelo Horizon)
+        // 📡 Enviar webhook criado (FORMA CORRETA AGORA)
         if ($user->webhook_enabled && $user->webhook_in_url) {
-            SendWebhookPixCreatedJob::dispatch($user, $tx);
+            SendWebhookPixCreatedJob::dispatch($user->id, $tx->id);
         }
 
         // ✅ Retorno final
@@ -195,7 +195,7 @@ class TransactionPixController extends Controller
     }
 
     /**
-     * 🔍 Consulta transação PIX ou saque por external_id
+     * 🔍 Status via external_id
      */
     public function statusByExternal(Request $request, string $externalId)
     {
@@ -272,7 +272,8 @@ class TransactionPixController extends Controller
         return response()->json(['success' => false, 'error' => 'No transaction or withdraw found for this external_id.'], 404);
     }
 
-    // 🔧 Utilitários auxiliares
+
+    // 🔧 Utilitários
     private function resolveUser(string $auth, string $secret)
     {
         return User::where('authkey', $auth)->where('secretkey', $secret)->first();
