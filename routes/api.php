@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\PodPayTransactionController;
 use App\Http\Controllers\Api\Webhooks\PodPayWebhookController;
 use App\Http\Controllers\Api\Webhooks\PodPayWithdrawWebhookController;
 
+// Outros webhooks
 use App\Http\Controllers\Webhooks\VeltraxWebhookController;
 use App\Http\Controllers\Webhooks\GatewayWebhookController;
 
@@ -34,6 +35,9 @@ use App\Http\Controllers\Api\Webhooks\PluggouPayoutWebhookController;
 use App\Http\Controllers\Api\Webhooks\LumnisWebhookController;
 use App\Http\Controllers\Api\Webhooks\LumnisWithdrawController;
 
+// 🦈 SharkBank
+use App\Http\Controllers\Api\Webhooks\SharkBankWebhookController;
+
 
 // ───────────────────────────────────────────────────────────────────────────────
 // HEALTHCHECK
@@ -53,26 +57,18 @@ Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
 
 
 // ───────────────────────────────────────────────
-// PIX — CASH IN (Lumnis - atual)
+// PIX — CASH IN (SharkBank - atual)
 // ───────────────────────────────────────────────
 Route::post('/transaction/pix', [TransactionPixController::class, 'store'])
     ->name('transaction.pix.store');
-
-Route::get('/v1/transaction/status/{txid}', [TransactionPixController::class, 'showByTxid'])
-    ->where('txid', '[A-Za-z0-9]+')
-    ->name('transaction.pix.status.txid');
 
 Route::get('/v1/transaction/status/external/{externalId}', [TransactionPixController::class, 'statusByExternal'])
     ->where('externalId', '[A-Za-z0-9\-_]+')
     ->name('transaction.pix.status.external');
 
-Route::get('/transaction/pix/{txid}', [TransactionPixController::class, 'showByTxid'])
-    ->where('txid', '[A-Za-z0-9]+')
-    ->name('transaction.pix.show');
-
 
 // ───────────────────────────────────────────────
-// PIX — CASH IN (PodPay - NOVO)
+// PIX — CASH IN (PodPay - legado)
 // ───────────────────────────────────────────────
 Route::post('/v1/transaction/pix', [PodPayTransactionController::class, 'store'])
     ->name('v1.transaction.pix.store');
@@ -160,11 +156,14 @@ Route::prefix('webhooks')->name('webhooks.')->group(function () {
         ->middleware('throttle:120,1')
         ->name('lumnis.withdraw');
 
-    // 🚀 PodPay — Payin (PIX) (sem limite)
-    Route::post('/podpay', PodPayWebhookController::class)
-        ->name('podpay');
+    // 🚀 PodPay — Payin (PIX)
+    Route::post('/podpay', PodPayWebhookController::class)->name('podpay');
 
-    // 🚀 PodPay — Payout (Withdraw) (sem limite)
-    Route::post('/podpay/withdraw', PodPayWithdrawWebhookController::class)
-        ->name('podpay.withdraw');
+    // 🚀 PodPay — Payout (Withdraw)
+    Route::post('/podpay/withdraw', PodPayWithdrawWebhookController::class)->name('podpay.withdraw');
+
+    // 🦈 SharkBank — PIX (Payin)
+    Route::post('/sharkbank', SharkBankWebhookController::class)
+        ->middleware('throttle:120,1')
+        ->name('sharkbank');
 });

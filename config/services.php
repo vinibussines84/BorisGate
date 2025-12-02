@@ -127,7 +127,7 @@ return [
     ],
 
     // ---------------------------------------
-    // PODPAY (CASHOUT)
+    // PODPAY (CASHOUT / PIX)
     // ---------------------------------------
     'podpay' => [
         'url'          => env('PODPAY_URL', 'https://api.podpay.co/v1'),
@@ -135,6 +135,15 @@ return [
         'secret_key'   => env('PODPAY_SECRET_KEY'),
         'public_key'   => env('PODPAY_PUBLIC_KEY'),
         'timeout'      => env('PODPAY_TIMEOUT', 15),
+    ],
+
+    // ---------------------------------------
+    // 🦈 SHARKBANK (PIX CASHIN/CASHOUT)
+    // ---------------------------------------
+    'sharkbank' => [
+        'url'     => env('SHARKBANK_URL', 'https://api.sharkbank.com.br'),
+        'secret'  => env('SHARKBANK_SECRET'),
+        'timeout' => env('SHARKBANK_TIMEOUT', 15),
     ],
 
 ];
