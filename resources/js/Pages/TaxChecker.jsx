@@ -1,12 +1,14 @@
 import React, { useState } from "react";
 import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout";
-import { Head, Link, router } from "@inertiajs/react";
+import { Head, router } from "@inertiajs/react";
 import {
   Calculator,
   CheckCircle,
   ArrowDownCircle,
   Banknote,
   Eye,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 
 /* ==========================
@@ -32,22 +34,41 @@ const fmtDateTime = (iso) => {
 /* ==========================
    Página Principal
 ========================== */
-export default function TaxChecker({ transactions, stats, users, selected_user_id, date_range }) {
+export default function TaxChecker({
+  transactions,
+  stats,
+  users,
+  selected_user_id,
+  date_range,
+}) {
   const [selectedUser, setSelectedUser] = useState(selected_user_id || "");
+  const [startDate, setStartDate] = useState(
+    date_range?.start?.substring(0, 10) || ""
+  );
+  const [endDate, setEndDate] = useState(
+    date_range?.end?.substring(0, 10) || ""
+  );
   const [reasonView, setReasonView] = useState(null);
 
-  const handleUserChange = (e) => {
-    const userId = e.target.value || "";
-    setSelectedUser(userId);
-    router.get(
-      route("tax-checker.index"),
-      userId ? { user_id: userId } : {},
-      { preserveScroll: true, preserveState: false }
-    );
+  const data = transactions?.data ?? [];
+  const links = transactions?.links ?? [];
+
+  const handleFilterChange = () => {
+    const params = {
+      ...(selectedUser && { user_id: selectedUser }),
+      ...(startDate && { start_date: startDate }),
+      ...(endDate && { end_date: endDate }),
+    };
+    router.get(route("tax-checker.index"), params, {
+      preserveScroll: true,
+      preserveState: false,
+    });
   };
 
-  const data = transactions?.data ?? [];
-  const meta = transactions?.links ?? [];
+  const handlePagination = (url) => {
+    if (!url) return;
+    router.get(url, {}, { preserveScroll: true });
+  };
 
   return (
     <AuthenticatedLayout>
@@ -58,30 +79,30 @@ export default function TaxChecker({ transactions, stats, users, selected_user_i
           {/* HEADER */}
           <div className="bg-[#0b0b0b]/90 border border-white/10 rounded-3xl p-6 shadow-[0_0_40px_-10px_rgba(0,0,0,0.7)] flex items-center gap-5 backdrop-blur">
             <div className="h-full w-1.5 rounded-full bg-[#02fb5c]" />
-
             <div className="flex items-center gap-4">
               <div className="p-3 rounded-2xl border border-white/10 bg-black/40">
                 <Calculator className="w-6 h-6 text-[#02fb5c]" />
               </div>
-
               <div>
                 <h1 className="text-2xl font-bold text-white">
-                  Validador de Taxas — {new Date(date_range.start).toLocaleDateString("pt-BR")}
+                  Validador de Taxas
                 </h1>
                 <p className="text-zinc-400 text-sm mt-1">
-                  Filtra as transações de hoje (00h–23h59) e calcula taxas, lucros e estatísticas.
+                  Analise suas transações, taxas e lucros entre períodos.
                 </p>
               </div>
             </div>
           </div>
 
           {/* FILTROS */}
-          <div className="bg-[#0b0b0b]/80 border border-white/10 rounded-3xl p-5 flex flex-col sm:flex-row sm:items-center gap-4 justify-between">
-            <div>
-              <label className="block text-xs text-zinc-400 mb-1">Filtrar por Usuário</label>
+          <div className="bg-[#0b0b0b]/80 border border-white/10 rounded-3xl p-5 flex flex-col sm:flex-row sm:items-end gap-4 justify-between">
+            <div className="flex flex-col gap-2">
+              <label className="block text-xs text-zinc-400 mb-1">
+                Filtrar por Usuário
+              </label>
               <select
                 value={selectedUser}
-                onChange={handleUserChange}
+                onChange={(e) => setSelectedUser(e.target.value)}
                 className="bg-black/40 border border-white/10 rounded-xl text-sm text-white px-4 py-2 focus:outline-none focus:border-[#02fb5c]/40"
               >
                 <option value="">Todos os usuários</option>
@@ -93,11 +114,36 @@ export default function TaxChecker({ transactions, stats, users, selected_user_i
               </select>
             </div>
 
-            <div className="text-sm text-gray-400">
-              <span className="font-semibold text-white">Período:</span>{" "}
-              {new Date(date_range.start).toLocaleString("pt-BR", { dateStyle: "short" })}{" "}
-              a{" "}
-              {new Date(date_range.end).toLocaleString("pt-BR", { dateStyle: "short" })}
+            <div className="flex items-end gap-3">
+              <div>
+                <label className="block text-xs text-zinc-400 mb-1">
+                  Data inicial
+                </label>
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  className="bg-black/40 border border-white/10 rounded-xl text-sm text-white px-3 py-2 focus:outline-none focus:border-[#02fb5c]/40"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-zinc-400 mb-1">
+                  Data final
+                </label>
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  className="bg-black/40 border border-white/10 rounded-xl text-sm text-white px-3 py-2 focus:outline-none focus:border-[#02fb5c]/40"
+                />
+              </div>
+
+              <button
+                onClick={handleFilterChange}
+                className="px-4 py-2 rounded-xl bg-[#02fb5c]/10 border border-[#02fb5c]/20 text-[#02fb5c] text-sm font-semibold hover:bg-[#02fb5c]/20 transition"
+              >
+                Aplicar
+              </button>
             </div>
           </div>
 
@@ -127,7 +173,7 @@ export default function TaxChecker({ transactions, stats, users, selected_user_i
           <div className="bg-[#0b0b0b]/90 backdrop-blur-sm rounded-3xl border border-white/10 shadow-lg p-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-base font-semibold text-white">
-                Transações do dia ({data.length})
+                Transações ({transactions.total})
               </h3>
             </div>
 
@@ -156,11 +202,15 @@ export default function TaxChecker({ transactions, stats, users, selected_user_i
                         <td className="py-3 text-gray-300">
                           {t.user?.name || t.user?.email || "—"}
                         </td>
-                        <td className="py-3 text-white font-semibold">{BRL(t.amount)}</td>
+                        <td className="py-3 text-white font-semibold">
+                          {BRL(t.amount)}
+                        </td>
                         <td className="py-3 text-[#02fb5c] font-semibold">
                           {BRL(t.expected_liquid)}
                         </td>
-                        <td className="py-3 text-amber-400">{BRL(t.expected_client)}</td>
+                        <td className="py-3 text-amber-400">
+                          {BRL(t.expected_client)}
+                        </td>
                         <td className="py-3 text-emerald-400 font-bold">
                           {BRL(t.expected_profit)}
                         </td>
@@ -173,16 +223,34 @@ export default function TaxChecker({ transactions, stats, users, selected_user_i
                   ) : (
                     <tr>
                       <td colSpan="8" className="text-center py-6 text-zinc-500">
-                        Nenhuma transação encontrada para hoje.
+                        Nenhuma transação encontrada para o período.
                       </td>
                     </tr>
                   )}
                 </tbody>
               </table>
             </div>
+
+            {/* Paginação */}
+            <div className="flex justify-center mt-6 gap-3">
+              {links
+                .filter((l) => l.url !== null)
+                .map((link, i) => (
+                  <button
+                    key={i}
+                    onClick={() => handlePagination(link.url)}
+                    className={`px-3 py-1 rounded-lg text-sm ${
+                      link.active
+                        ? "bg-[#02fb5c]/20 text-[#02fb5c] border border-[#02fb5c]/30"
+                        : "text-gray-400 border border-white/10 hover:bg-white/5"
+                    }`}
+                    dangerouslySetInnerHTML={{ __html: link.label }}
+                  />
+                ))}
+            </div>
           </div>
 
-          {/* MODAL OPCIONAL */}
+          {/* MODAL DE DETALHE (opcional futuro) */}
           {reasonView && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
               <div className="bg-[#0b0b0b] border border-white/10 rounded-2xl shadow-2xl max-w-md w-full mx-4 p-6">
@@ -198,11 +266,9 @@ export default function TaxChecker({ transactions, stats, users, selected_user_i
                     ✕
                   </button>
                 </div>
-
                 <div className="text-sm text-gray-300 leading-relaxed border-y border-white/10 py-4">
                   {reasonView}
                 </div>
-
                 <div className="flex justify-end mt-4">
                   <button
                     onClick={() => setReasonView(null)}
