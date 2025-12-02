@@ -36,13 +36,17 @@ class WithdrawController extends Controller
 
         $query = $this->baseQuery($user->id, $status, $search, $origin);
         $paginated = $query->paginate(10)->withQueryString();
+
         $items = $paginated->getCollection()->map(fn(Withdraw $w) => $this->mapWithdraw($w));
+        $paginated->setCollection($items);
 
         $totalsQuery = Withdraw::where('user_id', $user->id);
+
         $totals = [
             'sum_all'          => (float) $totalsQuery->sum('amount'),
             'count_all'        => (int)   $totalsQuery->count(),
-            'count_processing' => (int)   $totalsQuery->whereIn('status', ['pending', 'processing'])->count(),
+            'count_processing' => (int)   Withdraw::where('user_id', $user->id)
+                ->whereIn('status', ['pending', 'processing'])->count(),
         ];
 
         return response()->json([
@@ -60,7 +64,7 @@ class WithdrawController extends Controller
     }
 
     /*======================================================================
-     *  PANEL LIST
+     *  PANEL LIST (Inertia)
      *======================================================================*/
     public function index(Request $request)
     {
@@ -86,7 +90,7 @@ class WithdrawController extends Controller
     }
 
     /*======================================================================
-     *  CREATE (form Inertia)
+     *  CREATE (Inertia)
      *======================================================================*/
     public function create(Request $request)
     {
@@ -247,7 +251,6 @@ class WithdrawController extends Controller
     {
         $gross = round($amount, 2);
         $fee = 10.00; // taxa fixa obrigatória
-
         $net = round($gross - $fee, 2);
 
         if ($gross < 20) {
@@ -263,7 +266,7 @@ class WithdrawController extends Controller
 
     private function validateStoreRequest(Request $request): array
     {
-        $data = $request->validate([
+        return $request->validate([
             'amount'          => ['required', 'numeric', 'min:20', 'max:1000000'],
             'pixkey'          => ['required', 'string', 'max:140'],
             'pixkey_type'     => ['required', Rule::in(['cpf', 'cnpj', 'email', 'phone', 'randomkey'])],
@@ -271,8 +274,6 @@ class WithdrawController extends Controller
             'idempotency_key' => ['required', 'string', 'max:100'],
             'pin'             => ['required', 'regex:/^\d{4,8}$/'],
         ]);
-
-        return $data;
     }
 
     private function guardPinOnly(?string $hash, string $pin): void
@@ -293,19 +294,30 @@ class WithdrawController extends Controller
         });
     }
 
+    /*======================================================================
+     *  BASE QUERY (FILTROS E BUSCA)
+     *======================================================================*/
     private function baseQuery(int $userId, ?string $status, ?string $search, ?string $origin)
     {
         return Withdraw::query()
             ->where('user_id', $userId)
-            ->when($status, fn($q) => $q->where('status', $status))
-            ->when($search, fn($q) => $q->where(function ($q) use ($search) {
+            ->when($status && strtolower($status) !== 'all',
+                fn($q) => $q->whereRaw('LOWER(status) = ?', [strtolower($status)])
+            )
+            ->when($search, function ($q) use ($search) {
                 $s = "%$search%";
-                $q->where('description', 'like', $s)
-                  ->orWhere('pixkey', 'like', $s)
-                  ->orWhere('idempotency_key', 'like', $s);
-            }))
-            ->when($origin && Schema::hasColumn('withdraws', 'meta'),
-                fn($q) => $q->where('meta->source', $origin))
+                $q->where(function ($q) use ($s) {
+                    $q->where('description', 'like', $s)
+                      ->orWhere('pixkey', 'like', $s)
+                      ->orWhere('idempotency_key', 'like', $s)
+                      ->orWhere('provider_reference', 'like', $s);
+                });
+            })
+            ->when($origin && $origin !== 'all', function ($q) use ($origin) {
+                $q->whereRaw("
+                    LOWER(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(meta, '$.source')), '')) = ?
+                ", [$origin]);
+            })
             ->latest();
     }
 
@@ -324,6 +336,8 @@ class WithdrawController extends Controller
             'created_at'        => $w->created_at,
             'provider_reference'=> $w->provider_reference,
             'meta'              => $w->meta,
+            'origin'            => $w->meta['source'] ?? 'panel',
+            'origin_label'      => ucfirst($w->meta['source'] ?? 'Panel'),
         ];
     }
 
