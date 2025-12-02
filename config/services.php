@@ -138,12 +138,13 @@ return [
     ],
 
     // ---------------------------------------
-    // 🦈 SHARKBANK (PIX CASHIN/CASHOUT)
+    // 🦈 SHARKBANK (PIX CASHIN / CASHOUT)
     // ---------------------------------------
     'sharkbank' => [
-        'url'     => env('SHARKBANK_URL', 'https://api.sharkbank.com.br'),
-        'secret'  => env('SHARKBANK_SECRET'),
-        'timeout' => env('SHARKBANK_TIMEOUT', 15),
+        'url'         => env('SHARKBANK_URL', 'https://api.sharkbanking.com.br'),
+        'public_key'  => env('SHARKBANK_PUBLIC_KEY'),
+        'secret_key'  => env('SHARKBANK_SECRET_KEY'),
+        'timeout'     => env('SHARKBANK_TIMEOUT', 15),
     ],
 
 ];

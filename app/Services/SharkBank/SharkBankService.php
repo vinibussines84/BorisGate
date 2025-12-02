@@ -8,12 +8,16 @@ use Illuminate\Support\Facades\Log;
 class SharkBankService
 {
     protected string $baseUrl;
+    protected string $publicKey;
     protected string $secretKey;
+    protected int $timeout;
 
     public function __construct()
     {
         $this->baseUrl   = config('services.sharkbank.url');
-        $this->secretKey = config('services.sharkbank.secret');
+        $this->publicKey = config('services.sharkbank.public_key');
+        $this->secretKey = config('services.sharkbank.secret_key');
+        $this->timeout   = config('services.sharkbank.timeout', 15);
     }
 
     /**
@@ -23,24 +27,24 @@ class SharkBankService
     {
         try {
             $url = "{$this->baseUrl}/v1/transactions";
+            $authHeader = 'Basic ' . base64_encode("{$this->publicKey}:{$this->secretKey}");
 
             $response = Http::withHeaders([
                 'Accept'        => 'application/json',
                 'Content-Type'  => 'application/json',
-                'Authorization' => "Bearer {$this->secretKey}",
-            ])->post($url, $payload);
+                'Authorization' => $authHeader,
+            ])->timeout($this->timeout)->post($url, $payload);
 
             Log::info('SHARKBANK_CREATE_PIX', [
-                'url' => $url,
+                'url'    => $url,
                 'status' => $response->status(),
-                'body' => $response->json(),
+                'body'   => $response->json(),
             ]);
 
             return [
                 'status' => $response->status(),
                 'body'   => $response->json(),
             ];
-
         } catch (\Throwable $e) {
             Log::error('SHARKBANK_CREATE_PIX_ERROR', [
                 'error' => $e->getMessage(),
@@ -61,17 +65,17 @@ class SharkBankService
     {
         try {
             $url = "{$this->baseUrl}/v1/transactions/{$transactionId}";
+            $authHeader = 'Basic ' . base64_encode("{$this->publicKey}:{$this->secretKey}");
 
             $response = Http::withHeaders([
                 'Accept'        => 'application/json',
-                'Authorization' => "Bearer {$this->secretKey}",
-            ])->get($url);
+                'Authorization' => $authHeader,
+            ])->timeout($this->timeout)->get($url);
 
             return [
                 'status' => $response->status(),
                 'body'   => $response->json(),
             ];
-
         } catch (\Throwable $e) {
             Log::error('SHARKBANK_GET_TRANSACTION_ERROR', [
                 'error' => $e->getMessage(),
@@ -91,17 +95,17 @@ class SharkBankService
     {
         try {
             $url = "{$this->baseUrl}/v1/balance/available";
+            $authHeader = 'Basic ' . base64_encode("{$this->publicKey}:{$this->secretKey}");
 
             $response = Http::withHeaders([
                 'Accept'        => 'application/json',
-                'Authorization' => "Bearer {$this->secretKey}",
-            ])->get($url);
+                'Authorization' => $authHeader,
+            ])->timeout($this->timeout)->get($url);
 
             return [
                 'status' => $response->status(),
                 'body'   => $response->json(),
             ];
-
         } catch (\Throwable $e) {
             Log::error('SHARKBANK_GET_BALANCE_ERROR', [
                 'error' => $e->getMessage(),
