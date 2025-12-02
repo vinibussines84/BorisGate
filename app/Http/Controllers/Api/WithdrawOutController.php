@@ -7,8 +7,8 @@ use App\Jobs\SendWebhookWithdrawCreatedJob;
 use App\Models\User;
 use App\Models\Withdraw;
 use App\Services\Pix\KeyValidator;
-use App\Services\PodPay\PodPayCashoutService;
 use App\Services\Withdraw\WithdrawService;
+use App\Services\Lumnis\LumnisCashoutService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
@@ -16,8 +16,8 @@ use Illuminate\Validation\Rule;
 class WithdrawOutController extends Controller
 {
     public function __construct(
-        private readonly PodPayCashoutService $podpay,
         private readonly WithdrawService      $withdrawService,
+        private readonly LumnisCashoutService $lumnis
     ) {}
 
     public function store(Request $request)
@@ -65,11 +65,16 @@ class WithdrawOutController extends Controller
              * 🧾 Validação
              * ============================================================ */
             $data = $request->validate([
-                'amount'   => ['required', 'numeric', 'min:0.01'],
-                'key'      => ['required', 'string'],
-                'key_type' => ['required', Rule::in(['cpf', 'cnpj', 'email', 'phone', 'evp', 'copypaste'])],
-                'description' => ['nullable', 'string', 'max:255'],
-                'external_id' => ['nullable', 'string', 'max:64'],
+                'amount'       => ['required', 'numeric', 'min:0.01'],
+                'key'          => ['required', 'string'],
+                'key_type'     => ['required', Rule::in(['cpf', 'cnpj', 'email', 'phone', 'evp', 'copypaste'])],
+                'description'  => ['nullable', 'string', 'max:255'],
+                'external_id'  => ['nullable', 'string', 'max:64'],
+
+                // Details obrigatórios para Lumnis
+                'details' => ['required', 'array'],
+                'details.name' => ['required', 'string', 'max:80'],
+                'details.document' => ['required', 'string', 'max:20'],
             ]);
 
             /* ============================================================
@@ -108,14 +113,16 @@ class WithdrawOutController extends Controller
             $externalId = $data['external_id'] ??
                 'WD_' . now()->timestamp . '_' . random_int(1000, 9999);
 
-            if (Withdraw::where('user_id', $user->id)->where('external_id', $externalId)->exists()) {
+            if (Withdraw::where('user_id', $user->id)
+                ->where('external_id', $externalId)
+                ->exists()) {
                 return $this->error('External ID duplicado.');
             }
 
             $internalRef = 'withdraw_' . now()->timestamp . '_' . random_int(1000, 9999);
 
             /* ============================================================
-             * 🧾 Criar saque local + debitar saldo via SERVICE
+             * 🧾 Criar saque local
              * ============================================================ */
             try {
                 $withdraw = $this->withdrawService->create(
@@ -127,7 +134,9 @@ class WithdrawOutController extends Controller
                         'key'         => $data['key'],
                         'key_type'    => strtolower($data['key_type']),
                         'external_id' => $externalId,
-                        'internal_ref'=> $internalRef
+                        'internal_ref'=> $internalRef,
+                        'provider'    => 'lumnis',
+                        'details'     => $data['details'],
                     ]
                 );
             } catch (\Throwable $e) {
@@ -135,48 +144,59 @@ class WithdrawOutController extends Controller
             }
 
             /* ============================================================
-             * 2️⃣ Criar saque na PodPay
+             * 🚀 Criar saque na Lumnis
              * ============================================================ */
             $payload = [
-                "method"      => "fiat",
-                "amount"      => (int) round($gross * 100),
-                "netPayout"   => true,
-                "pixKey"      => $data['key'],
-                "pixKeyType"  => strtolower($data['key_type']),
-                "postbackUrl" => route('webhooks.podpay.withdraw'),
+                "amount"       => (int) round($gross * 100),
+                "key"          => $data['key'],
+                "key_type"     => strtoupper($data['key_type']),
+                "description"  => $data['description'] ?? '',
+                "external_ref" => $externalId,
+                "postback"     => route('lumnis.withdraw'),
+
+                // 🔥 MANTÉM EXATAMENTE COMO VEIO NO BODY
+                "details"      => [
+                    "name"     => $data['details']['name'],
+                    "document" => preg_replace('/\D/', '', $data['details']['document']),
+                ],
             ];
 
-            $resp = $this->podpay->createWithdrawal($payload);
+            $resp = $this->lumnis->createWithdrawal($payload);
 
+            /* ============================================================
+             * ❌ Erro do provedor
+             * ============================================================ */
             if (!$resp['success']) {
                 $this->withdrawService->refundLocal($withdraw, 'provider_error');
-                return $this->error('Erro ao criar saque no provedor.');
+                return $this->error($resp['message'] ?? 'Erro ao criar saque na Lumnis.');
             }
 
             /* ============================================================
-             * 3️⃣ Obter referência do provider
+             * 📌 Obter referência
              * ============================================================ */
-            $providerRef = data_get($resp, 'data.id');
+            $providerRef = data_get($resp, 'data.id')
+                ?? data_get($resp, 'data.identifier')
+                ?? null;
 
             if (!$providerRef) {
                 $this->withdrawService->refundLocal($withdraw, 'missing_provider_id');
-                return $this->error('Não foi possível obter referência do provedor.');
+                return $this->error('Não foi possível obter referência da Lumnis.');
             }
 
             /* ============================================================
-             * 4️⃣ Normalizar status inicial
+             * 🔄 Normalizar status
              * ============================================================ */
             $providerStatus = strtoupper(data_get($resp, 'data.status', 'PENDING'));
 
             $status = match ($providerStatus) {
-                'PAID', 'COMPLETED' => 'paid',
+                'PAID', 'COMPLETED', 'SUCCESS' => 'paid',
                 'FAILED', 'ERROR', 'CANCELED', 'CANCELLED' => 'failed',
-                'PROCESSING', 'SENDING WITHDRAW REQUEST', 'SENT TO PROVIDER' => 'processing',
+                'PROCESSING', 'SENDING', 'SENT', 'PENDING' => 'processing',
                 default => 'pending',
             };
 
             /* ============================================================
-             * 5️⃣ Atualizar saque com provider_reference via SERVICE
+             * 💾 Atualizar saque local
              * ============================================================ */
             $this->withdrawService->updateProviderReference(
                 $withdraw,
@@ -186,7 +206,7 @@ class WithdrawOutController extends Controller
             );
 
             /* ============================================================
-             * 6️⃣ Enviar webhook OUT
+             * 🌐 Webhook OUT
              * ============================================================ */
             if ($user->webhook_enabled && $user->webhook_out_url) {
                 SendWebhookWithdrawCreatedJob::dispatch(
@@ -212,6 +232,7 @@ class WithdrawOutController extends Controller
                     'pix_key_type'  => $withdraw->pixkey_type,
                     'status'        => $status,
                     'reference'     => $providerRef,
+                    'provider'      => 'lumnis',
                 ],
             ]);
 
