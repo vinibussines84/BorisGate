@@ -120,7 +120,7 @@ export default function Login() {
           <div className="mb-4 inline-flex items-center gap-2 text-sm text-neutral-400">
             <img
               src="/images/logopixon.png"
-              alt="EquitPay"
+              alt="PixionPay"
               className="h-10 md:h-12 w-auto opacity-90 grayscale-[35%] contrast-110"
             />
             <span className="px-1.5 text-neutral-600 select-none">•</span>

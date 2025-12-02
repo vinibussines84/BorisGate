@@ -115,7 +115,7 @@ class PodPayTransactionController extends Controller
             "externalRef" => $externalId,
             "postbackUrl" => route('webhooks.podpay'),
             "items" => [[
-                "title"      => "Pix EquitPay",
+                "title"      => "Pix",
                 "unitPrice"  => $amountCents,
                 "quantity"   => 1,
                 "tangible"   => false,

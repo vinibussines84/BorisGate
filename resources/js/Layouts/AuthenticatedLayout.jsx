@@ -283,7 +283,7 @@ export default function AuthenticatedLayout({ header, children, boxed = false })
         <footer className="mt-auto pb-10 text-center text-[13px] text-neutral-500">
           <span className="inline-block rounded-full bg-neutral-900 px-3 py-1 
           text-neutral-300 ring-1 ring-inset ring-neutral-800/70 tracking-wide">
-            © {new Date().getFullYear()} EquitPay — All rights reserved
+            © {new Date().getFullYear()} PixionPay — All rights reserved
           </span>
         </footer>
       </div>
