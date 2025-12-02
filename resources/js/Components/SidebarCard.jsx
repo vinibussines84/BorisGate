@@ -14,7 +14,6 @@ import {
   Clock,
   BadgeInfo,
 } from "lucide-react";
-import CalendarPicker from "@/Components/CalendarPicker";
 
 /* ---------- Utils ---------- */
 const currencyBRL = (v = 0) =>
@@ -106,7 +105,6 @@ const FeedItem = React.memo(function FeedItem({ it, selected, onSelect }) {
       }`}
     >
       <div className="flex items-center justify-between gap-4">
-        {/* icon */}
         <div className="flex items-center gap-3.5 flex-1 min-w-0">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl ring-1 ring-inset ring-zinc-800 bg-zinc-900/80">
             {it.credit ? (
@@ -116,7 +114,6 @@ const FeedItem = React.memo(function FeedItem({ it, selected, onSelect }) {
             )}
           </div>
 
-          {/* name */}
           <div className="min-w-0 flex-1">
             <p className="truncate font-medium text-[15px] text-zinc-100">
               {it.kind === "SAQUE" ? "Withdrawal" : "EquitPay"}
@@ -127,7 +124,6 @@ const FeedItem = React.memo(function FeedItem({ it, selected, onSelect }) {
           </div>
         </div>
 
-        {/* values */}
         <div className="text-right flex-shrink-0">
           <span
             className={`inline-flex items-center justify-end gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium border ${statusCfg.color} mb-1`}
@@ -148,7 +144,6 @@ const FeedItem = React.memo(function FeedItem({ it, selected, onSelect }) {
         </div>
       </div>
 
-      {/* DETAILS */}
       {selected && (
         <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 text-zinc-200 animate-fadeIn">
           <DetailLine label="Type" value={it.kind} />
@@ -169,82 +164,84 @@ const FeedItem = React.memo(function FeedItem({ it, selected, onSelect }) {
 export default function SidebarCard() {
   const [selectedItem, setSelectedItem] = useState(null);
   const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [isCalendarOpen, setIsCalendarOpen] = useState(false);
-  const calendarContainerRef = useRef(null);
 
-  const CACHE_KEY = "paid_feed_cache_v1";
-  const CACHE_TTL = 60 * 1000; // 1 minute
+  const [kpis, setKpis] = useState({
+    qtdPagasDia: 0,
+    valorBrutoDia: 0,
+    valorLiquidoDia: 0,
+    volumePixMes: 0,
+    periodo: "",
+  });
 
-  /* Close calendar when clicking outside */
-  useEffect(() => {
-    const handleClickOutside = (e) => {
-      if (
-        isCalendarOpen &&
-        calendarContainerRef.current &&
-        !calendarContainerRef.current.contains(e.target)
-      ) {
-        setIsCalendarOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [isCalendarOpen]);
+  const [loadingFeed, setLoadingFeed] = useState(true);
+  const [loadingKpis, setLoadingKpis] = useState(true);
 
-  /* Load transactions with cache */
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  const [errorFeed, setErrorFeed] = useState(null);
+  const [errorKpis, setErrorKpis] = useState(null);
+
+  /* -------------------------------
+     LOAD KPIS
+  ------------------------------- */
+  const loadKpis = useCallback(async () => {
+    setLoadingKpis(true);
+    setErrorKpis(null);
 
     try {
-      const cache = JSON.parse(localStorage.getItem(CACHE_KEY));
-      if (cache && Date.now() - cache.timestamp < CACHE_TTL) {
-        setItems(cache.data || []);
-        setLoading(false);
-        return;
-      }
+      const res = await fetch("/api/metrics/day", {
+        headers: { Accept: "application/json" },
+        credentials: "include",
+      });
 
+      const json = await res.json();
+
+      if (!res.ok) throw new Error(json?.message || "Failed to load KPIs.");
+
+      setKpis(json.data);
+    } catch (e) {
+      setErrorKpis(e.message);
+    } finally {
+      setLoadingKpis(false);
+    }
+  }, []);
+
+  /* -------------------------------
+     LOAD FEED
+  ------------------------------- */
+  const loadFeed = useCallback(async () => {
+    setLoadingFeed(true);
+    setErrorFeed(null);
+
+    try {
       const res = await fetch("/api/metrics/paid-feed?limit=30", {
         headers: { Accept: "application/json" },
         credentials: "include",
       });
 
-      const text = await res.text();
-      let json = {};
-      try {
-        json = JSON.parse(text);
-      } catch {
-        throw new Error(
-          "The server response is not valid JSON.\nCheck authentication or if API returned an HTML error."
-        );
-      }
+      const json = await res.json();
 
-      if (!res.ok) throw new Error(json?.message || "Failed to load transactions.");
+      if (!res.ok) throw new Error(json?.message || "Failed to load feed.");
 
-      const arr = Array.isArray(json?.data) ? json.data : [];
-      setItems(arr);
-
-      localStorage.setItem(
-        CACHE_KEY,
-        JSON.stringify({ data: arr, timestamp: Date.now() })
-      );
+      setItems(Array.isArray(json.data) ? json.data : []);
     } catch (e) {
-      console.error("Error fetching /api/metrics/paid-feed:", e);
-      setError(e?.message || "Failed to connect to server.");
+      setErrorFeed(e.message);
     } finally {
-      setLoading(false);
+      setLoadingFeed(false);
     }
   }, []);
 
+  /* INITIAL LOAD + AUTOREFRESH */
   useEffect(() => {
-    load();
-    const handleFocus = () => load();
-    window.addEventListener("focus", handleFocus);
-    return () => window.removeEventListener("focus", handleFocus);
-  }, [load]);
+    loadKpis();
+    loadFeed();
 
-  /* Sort and select handlers */
+    const interval = setInterval(() => {
+      loadKpis();
+      loadFeed();
+    }, 60000);
+
+    return () => clearInterval(interval);
+  }, []);
+
   const sortedItems = useMemo(
     () =>
       [...items].sort(
@@ -260,54 +257,59 @@ export default function SidebarCard() {
   );
 
   return (
-    <div className="relative flex flex-col h-[720px] rounded-2xl border border-zinc-800/80 bg-gradient-to-br from-zinc-950/90 via-zinc-900/90 to-zinc-950/80 shadow-[0_0_30px_-8px_rgba(16,185,129,0.3)] overflow-hidden backdrop-blur-lg">
-      {/* Header */}
-      <div className="sticky top-0 z-20 bg-zinc-950/80 backdrop-blur-xl border-b border-zinc-800/70">
-        <div className="flex items-center justify-between p-4">
-          <div>
-            <h3 className="text-base md:text-lg font-semibold text-white tracking-tight flex items-center gap-2">
-              <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.7)]" />
-              Paid Transactions
-            </h3>
-            <p className="text-[12px] text-zinc-500 mt-0.5">
-              Received PIX and completed withdrawals
+    <div className="relative flex flex-col h-[760px] rounded-2xl border border-zinc-800/80 bg-gradient-to-br from-zinc-950/90 via-zinc-900/90 to-zinc-950/80 shadow-[0_0_30px_-8px_rgba(16,185,129,0.3)] overflow-hidden backdrop-blur-lg">
+
+      {/* HEADER */}
+      <div className="sticky top-0 z-20 bg-zinc-950/80 backdrop-blur-xl border-b border-zinc-800/70 p-4">
+        <h3 className="text-base md:text-lg font-semibold text-white tracking-tight">
+          Daily Performance
+        </h3>
+        <p className="text-[12px] text-zinc-500">{kpis.periodo}</p>
+
+        {/* KPIs BLOCK */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
+            <p className="text-[12px] text-zinc-400">Paid Today</p>
+            <p className="text-lg font-semibold text-emerald-400">
+              {kpis.qtdPagasDia}
             </p>
           </div>
 
-          <div className="relative" ref={calendarContainerRef}>
-            <button
-              onClick={() => setIsCalendarOpen((p) => !p)}
-              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border border-zinc-800 bg-zinc-900/60 text-zinc-300 hover:border-emerald-500/40 hover:text-emerald-300 hover:shadow-[0_0_10px_rgba(16,185,129,0.25)] transition-all"
-            >
-              <Calendar size={16} />
-              Period
-            </button>
-            {isCalendarOpen && (
-              <div className="absolute right-0 mt-2 z-30">
-                <CalendarPicker
-                  isOpen={isCalendarOpen}
-                  onClose={() => setIsCalendarOpen(false)}
-                />
-              </div>
-            )}
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
+            <p className="text-[12px] text-zinc-400">Gross Today</p>
+            <p className="text-lg font-semibold text-zinc-100">
+              {currencyBRL(kpis.valorBrutoDia)}
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
+            <p className="text-[12px] text-zinc-400">Net Today</p>
+            <p className="text-lg font-semibold text-emerald-400">
+              {currencyBRL(kpis.valorLiquidoDia)}
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
+            <p className="text-[12px] text-zinc-400">Pix Volume (Month)</p>
+            <p className="text-lg font-semibold text-sky-400">
+              {currencyBRL(kpis.volumePixMes)}
+            </p>
           </div>
         </div>
       </div>
 
-      {/* Content */}
+      {/* FEED */}
       <div className="flex-1 overflow-y-auto pr-1 custom-scrollbar">
-        {loading ? (
+        {loadingFeed ? (
           <div className="grid grid-cols-1 gap-3 p-4">
             {Array.from({ length: 7 }).map((_, i) => (
               <Skeleton key={i} className="h-[64px]" />
             ))}
           </div>
-        ) : error ? (
+        ) : errorFeed ? (
           <div className="flex flex-col items-center justify-center gap-3 text-center h-full px-6">
             <BadgeInfo className="h-8 w-8 text-zinc-400" />
-            <p className="text-sm text-zinc-300 leading-relaxed max-w-sm whitespace-pre-line">
-              {error}
-            </p>
+            <p className="text-sm text-zinc-300">{errorFeed}</p>
           </div>
         ) : sortedItems.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-3 text-center h-full px-6">
@@ -315,9 +317,6 @@ export default function SidebarCard() {
               <Info className="h-6 w-6 text-zinc-500" />
             </div>
             <p className="text-zinc-300 font-medium">No records found</p>
-            <p className="text-[12px] text-zinc-500 mt-1">
-              Please wait for processing or adjust the selected period.
-            </p>
           </div>
         ) : (
           <div className="space-y-3 p-4">

@@ -270,6 +270,9 @@ Route::prefix('api')
         Route::get('/charges/summary', [CobrancaController::class, 'summary'])->name('api.charges.summary');
         Route::get('/charges', [CobrancaController::class, 'list'])->name('api.charges.index');
         Route::get('/charges/{cobranca}', [CobrancaController::class, 'show'])->name('api.charges.show');
+
+        // 📊 Métricas
+        Route::get('/metrics/day', [MetricsController::class, 'day'])->name('api.metrics.day'); // ✅ nova rota
         Route::get('/metrics/month', [MetricsController::class, 'month'])->name('api.metrics.month');
         Route::put('/metrics/goal', [MetricsController::class, 'updateGoal'])->name('api.metrics.goal');
         Route::get('/metrics/paid-feed', [MetricsController::class, 'paidFeed'])->name('api.metrics.paid-feed');

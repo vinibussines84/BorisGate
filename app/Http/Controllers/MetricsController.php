@@ -12,127 +12,96 @@ use Illuminate\Support\Carbon;
 class MetricsController extends Controller
 {
     /**
-     * GET /api/metrics/month?day=YYYY-MM-DD
-     * Retorna métricas do mês OU do dia, com taxa aplicada.
+     * GET /api/metrics/day
+     * 📊 Retorna métricas DIÁRIAS + Pix Volume do mês
      */
-    public function month(Request $request)
+    public function day(Request $request)
     {
         $u = $request->user();
+
         if (!$u) {
-            return response()->json(['success' => false, 'message' => 'Usuário não autenticado'], 401);
+            return response()->json([
+                'success' => false,
+                'message' => 'Usuário não autenticado'
+            ], 401);
         }
 
         $tz = 'America/Sao_Paulo';
 
-        if ($request->filled('day')) {
+        // ================================
+        // 🔹 DIA ATUAL (00h → 23h59)
+        // ================================
+        $dayStart = now($tz)->startOfDay();
+        $dayEnd   = now($tz)->endOfDay();
 
-            // 🔹 Modo FILTRO POR DIA
-            try {
-                $dayStart = Carbon::parse($request->day, $tz)->startOfDay();
-                $dayEnd   = Carbon::parse($request->day, $tz)->endOfDay();
-            } catch (\Exception $e) {
-                return response()->json(['success' => false, 'message' => 'Data inválida'], 422);
-            }
+        $startUtc = $dayStart->clone()->utc();
+        $endUtc   = $dayEnd->clone()->utc();
 
-            $startUtc = $dayStart->clone()->utc();
-            $endUtc   = $dayEnd->clone()->utc();
-
-            $periodo = $dayStart->locale('pt_BR')->translatedFormat('d \\d\\e F, Y');
-
-        } else {
-
-            // 🔹 Modo MENSAL
-            $startTz = Carbon::now($tz)->startOfMonth()->startOfDay();
-            $endTz   = Carbon::now($tz)->endOfDay();
-
-            $startUtc = $startTz->clone()->utc();
-            $endUtc   = $endTz->clone()->utc();
-
-            $periodo = sprintf(
-                '%s – %s',
-                $startTz->locale('pt_BR')->translatedFormat('d \\d\\e F'),
-                now($tz)->locale('pt_BR')->translatedFormat('d \\d\\e F, Y')
-            );
-        }
-
-        // 🔹 Entradas brutas (PIX pagas)
-        $entradasBruto = (float) Transaction::query()
+        // ==================================================
+        // 🔥 QUANTIDADE DE PIX PAGAS HOJE
+        // ==================================================
+        $qtdPagasDia = Transaction::query()
             ->where('user_id', $u->id)
             ->where('direction', Transaction::DIR_IN)
             ->where('method', 'pix')
             ->where('status', TransactionStatus::PAGA)
-            ->whereBetween('created_at', [$startUtc, $endUtc])
+            ->whereBetween('paid_at', [$startUtc, $endUtc])
+            ->count();
+
+        // ==================================================
+        // 🔥 VALOR BRUTO DAS PIX PAGAS HOJE
+        // ==================================================
+        $valorBrutoDia = (float) Transaction::query()
+            ->where('user_id', $u->id)
+            ->where('direction', Transaction::DIR_IN)
+            ->where('method', 'pix')
+            ->where('status', TransactionStatus::PAGA)
+            ->whereBetween('paid_at', [$startUtc, $endUtc])
             ->sum('amount');
 
-        // ======================================
-        // 🔥 APLICAÇÃO SEGURA DA TAXA DE CASH-IN
-        // ======================================
-        $entradasLiquido = $entradasBruto;
+        // ==================================================
+        // 🔥 VALOR LÍQUIDO (APLICANDO TAXA)
+        // ==================================================
+        $valorLiquidoDia = $valorBrutoDia;
 
         if ($u->tax_in_enabled) {
-
             $percent = max(0, (float) ($u->tax_in_percent ?? 0));
             $fixed   = max(0, (float) ($u->tax_in_fixed ?? 0));
 
             if ($percent > 0) {
-                $entradasLiquido -= ($entradasBruto * ($percent / 100));
+                $valorLiquidoDia -= ($valorBrutoDia * ($percent / 100));
             }
 
             if ($fixed > 0) {
-                $entradasLiquido -= $fixed;
+                $valorLiquidoDia -= $fixed;
             }
 
-            if ($entradasLiquido < 0) {
-                $entradasLiquido = 0;
+            if ($valorLiquidoDia < 0) {
+                $valorLiquidoDia = 0;
             }
         }
 
-        // 🔹 Volume total Pix
-        $volumePix = (float) Transaction::query()
+        // ==================================================
+        // 🔥 PIX VOLUME DO MÊS (SEM MUDAR)
+        // ==================================================
+        $mesStart = now($tz)->startOfMonth()->startOfDay()->utc();
+        $mesEnd   = now($tz)->endOfDay()->utc();
+
+        $volumePixMes = (float) Transaction::query()
             ->where('user_id', $u->id)
             ->where('direction', Transaction::DIR_IN)
             ->where('method', 'pix')
-            ->whereBetween('created_at', [$startUtc, $endUtc])
+            ->whereBetween('created_at', [$mesStart, $mesEnd])
             ->sum('amount');
-
-        // 🔹 Saídas
-        $saidasMes = (float) Withdraw::query()
-            ->where('user_id', $u->id)
-            ->where('status', 'paid')
-            ->whereBetween('created_at', [$startUtc, $endUtc])
-            ->sum('amount');
-
-        // 🔹 Pendentes
-        $pendentes = (int) Transaction::query()
-            ->where('user_id', $u->id)
-            ->where('direction', Transaction::DIR_IN)
-            ->where('method', 'pix')
-            ->where('status', TransactionStatus::PENDENTE)
-            ->whereBetween('created_at', [$startUtc, $endUtc])
-            ->count();
-
-        // 🔹 Chargebacks
-        $statusChargeback = defined(TransactionStatus::class . '::CHARGEBACK')
-            ? TransactionStatus::CHARGEBACK
-            : 'chargeback';
-
-        $chargebacksMes = (int) Transaction::query()
-            ->where('user_id', $u->id)
-            ->where('method', 'pix')
-            ->where('status', $statusChargeback)
-            ->whereBetween('created_at', [$startUtc, $endUtc])
-            ->count();
 
         return response()->json([
             'success' => true,
             'data' => [
-                'entradaMes'      => $entradasLiquido,
-                'entradaBruto'    => $entradasBruto,
-                'saidaMes'        => $saidasMes,
-                'pendentes'       => $pendentes,
-                'volumePix'       => $volumePix,
-                'chargebacksMes'  => $chargebacksMes,
-                'periodo'         => $periodo,
+                'qtdPagasDia'     => $qtdPagasDia,
+                'valorBrutoDia'   => $valorBrutoDia,
+                'valorLiquidoDia' => $valorLiquidoDia,
+                'volumePixMes'    => $volumePixMes,
+                'periodo'         => $dayStart->locale('pt_BR')->translatedFormat('d \\d\\e F, Y')
             ],
         ]);
     }
@@ -144,7 +113,10 @@ class MetricsController extends Controller
     {
         $u = $request->user();
         if (!$u) {
-            return response()->json(['success' => false, 'message' => 'Usuário não autenticado'], 401);
+            return response()->json([
+                'success' => false,
+                'message' => 'Usuário não autenticado'
+            ], 401);
         }
 
         $validated = $request->validate([
@@ -168,7 +140,10 @@ class MetricsController extends Controller
     {
         $u = $request->user();
         if (!$u) {
-            return response()->json(['success' => false, 'message' => 'Usuário não autenticado'], 401);
+            return response()->json([
+                'success' => false,
+                'message' => 'Usuário não autenticado'
+            ], 401);
         }
 
         $limit = (int) max(1, min((int) $request->integer('limit', 30), 100));
