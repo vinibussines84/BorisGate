@@ -13,33 +13,25 @@ class MetricsController extends Controller
 {
     /**
      * GET /api/metrics/day
-     * 📊 Retorna métricas DIÁRIAS + Pix Volume do mês
+     * Retorna métricas do dia (00h às 23h59) e volume mensal total.
      */
     public function day(Request $request)
     {
         $u = $request->user();
-
         if (!$u) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Usuário não autenticado'
-            ], 401);
+            return response()->json(['success' => false, 'message' => 'Usuário não autenticado'], 401);
         }
 
         $tz = 'America/Sao_Paulo';
-
-        // ================================
-        // 🔹 DIA ATUAL (00h → 23h59)
-        // ================================
-        $dayStart = now($tz)->startOfDay();
-        $dayEnd   = now($tz)->endOfDay();
+        $dayStart = Carbon::now($tz)->startOfDay();
+        $dayEnd   = Carbon::now($tz)->endOfDay();
 
         $startUtc = $dayStart->clone()->utc();
         $endUtc   = $dayEnd->clone()->utc();
 
-        // ==================================================
-        // 🔥 QUANTIDADE DE PIX PAGAS HOJE
-        // ==================================================
+        $periodo = $dayStart->locale('pt_BR')->translatedFormat('d \\d\\e F, Y');
+
+        // 🔹 Quantidade de transações pagas no dia
         $qtdPagasDia = Transaction::query()
             ->where('user_id', $u->id)
             ->where('direction', Transaction::DIR_IN)
@@ -48,9 +40,7 @@ class MetricsController extends Controller
             ->whereBetween('paid_at', [$startUtc, $endUtc])
             ->count();
 
-        // ==================================================
-        // 🔥 VALOR BRUTO DAS PIX PAGAS HOJE
-        // ==================================================
+        // 🔹 Valor bruto pago no dia
         $valorBrutoDia = (float) Transaction::query()
             ->where('user_id', $u->id)
             ->where('direction', Transaction::DIR_IN)
@@ -59,11 +49,8 @@ class MetricsController extends Controller
             ->whereBetween('paid_at', [$startUtc, $endUtc])
             ->sum('amount');
 
-        // ==================================================
-        // 🔥 VALOR LÍQUIDO (APLICANDO TAXA)
-        // ==================================================
+        // 🔹 Valor líquido (aplicando taxa de cash-in)
         $valorLiquidoDia = $valorBrutoDia;
-
         if ($u->tax_in_enabled) {
             $percent = max(0, (float) ($u->tax_in_percent ?? 0));
             $fixed   = max(0, (float) ($u->tax_in_fixed ?? 0));
@@ -71,27 +58,31 @@ class MetricsController extends Controller
             if ($percent > 0) {
                 $valorLiquidoDia -= ($valorBrutoDia * ($percent / 100));
             }
-
             if ($fixed > 0) {
                 $valorLiquidoDia -= $fixed;
             }
-
             if ($valorLiquidoDia < 0) {
                 $valorLiquidoDia = 0;
             }
         }
 
-        // ==================================================
-        // 🔥 PIX VOLUME DO MÊS (SEM MUDAR)
-        // ==================================================
-        $mesStart = now($tz)->startOfMonth()->startOfDay()->utc();
-        $mesEnd   = now($tz)->endOfDay()->utc();
+        // 🔹 Volume total Pix do mês
+        $mesInicio = Carbon::now($tz)->startOfMonth()->startOfDay()->utc();
+        $mesFim    = Carbon::now($tz)->endOfDay()->utc();
 
         $volumePixMes = (float) Transaction::query()
             ->where('user_id', $u->id)
             ->where('direction', Transaction::DIR_IN)
             ->where('method', 'pix')
-            ->whereBetween('created_at', [$mesStart, $mesEnd])
+            ->where('status', TransactionStatus::PAGA)
+            ->whereBetween('paid_at', [$mesInicio, $mesFim])
+            ->sum('amount');
+
+        // 🔹 Saídas (saques pagos no dia)
+        $saidasDia = (float) Withdraw::query()
+            ->where('user_id', $u->id)
+            ->where('status', 'paid')
+            ->whereBetween('processed_at', [$startUtc, $endUtc])
             ->sum('amount');
 
         return response()->json([
@@ -100,8 +91,109 @@ class MetricsController extends Controller
                 'qtdPagasDia'     => $qtdPagasDia,
                 'valorBrutoDia'   => $valorBrutoDia,
                 'valorLiquidoDia' => $valorLiquidoDia,
+                'saidasDia'       => $saidasDia,
                 'volumePixMes'    => $volumePixMes,
-                'periodo'         => $dayStart->locale('pt_BR')->translatedFormat('d \\d\\e F, Y')
+                'periodo'         => $periodo,
+            ],
+        ]);
+    }
+
+    /**
+     * GET /api/metrics/month
+     * Mantém métricas mensais completas (entrada, saída, pendentes, etc.).
+     */
+    public function month(Request $request)
+    {
+        $u = $request->user();
+        if (!$u) {
+            return response()->json(['success' => false, 'message' => 'Usuário não autenticado'], 401);
+        }
+
+        $tz = 'America/Sao_Paulo';
+        $startTz = Carbon::now($tz)->startOfMonth()->startOfDay();
+        $endTz   = Carbon::now($tz)->endOfDay();
+
+        $startUtc = $startTz->clone()->utc();
+        $endUtc   = $endTz->clone()->utc();
+
+        $periodo = sprintf(
+            '%s – %s',
+            $startTz->locale('pt_BR')->translatedFormat('d \\d\\e F'),
+            now($tz)->locale('pt_BR')->translatedFormat('d \\d\\e F, Y')
+        );
+
+        // Entradas (Pix pagas)
+        $entradasBruto = (float) Transaction::query()
+            ->where('user_id', $u->id)
+            ->where('direction', Transaction::DIR_IN)
+            ->where('method', 'pix')
+            ->where('status', TransactionStatus::PAGA)
+            ->whereBetween('created_at', [$startUtc, $endUtc])
+            ->sum('amount');
+
+        // Aplica taxa
+        $entradasLiquido = $entradasBruto;
+        if ($u->tax_in_enabled) {
+            $percent = max(0, (float) ($u->tax_in_percent ?? 0));
+            $fixed   = max(0, (float) ($u->tax_in_fixed ?? 0));
+
+            if ($percent > 0) {
+                $entradasLiquido -= ($entradasBruto * ($percent / 100));
+            }
+            if ($fixed > 0) {
+                $entradasLiquido -= $fixed;
+            }
+            if ($entradasLiquido < 0) {
+                $entradasLiquido = 0;
+            }
+        }
+
+        // Volume total Pix
+        $volumePix = (float) Transaction::query()
+            ->where('user_id', $u->id)
+            ->where('direction', Transaction::DIR_IN)
+            ->where('method', 'pix')
+            ->whereBetween('created_at', [$startUtc, $endUtc])
+            ->sum('amount');
+
+        // Saídas (saques pagos no mês)
+        $saidasMes = (float) Withdraw::query()
+            ->where('user_id', $u->id)
+            ->where('status', 'paid')
+            ->whereBetween('created_at', [$startUtc, $endUtc])
+            ->sum('amount');
+
+        // Pendentes
+        $pendentes = (int) Transaction::query()
+            ->where('user_id', $u->id)
+            ->where('direction', Transaction::DIR_IN)
+            ->where('method', 'pix')
+            ->where('status', TransactionStatus::PENDENTE)
+            ->whereBetween('created_at', [$startUtc, $endUtc])
+            ->count();
+
+        // Chargebacks (se existir)
+        $statusChargeback = defined(TransactionStatus::class . '::CHARGEBACK')
+            ? TransactionStatus::CHARGEBACK
+            : 'chargeback';
+
+        $chargebacksMes = (int) Transaction::query()
+            ->where('user_id', $u->id)
+            ->where('method', 'pix')
+            ->where('status', $statusChargeback)
+            ->whereBetween('created_at', [$startUtc, $endUtc])
+            ->count();
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'entradaMes'      => $entradasLiquido,
+                'entradaBruto'    => $entradasBruto,
+                'saidaMes'        => $saidasMes,
+                'pendentes'       => $pendentes,
+                'volumePix'       => $volumePix,
+                'chargebacksMes'  => $chargebacksMes,
+                'periodo'         => $periodo,
             ],
         ]);
     }
@@ -113,10 +205,7 @@ class MetricsController extends Controller
     {
         $u = $request->user();
         if (!$u) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Usuário não autenticado'
-            ], 401);
+            return response()->json(['success' => false, 'message' => 'Usuário não autenticado'], 401);
         }
 
         $validated = $request->validate([
@@ -140,15 +229,12 @@ class MetricsController extends Controller
     {
         $u = $request->user();
         if (!$u) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Usuário não autenticado'
-            ], 401);
+            return response()->json(['success' => false, 'message' => 'Usuário não autenticado'], 401);
         }
 
         $limit = (int) max(1, min((int) $request->integer('limit', 30), 100));
 
-        // 🔹 PIX pagas
+        // PIX pagas
         $pix = Transaction::query()
             ->where('user_id', $u->id)
             ->where('direction', Transaction::DIR_IN)
@@ -172,7 +258,7 @@ class MetricsController extends Controller
                 'credit'      => true,
             ]);
 
-        // 🔹 SAQUES pagos
+        // Saques pagos
         $saques = Withdraw::query()
             ->where('user_id', $u->id)
             ->where('status', 'paid')
