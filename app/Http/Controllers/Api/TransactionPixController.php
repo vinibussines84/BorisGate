@@ -52,7 +52,7 @@ class TransactionPixController extends Controller
             return response()->json(['success' => false, 'error' => 'The maximum allowed PIX amount is R$3000.'], 422);
         }
 
-        // ❌ Evitar duplicidade de external_id
+        // ❌ Evitar duplicidade
         if (Transaction::where('user_id', $user->id)
             ->where('external_reference', $externalId)
             ->exists()) {
@@ -77,7 +77,7 @@ class TransactionPixController extends Controller
         $name  = $data['name']  ?? $user->name ?? $user->nome_completo ?? 'Client';
         $email = $data['email'] ?? $user->email ?? 'no-email@placeholder.com';
 
-        // 🧮 Criar transação local
+        // 🧮 Criar transação local (não dispara Observer)
         $tx = Transaction::create([
             'tenant_id'          => $user->tenant_id,
             'user_id'            => $user->id,
@@ -94,7 +94,7 @@ class TransactionPixController extends Controller
             'user_agent'         => $request->userAgent(),
         ]);
 
-        // 🔗 Payload para a PodPay
+        // 🔗 Payload PodPay
         $payload = [
             "amount"        => $amountCents,
             "currency"      => "BRL",
@@ -117,7 +117,7 @@ class TransactionPixController extends Controller
             ]]
         ];
 
-        // 🚀 Envio à PodPay
+        // 🚀 API PodPay
         try {
             $response = $podpay->createPixTransaction($payload);
 
@@ -135,16 +135,16 @@ class TransactionPixController extends Controller
 
         } catch (\Throwable $e) {
             Log::error("PODPAY_PIX_CREATE_ERROR", ['error' => $e->getMessage()]);
-            $tx->update(['status' => TransactionStatus::FALHA]);
+            $tx->updateQuietly(['status' => TransactionStatus::FALHA]);
             return response()->json(['success' => false, 'error' => 'Failed to create PIX transaction.'], 500);
         }
 
-        // ⏰ Ajuste timezone
+        // ⏰ Ajuste de timezone
         $createdAtBr = Carbon::parse(data_get($body, 'createdAt'))
             ->tz('America/Sao_Paulo')
             ->toDateTimeString();
 
-        // 🧩 Atualizar transação local
+        // 🧩 Atualizar transação (SEM observer)
         $cleanRaw = [
             'id'          => data_get($body, 'id'),
             'total'       => data_get($body, 'amount'),
@@ -163,7 +163,7 @@ class TransactionPixController extends Controller
             'external_ref'=> data_get($body, 'externalRef'),
         ];
 
-        $tx->update([
+        $tx->updateQuietly([
             'txid'                    => $transactionId,
             'provider_transaction_id' => $transactionId,
             'provider_payload'        => [
@@ -176,12 +176,12 @@ class TransactionPixController extends Controller
             ],
         ]);
 
-        // 📡 Enviar webhook criado (FORMA CORRETA AGORA)
+        // 📡 Webhook: Pix Criado
         if ($user->webhook_enabled && $user->webhook_in_url) {
             SendWebhookPixCreatedJob::dispatch($user->id, $tx->id);
         }
 
-        // ✅ Retorno final
+        // 🎯 Retorno final
         return response()->json([
             'success'        => true,
             'transaction_id' => $tx->id,
@@ -195,7 +195,7 @@ class TransactionPixController extends Controller
     }
 
     /**
-     * 🔍 Status via external_id
+     * 🔍 Consulta via external_id
      */
     public function statusByExternal(Request $request, string $externalId)
     {
@@ -272,8 +272,7 @@ class TransactionPixController extends Controller
         return response()->json(['success' => false, 'error' => 'No transaction or withdraw found for this external_id.'], 404);
     }
 
-
-    // 🔧 Utilitários
+    // 🔧 Helpers
     private function resolveUser(string $auth, string $secret)
     {
         return User::where('authkey', $auth)->where('secretkey', $secret)->first();
