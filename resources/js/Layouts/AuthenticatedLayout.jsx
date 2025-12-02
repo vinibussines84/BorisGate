@@ -10,6 +10,8 @@ import {
   LogOut,
   Menu,
   X,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import NotificationBell from "@/Components/NotificationBell";
 
@@ -37,7 +39,7 @@ function LogoutConfirmModal({ open, onCancel, onConfirm }) {
 
           <button
             onClick={onConfirm}
-            className="px-4 py-2 text-sm rounded-lg bg-red-600 hover:bg-red-700 text-white transition"
+            className="px-4 py-2 text-sm rounded-lg bg-[#ff005d] hover:bg-[#e00052] text-white transition"
           >
             Logout
           </button>
@@ -51,7 +53,7 @@ function LogoutConfirmModal({ open, onCancel, onConfirm }) {
 function BrandLogo({ className = "block h-[28px] w-auto md:h-[32px]" }) {
   return (
     <img
-      src="/images/equitpay.png"
+      src="/images/logopixon.png"
       alt="Logo"
       className={`${className} select-none pointer-events-none opacity-90 hover:opacity-100 transition`}
       loading="eager"
@@ -60,7 +62,7 @@ function BrandLogo({ className = "block h-[28px] w-auto md:h-[32px]" }) {
   );
 }
 
-/* ---------- Avatar Menu (COM CONFIRMAÇÃO) ---------- */
+/* ---------- Avatar Menu ---------- */
 function UserFavicon({ initials, closeMobile, openConfirm }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
@@ -81,7 +83,7 @@ function UserFavicon({ initials, closeMobile, openConfirm }) {
         onClick={() => setOpen((v) => !v)}
         className="grid size-9 place-items-center rounded-full bg-neutral-900 
         text-[13px] font-medium text-neutral-200 ring-1 ring-neutral-700 
-        hover:ring-emerald-500 transition"
+        hover:ring-[#ff005d] transition"
       >
         {initials}
       </button>
@@ -93,7 +95,7 @@ function UserFavicon({ initials, closeMobile, openConfirm }) {
             onClick={() => {
               setOpen(false);
               closeMobile?.();
-              openConfirm(); // abre o modal
+              openConfirm();
             }}
             className="flex items-center gap-2 w-full px-4 py-2 text-sm text-neutral-300 
             hover:bg-neutral-900/80 transition-colors"
@@ -112,6 +114,7 @@ export default function AuthenticatedLayout({ header, children, boxed = false })
   const user = page?.props?.auth?.user;
   const [mobileOpen, setMobileOpen] = useState(false);
   const [confirmLogout, setConfirmLogout] = useState(false);
+  const [integrationOpen, setIntegrationOpen] = useState(false);
 
   const closeMobileMenu = () => setMobileOpen(false);
 
@@ -158,7 +161,6 @@ export default function AuthenticatedLayout({ header, children, boxed = false })
   return (
     <div className="min-h-screen bg-[#0B0B0B] text-gray-100 flex flex-col">
 
-      {/* MODAL DE CONFIRMAÇÃO */}
       <LogoutConfirmModal
         open={confirmLogout}
         onCancel={() => setConfirmLogout(false)}
@@ -168,7 +170,6 @@ export default function AuthenticatedLayout({ header, children, boxed = false })
       {/* TOPBAR */}
       <header className="sticky top-0 z-50 border-b border-neutral-800/60 bg-[#0B0B0B]/95 backdrop-blur">
         <div className="flex items-center justify-between px-5 py-3">
-
           <div className="flex items-center gap-3">
             <button
               onClick={() => setMobileOpen((v) => !v)}
@@ -190,57 +191,70 @@ export default function AuthenticatedLayout({ header, children, boxed = false })
               openConfirm={() => setConfirmLogout(true)}
             />
           </div>
-
         </div>
       </header>
 
-      {/* SIDEBAR DESKTOP */}
+      {/* SIDEBAR DESKTOP - ESTILIZADO */}
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-[282px] 
       lg:flex lg:flex-col lg:border-r lg:border-neutral-800/60 lg:bg-neutral-950">
-
         <div className="flex items-center gap-3 px-6 py-5 border-b border-neutral-800/70">
           <Link href="/dashboard" className="flex items-center gap-3">
             <BrandLogo />
           </Link>
         </div>
 
-        <nav className="min-h-0 flex-1 overflow-y-auto px-3 py-5 hide-scrollbar">
-          <ul className="space-y-1.5">
+        <nav className="min-h-0 flex-1 overflow-y-auto px-4 py-6 hide-scrollbar"> {/* AUMENTADO: px-4 py-6 */}
+          <ul className="space-y-1">
             {primaryLinks.map((item) => (
               <li key={item.key}>
                 {item.isDropdown ? (
-                  <div className="space-y-1.5">
+                  <>
+                    <button
+                      onClick={() => setIntegrationOpen((v) => !v)}
+                      className={`flex items-center justify-between w-full px-4 py-3 rounded-xl text-sm font-medium transition ${ /* AUMENTADO: px-4 py-3, rounded-xl */
+                        item.active
+                          ? "text-[#ff005d]"
+                          : "text-neutral-400 hover:text-white hover:bg-neutral-900/80" // ADICIONADO: Hover state
+                      }`}
+                    >
+                      <span className="flex items-center gap-2">
+                        <item.icon size={17} />
+                        {item.label}
+                      </span>
+                      {integrationOpen ? (
+                        <ChevronUp size={16} />
+                      ) : (
+                        <ChevronDown size={16} />
+                      )}
+                    </button>
 
-                    <div className="flex items-center gap-3 text-sm font-medium text-neutral-400 px-3">
-                      <item.icon size={17} /> {item.label}
-                    </div>
-
-                    <ul className="pl-8 space-y-1">
-                      {item.children.map((c) => (
-                        <li key={c.key}>
-                          <Link
-                            href={c.href}
-                            className={`block px-3 py-1.5 text-sm rounded-lg ${
-                              currentPath.startsWith(normalizePath(c.href))
-                                ? "text-emerald-400 bg-emerald-600/10"
-                                : "text-neutral-400 hover:bg-neutral-900/60"
-                            }`}
-                          >
-                            {c.label}
-                          </Link>
-                        </li>
-                      ))}
-                    </ul>
-
-                  </div>
+                    {integrationOpen && (
+                      <ul className="pl-6 mt-1 space-y-1"> {/* AJUSTADO: pl-6 */}
+                        {item.children.map((c) => (
+                          <li key={c.key}>
+                            <Link
+                              href={c.href}
+                              className={`block px-4 py-2 text-sm rounded-lg transition ${ /* AJUSTADO: px-4 py-2, rounded-lg */
+                                currentPath.startsWith(normalizePath(c.href))
+                                  ? "text-[#ff005d] bg-[#ff005d]/10 font-medium" // ADICIONADO: font-medium no sublink ativo
+                                  : "text-neutral-400 hover:bg-neutral-900/60 hover:text-neutral-300"
+                              }`}
+                            >
+                              {c.label}
+                            </Link>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </>
                 ) : (
                   <Link
                     href={item.href}
-                    className={`flex items-center gap-3.5 rounded-xl px-3 py-2.5 
-                    text-[14.5px] transition ${
+                    className={`flex items-center gap-3.5 rounded-xl px-4 py-3 
+                    text-[14.5px] transition font-medium ${ /* AUMENTADO: px-4 py-3, rounded-xl, font-medium */
                       item.active
-                        ? "bg-neutral-900/90 text-neutral-100 ring-1 ring-neutral-700/70"
-                        : "text-neutral-400 hover:bg-neutral-900/80 hover:text-neutral-100"
+                        ? "bg-[#ff005d]/10 text-[#ff005d] shadow-inner shadow-black/30 ring-1 ring-[#ff005d]/30" // NOVO: shadow-inner + ring mais sutil
+                        : "text-neutral-400 hover:bg-neutral-900/80 hover:text-white"
                     }`}
                   >
                     <item.icon className="h-[18px] w-[18px]" />
@@ -251,83 +265,10 @@ export default function AuthenticatedLayout({ header, children, boxed = false })
             ))}
           </ul>
         </nav>
-
-        <div className="border-t border-neutral-800/70 p-5">
-          <UserFavicon
-            initials={initials}
-            closeMobile={closeMobileMenu}
-            openConfirm={() => setConfirmLogout(true)}
-          />
-        </div>
       </aside>
-
-      {/* MOBILE MENU */}
-      {mobileOpen && (
-        <div className="lg:hidden fixed inset-0 z-40 bg-black/80 backdrop-blur-sm">
-
-          <div className="absolute left-0 top-0 h-full w-64 bg-neutral-950 
-          border-r border-neutral-800/60 shadow-xl p-5 space-y-4 overflow-y-auto">
-
-            {primaryLinks.map((item) =>
-              item.isDropdown ? (
-                <div key={item.key} className="space-y-2">
-
-                  <div className="flex items-center gap-2 text-sm text-neutral-300 font-medium">
-                    <item.icon size={16} />
-                    {item.label}
-                  </div>
-
-                  {item.children.map((c) => (
-                    <Link
-                      key={c.key}
-                      href={c.href}
-                      onClick={closeMobileMenu}
-                      className={`block pl-6 py-1 text-sm rounded-lg ${
-                        currentPath.startsWith(normalizePath(c.href))
-                          ? "text-emerald-400 bg-emerald-600/10"
-                          : "text-neutral-400 hover:bg-neutral-900/60"
-                      }`}
-                    >
-                      {c.label}
-                    </Link>
-                  ))}
-                </div>
-              ) : (
-                <Link
-                  key={item.key}
-                  href={item.href}
-                  onClick={closeMobileMenu}
-                  className={`flex items-center gap-3 rounded-lg px-2 py-2 text-[14px] ${
-                    item.active
-                      ? "bg-neutral-900 text-white ring-1 ring-neutral-700/70"
-                      : "text-neutral-400 hover:bg-neutral-900/60"
-                  }`}
-                >
-                  <item.icon size={17} />
-                  {item.label}
-                </Link>
-              )
-            )}
-
-            {/* Mobile logout */}
-            <button
-              onClick={() => {
-                closeMobileMenu();
-                setConfirmLogout(true);
-              }}
-              className="flex items-center gap-2 w-full px-2 py-2 text-sm 
-              text-neutral-300 hover:bg-neutral-900/80 rounded-lg mt-4"
-            >
-              <LogOut size={17} className="text-neutral-400" /> Logout
-            </button>
-
-          </div>
-        </div>
-      )}
 
       {/* MAIN */}
       <div className="lg:pl-[282px] flex-1 flex flex-col min-w-0">
-        
         <main className="flex-1 px-5 sm:px-7 lg:px-9 py-7">
           {boxed ? (
             <div className="rounded-3xl border border-neutral-800/70 bg-neutral-950/95 
@@ -345,9 +286,7 @@ export default function AuthenticatedLayout({ header, children, boxed = false })
             © {new Date().getFullYear()} EquitPay — All rights reserved
           </span>
         </footer>
-
       </div>
-
     </div>
   );
 }

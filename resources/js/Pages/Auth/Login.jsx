@@ -105,21 +105,21 @@ export default function Login() {
           "min-h-screen text-neutral-200 flex items-center justify-center",
           "bg-neutral-950 relative overflow-hidden",
           "before:absolute before:inset-0 before:pointer-events-none",
-          "before:[background:radial-gradient(70%_70%_at_50%_100%,rgba(2,251,92,0.15),transparent_75%)]",
+          "before:[background:radial-gradient(70%_70%_at_50%_100%,rgba(255,0,93,0.35),transparent_75%)]",
         ].join(" ")}
       >
         {/* 🔥 Background Image */}
         <img
-          src="/images/line.png"
+          src="/images/linepix.png"
           alt="Line background"
-          className="absolute inset-0 w-full h-full object-cover opacity-20 mix-blend-lighten pointer-events-none select-none"
+          className="absolute inset-0 w-full h-full object-cover opacity-5 mix-blend-lighten pointer-events-none select-none"
         />
 
         {/* CONTENT */}
         <div className="flex flex-col justify-center px-6 sm:px-10 py-10 w-full max-w-[480px] relative z-10">
           <div className="mb-4 inline-flex items-center gap-2 text-sm text-neutral-400">
             <img
-              src="/images/equitpay.png"
+              src="/images/logopixon.png"
               alt="EquitPay"
               className="h-10 md:h-12 w-auto opacity-90 grayscale-[35%] contrast-110"
             />
@@ -171,7 +171,7 @@ export default function Login() {
                       w-full rounded-2xl px-4 py-3 text-[15px]
                       bg-neutral-950 text-neutral-100 placeholder-neutral-500
                       ring-1 ring-inset ring-neutral-800 border border-transparent outline-none
-                      focus:ring-[2px] focus:ring-[#02fb5c]
+                      focus:ring-[2px] focus:ring-[#ff005d]
                     "
                     value={data.email}
                     onChange={(e) => setData("email", e.target.value)}
@@ -207,7 +207,7 @@ export default function Login() {
                         w-full rounded-2xl px-4 py-3 pr-12 text-[15px]
                         bg-neutral-950 text-neutral-100 placeholder-neutral-500
                         ring-1 ring-inset ring-neutral-800 border border-transparent outline-none
-                        focus:ring-[2px] focus:ring-[#02fb5c]
+                        focus:ring-[2px] focus:ring-[#ff005d]
                       "
                       value={data.password}
                       onChange={(e) => setData("password", e.target.value)}
@@ -286,10 +286,10 @@ function PrimaryButton({ text, disabled, type = "button", variant = "solid", loa
     variant === "outline"
       ? disabled
         ? "ring-1 ring-inset ring-neutral-800 text-neutral-500 bg-neutral-950"
-        : "ring-1 ring-inset text-[#02fb5c] ring-[#02fb5c]/60 bg-neutral-950 hover:bg-[#02fb5c]/10"
+        : "ring-1 ring-inset text-[#ff005d] ring-[#ff005d]/60 bg-neutral-950 hover:bg-[#ff005d]/10"
       : disabled
-      ? "bg-[#02fb5c]/40 text-neutral-900 cursor-not-allowed"
-      : "bg-[#02fb5c] text-neutral-950 hover:bg-[#00e756]";
+      ? "bg-[#ff005d]/40 text-neutral-900 cursor-not-allowed"
+      : "bg-[#ff005d] text-neutral-950 hover:bg-[#e00052]";
 
   return (
     <button type={type} disabled={disabled || loading} className={`${base} ${styles}`}>

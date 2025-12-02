@@ -34,7 +34,7 @@ function inputClass(hasError = false) {
     "ring-1 ring-inset border border-transparent",
     hasError
       ? "ring-rose-600/70"
-      : "ring-neutral-800 focus:ring-[2px] focus:ring-[#02fb5c]",
+      : "ring-neutral-800 focus:ring-[2px] focus:ring-[#ff0a66]",
   ].join(" ");
 }
 
@@ -49,7 +49,7 @@ function StatusBadge({
 }) {
   if (state === "ok") {
     return (
-      <span className="inline-flex items-center gap-1.5 rounded-full border border-[#02fb5c]/40 bg-[#02fb5c]/10 px-2 py-0.5 text-[11px] text-[#02fb5c]">
+      <span className="inline-flex items-center gap-1.5 rounded-full border border-[#ff0a66]/40 bg-[#ff0a66]/10 px-2 py-0.5 text-[11px] text-[#ff0a66]">
         <CheckCircle size={12} /> {okText}
       </span>
     );
@@ -85,10 +85,10 @@ function PrimaryButton({
     variant === "outline"
       ? disabled
         ? "ring-1 ring-inset ring-neutral-800 text-neutral-600 bg-neutral-950"
-        : "ring-1 ring-inset ring-[#02fb5c] text-[#02fb5c] bg-neutral-950 hover:bg-[#02fb5c]/10"
+        : "ring-1 ring-inset ring-[#ff0a66] text-[#ff0a66] bg-neutral-950 hover:bg-[#ff0a66]/10"
       : disabled
-      ? "bg-[#02fb5c]/40 text-neutral-900 cursor-not-allowed"
-      : "bg-[#02fb5c] text-neutral-900 hover:bg-[#00e756]";
+      ? "bg-[#ff0a66]/40 text-neutral-900 cursor-not-allowed"
+      : "bg-[#ff0a66] text-neutral-900 hover:bg-[#e0085a]";
 
   return (
     <button
@@ -204,7 +204,7 @@ export default function Register() {
         className={[
           "min-h-screen flex items-center justify-center text-neutral-200 bg-neutral-950 relative",
           "before:absolute before:inset-0 before:pointer-events-none",
-          "before:[background:radial-gradient(70%_70%_at_50%_100%,rgba(2,251,92,0.14),transparent_80%)]",
+          "before:[background:radial-gradient(70%_70%_at_50%_100%,rgba(255,10,102,0.14),transparent_80%)]",
         ].join(" ")}
       >
         <div className="w-full max-w-[480px] px-6 sm:px-10 py-10">
@@ -258,7 +258,7 @@ export default function Register() {
 
               <div className="h-2 w-full rounded-full bg-white/10 overflow-hidden">
                 <div
-                  className="h-full bg-[#02fb5c] transition-all"
+                  className="h-full bg-[#ff0a66] transition-all"
                   style={{ width: `${progressPct}%` }}
                 />
               </div>
@@ -388,11 +388,7 @@ export default function Register() {
                       onClick={() => setShowPass((v) => !v)}
                       className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-200"
                     >
-                      {showPass ? (
-                        <EyeOff className="h-5 w-5" />
-                      ) : (
-                        <Eye className="h-5 w-5" />
-                      )}
+                      {showPass ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
                     </button>
                   </div>
                 </Field>
@@ -412,11 +408,7 @@ export default function Register() {
                       onClick={() => setShowPass2((v) => !v)}
                       className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-200"
                     >
-                      {showPass2 ? (
-                        <EyeOff className="h-5 w-5" />
-                      ) : (
-                        <Eye className="h-5 w-5" />
-                      )}
+                      {showPass2 ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
                     </button>
                   </div>
                 </Field>

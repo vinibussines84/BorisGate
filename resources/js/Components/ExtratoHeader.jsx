@@ -76,7 +76,7 @@ export default function ExtratoHeader({
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div className="flex items-center gap-3">
           <div className="p-3 rounded-2xl border border-white/10 bg-[#0a0a0a]/90 shrink-0">
-            <FileText className="w-5 h-5 text-[#02fb5c]" />
+            <FileText className="w-5 h-5 text-[#ff005d]" />
           </div>
           <div>
             <h1 className="text-xl font-semibold text-white leading-none">
@@ -122,10 +122,10 @@ export default function ExtratoHeader({
         </div>
 
         <div className="flex sm:flex-row flex-col gap-3 shrink-0">
-          {/* Entradas */}
+          {/* Entradas (Agora usa a cor do ativo [#ff005d]) */}
           <div className="flex items-center justify-between sm:justify-start gap-3 rounded-2xl px-5 py-3 bg-[#0a0a0a]/95 border border-[#1b1b1b] shadow-inner w-[180px]">
-            <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-[#02fb5c]/20 border border-[#02fb5c]/40">
-              <ArrowUpRight size={15} className="text-[#02fb5c]" />
+            <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-[#ff005d]/20 border border-[#ff005d]/40">
+              <ArrowUpRight size={15} className="text-[#ff005d]" />
             </div>
             <div className="flex flex-col">
               <span className="text-[12px] text-gray-400">Credits</span>
@@ -135,7 +135,7 @@ export default function ExtratoHeader({
             </div>
           </div>
 
-          {/* Saídas */}
+          {/* Saídas (Mantém a cor de falha [#ff3b5c]) */}
           <div className="flex items-center justify-between sm:justify-start gap-3 rounded-2xl px-5 py-3 bg-[#0a0a0a]/95 border border-[#1b1b1b] shadow-inner w-[180px]">
             <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-[#2b0000]/40 border border-[#ff3b5c]/40">
               <ArrowDownRight size={15} className="text-[#ff3b5c]" />
@@ -161,7 +161,7 @@ export default function ExtratoHeader({
           <div className="relative flex items-center overflow-x-auto no-scrollbar p-1 rounded-xl bg-[#050505]/80 border border-[#1a1a1a] max-w-full scroll-smooth min-h-[32px]">
             {/* PILL */}
             <div
-              className="absolute h-[28px] rounded-lg bg-[#02fb5c]/10 border border-[#02fb5c]/40 transition-all duration-300 ease-out"
+              className="absolute h-[28px] rounded-lg bg-[#ff005d]/10 border border-[#ff005d]/40 transition-all duration-300 ease-out"
               style={{ width: pillStyle.width, left: pillStyle.left }}
             />
             <div className="flex flex-nowrap space-x-1">
@@ -177,7 +177,7 @@ export default function ExtratoHeader({
                   }}
                   className={`relative z-10 px-4 py-1 text-[11px] rounded-lg whitespace-nowrap transition-colors ${
                     statusFilter === s.key
-                      ? "text-[#02fb5c]"
+                      ? "text-[#ff005d]"
                       : "text-gray-300 hover:text-white"
                   }`}
                 >
@@ -201,14 +201,14 @@ export default function ExtratoHeader({
               onKeyDown={onKeyPress}
               placeholder="Search by E2E, Amount..."
               className="w-full pl-9 pr-3 py-2 text-xs rounded-lg bg-[#050505]/80 border border-[#1a1a1a]
-                text-gray-200 placeholder:text-gray-500 focus:ring-2 focus:ring-[#02fb5c]/40 transition-all duration-200"
+                text-gray-200 placeholder:text-gray-500 focus:ring-2 focus:ring-[#ff005d]/40 transition-all duration-200"
             />
           </div>
 
           {/* BOTÃO SEARCH */}
           <button
             onClick={() => refresh(true)}
-            className="px-4 py-2 text-xs font-medium rounded-lg bg-[#02fb5c]/20 border border-[#02fb5c]/40 text-[#02fb5c] hover:bg-[#02fb5c]/30 transition-all"
+            className="px-4 py-2 text-xs font-medium rounded-lg bg-[#ff005d]/20 border border-[#ff005d]/40 text-[#ff005d] hover:bg-[#ff005d]/30 transition-all"
           >
             Search
           </button>

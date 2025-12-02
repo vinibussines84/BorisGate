@@ -99,10 +99,11 @@ const Pagination = ({ page, totalPages, setPage }) => {
  * ---------------------------------------- */
 const Toast = ({ message, type = "success", onClose }) => {
     if (!message) return null;
+    // MUDANÇA: Cor do Toast de sucesso para [#ff005d]
     const color =
         type === "error"
             ? "bg-red-500/20 text-red-400 border border-red-500/40"
-            : "bg-[#02fb5c]/20 text-[#02fb5c] border border-[#02fb5c]/30";
+            : "bg-[#ff005d]/20 text-[#ff005d] border border-[#ff005d]/30";
 
     return (
         <div
@@ -141,7 +142,8 @@ const ConfirmModal = ({ show, onConfirm, onCancel }) => {
 
                     <button
                         onClick={onConfirm}
-                        className="px-5 py-2.5 rounded-full bg-[#02fb5c] text-[#0b0b0b] font-medium shadow-[0_0_10px_rgba(2,251,92,0.4)] hover:brightness-110 active:scale-95 transition"
+                        // MUDANÇA: bg-[#02fb5c] -> bg-[#ff005d], text-[#0b0b0b] -> text-white, Sombra para a cor correta
+                        className="px-5 py-2.5 rounded-full bg-[#ff005d] text-white font-medium shadow-[0_0_10px_rgba(255,0,93,0.4)] hover:brightness-110 active:scale-95 transition"
                     >
                         Resend
                     </button>
@@ -240,7 +242,8 @@ export default function WebhooksIndex({ webhooks = [] }) {
                     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-6">
                         <div className="flex-1 bg-[#0b0b0b]/90 rounded-full px-8 py-5 flex items-center justify-between shadow-[0_0_20px_-8px_rgba(0,0,0,0.8)] border border-white/10">
                             <div className="flex items-center gap-3">
-                                <span className="w-2 h-8 bg-[#02fb5c] rounded-full shadow-[0_0_10px_rgba(2,251,92,0.5)]"></span>
+                                {/* MUDANÇA: Cor do indicador para [#ff005d] e sombra para a cor correta */}
+                                <span className="w-2 h-8 bg-[#ff005d] rounded-full shadow-[0_0_10px_rgba(255,0,93,0.5)]"></span>
 
                                 <h1 className="text-xl sm:text-2xl font-semibold text-white">
                                     Webhook Management
@@ -254,8 +257,9 @@ export default function WebhooksIndex({ webhooks = [] }) {
                                         key={tab}
                                         onClick={() => setActiveTab(tab)}
                                         className={`px-6 py-2 rounded-full text-sm font-medium transition ${
+                                            // MUDANÇA: Cor da aba ativa para [#ff005d] e sombra para a cor correta
                                             activeTab === tab
-                                                ? "bg-[#02fb5c] text-black shadow-[0_0_10px_rgba(2,251,92,0.5)]"
+                                                ? "bg-[#ff005d] text-black shadow-[0_0_10px_rgba(255,0,93,0.5)]"
                                                 : "text-gray-400 hover:text-white"
                                         }`}
                                     >
@@ -271,8 +275,9 @@ export default function WebhooksIndex({ webhooks = [] }) {
                     {/* OVERVIEW */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div className="bg-[#0b0b0b]/90 rounded-2xl border border-white/10 p-5 flex items-center gap-4 shadow-[0_0_15px_-5px_rgba(0,0,0,0.8)]">
-                            <div className="bg-[#02fb5c]/10 p-3 rounded-xl border border-[#02fb5c]/30">
-                                <Database size={22} className="text-[#02fb5c]" />
+                            {/* MUDANÇA: Cor do bg e border do ícone para [#ff005d] */}
+                            <div className="bg-[#ff005d]/10 p-3 rounded-xl border border-[#ff005d]/30">
+                                <Database size={22} className="text-[#ff005d]" />
                             </div>
                             <div>
                                 <p className="text-sm text-gray-400">Registered webhooks</p>
@@ -283,8 +288,9 @@ export default function WebhooksIndex({ webhooks = [] }) {
                         </div>
 
                         <div className="bg-[#0b0b0b]/90 rounded-2xl border border-white/10 p-5 flex items-center gap-4 shadow-[0_0_15px_-5px_rgba(0,0,0,0.8)]">
-                            <div className="bg-[#02fb5c]/10 p-3 rounded-xl border border-[#02fb5c]/30">
-                                <Activity size={22} className="text-[#02fb5c]" />
+                            {/* MUDANÇA: Cor do bg e border do ícone para [#ff005d] */}
+                            <div className="bg-[#ff005d]/10 p-3 rounded-xl border border-[#ff005d]/30">
+                                <Activity size={22} className="text-[#ff005d]" />
                             </div>
                             <div>
                                 <p className="text-sm text-gray-400">Recent events</p>
@@ -325,7 +331,8 @@ export default function WebhooksIndex({ webhooks = [] }) {
                                                     key={hook.id}
                                                     className="border-b border-white/5 hover:bg-white/5 transition"
                                                 >
-                                                    <td className="py-3 pr-4 text-[#02fb5c] font-medium">
+                                                    {/* MUDANÇA: Cor do texto e ícone para [#ff005d] */}
+                                                    <td className="py-3 pr-4 text-[#ff005d] font-medium">
                                                         <div className="flex items-center gap-2">
                                                             <Link2 size={14} />
                                                             <a
@@ -343,7 +350,7 @@ export default function WebhooksIndex({ webhooks = [] }) {
                                                         <div className="flex items-center gap-2">
                                                             <ArrowLeftRight
                                                                 size={16}
-                                                                className="text-[#02fb5c]"
+                                                                className="text-[#ff005d]" // MUDANÇA: Cor do ícone para [#ff005d]
                                                             />
                                                             {hook.type}
                                                         </div>
@@ -381,7 +388,8 @@ export default function WebhooksIndex({ webhooks = [] }) {
                                     <button
                                         onClick={fetchLogs}
                                         disabled={loadingLogs}
-                                        className="flex items-center gap-2 text-sm px-4 py-2 rounded-full border border-[#02fb5c]/30 text-[#02fb5c] hover:bg-[#02fb5c]/10 transition disabled:opacity-50"
+                                        // MUDANÇA: Cor da borda e texto do botão Refresh para [#ff005d]
+                                        className="flex items-center gap-2 text-sm px-4 py-2 rounded-full border border-[#ff005d]/30 text-[#ff005d] hover:bg-[#ff005d]/10 transition disabled:opacity-50"
                                     >
                                         <RefreshCcw size={16} />
                                         Refresh
@@ -463,6 +471,7 @@ export default function WebhooksIndex({ webhooks = [] }) {
                                                                 resendingId === log.id
                                                             }
                                                             className={`p-2 rounded-lg transition ${
+                                                                // Mantido 'blue' para a ação de resend, é um bom indicador secundário (Reenviar)
                                                                 resendingId === log.id
                                                                     ? "text-blue-400 animate-pulse"
                                                                     : "text-gray-400 hover:text-blue-400 hover:bg-blue-400/10"

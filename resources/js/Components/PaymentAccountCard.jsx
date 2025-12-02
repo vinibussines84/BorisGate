@@ -29,7 +29,7 @@ function CardProgress({ visible }) {
         }
       `}</style>
       <div className="absolute inset-x-0 top-0 h-[2px] overflow-hidden">
-        <div className="h-full w-1/3 bg-[#02fb5c]/70 animate-[cardSlide_1.4s_linear_infinite]" />
+        <div className="h-full w-1/3 bg-[#ff005d]/70 animate-[cardSlide_1.4s_linear_infinite]" />
       </div>
     </>
   );
@@ -73,14 +73,12 @@ export default function PaymentAccountCard({ minHeight = 80 }) {
         const newBalance = data.data?.amount_available ?? 0;
         const newBlocked = data.data?.blocked_amount ?? 0;
 
-        // only update state if changed
         setBalance((prev) => (prev !== newBalance ? newBalance : prev));
         setBlockedBalance((prev) =>
           prev !== newBlocked ? newBlocked : prev
         );
         setError(null);
 
-        // update cache
         localStorage.setItem(
           CACHE_KEY,
           JSON.stringify({
@@ -126,7 +124,7 @@ export default function PaymentAccountCard({ minHeight = 80 }) {
         <div className="inline-flex items-center gap-2 rounded-full border border-neutral-700 bg-neutral-900/60 px-3 py-1.5">
           <span
             className={`h-2 w-2 rounded-full ${
-              error ? "bg-red-500" : "bg-emerald-400"
+              error ? "bg-red-500" : "bg-[#ff005d]"
             }`}
           />
           <span className="text-[11px] text-neutral-300 tracking-wide">
@@ -143,7 +141,7 @@ export default function PaymentAccountCard({ minHeight = 80 }) {
             <RefreshCw
               size={15}
               className={
-                isRefreshing ? "animate-spin text-[#02fb5c]" : "text-neutral-300"
+                isRefreshing ? "animate-spin text-[#ff005d]" : "text-neutral-300"
               }
             />
           </button>
@@ -209,8 +207,8 @@ export default function PaymentAccountCard({ minHeight = 80 }) {
           </button>
 
           <button
-            onClick={() => (window.location.href = "/saques/solicitar")}
-            className="flex items-center justify-center gap-2 h-10 text-sm rounded-xl bg-[#02fb5c] hover:bg-[#29ff78] text-neutral-900 font-semibold transition"
+            onClick={() => (window.location.href = '/saques/solicitar')}
+            className="flex items-center justify-center gap-2 h-10 text-sm rounded-xl bg-[#ff005d] hover:bg-[#e00052] text-neutral-50 font-semibold transition"
           >
             <SendHorizonal size={16} />
             Send Pix

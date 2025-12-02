@@ -57,21 +57,21 @@ function computeFee(enabled, fixed, percent) {
       enabled: true,
       type: "Mixed",
       valueStr: `${toPct(pct)} + ${toBRL(f)}`,
-      badgeTone: "bg-[#02fb5c]/10 text-[#02fb5c] border-[#02fb5c]/30",
+      badgeTone: "bg-[#ff005d]/10 text-[#ff005d] border-[#ff005d]/30",
     };
   if (pct > 0)
     return {
       enabled: true,
       type: "Percentage",
       valueStr: toPct(pct),
-      badgeTone: "bg-[#02fb5c]/10 text-[#02fb5c] border-[#02fb5c]/30",
+      badgeTone: "bg-[#ff005d]/10 text-[#ff005d] border-[#ff005d]/30",
     };
   if (f > 0)
     return {
       enabled: true,
       type: "Fixed",
       valueStr: toBRL(f),
-      badgeTone: "bg-[#02fb5c]/10 text-[#02fb5c] border-[#02fb5c]/30",
+      badgeTone: "bg-[#ff005d]/10 text-[#ff005d] border-[#ff005d]/30",
     };
   return {
     enabled: true,
@@ -99,7 +99,7 @@ const HeaderCapsule = ({ children }) => (
 const SectionTitle = ({ icon: Icon, title }) => (
   <div className="flex items-center gap-3 mb-4">
     <div className="p-3 rounded-xl bg-[#111]/70 border border-white/10 shadow-sm shadow-black/10">
-      <Icon size={18} className="text-[#02fb5c]" />
+      <Icon size={18} className="text-[#ff005d]" />
     </div>
     <h2 className="text-lg font-semibold text-white">{title}</h2>
   </div>
@@ -119,7 +119,7 @@ const ApiKeyCard = ({ label, value, hidden, copiedKey, copyWarningKey, onCopy })
           onClick={() => onCopy(value, label, hidden)}
           className={`p-2 rounded-lg transition shadow-sm ${
             isCopied
-              ? "bg-[#02fb5c]/20 text-[#02fb5c] border border-[#02fb5c]/30 shadow-[#02fb5c]/20"
+              ? "bg-[#ff005d]/20 text-[#ff005d] border border-[#ff005d]/30 shadow-[#ff005d]/20"
               : warning
               ? "bg-yellow-500/20 text-yellow-300 border border-yellow-300/30 shadow-yellow-300/20"
               : "text-gray-300 hover:bg-white/10 shadow-black/10"
@@ -136,7 +136,7 @@ const FeeRow = ({ icon: Icon, title, fee }) => (
   <div className="flex items-center justify-between bg-[#111]/70 border border-white/10 rounded-xl p-4 shadow-sm shadow-black/10">
     <div className="flex items-center gap-3">
       <div className="p-2 rounded-lg bg-[#0b0b0b]/70 border border-white/10 shadow-sm shadow-black/10">
-        <Icon size={18} className="text-[#02fb5c]" />
+        <Icon size={18} className="text-[#ff005d]" />
       </div>
       <div>
         <p className="text-white text-sm">{title}</p>
@@ -166,13 +166,13 @@ const WebhookRow = ({ label, url, copied, onCopy, enabled }) => {
     >
       <div className="flex items-center gap-3 min-w-0">
         <div className="p-2 rounded-lg bg-[#111]/70 border border-white/10 shadow-sm shadow-black/10">
-          <WebhookIcon size={18} className="text-[#02fb5c]" />
+          <WebhookIcon size={18} className="text-[#ff005d]" />
         </div>
 
         <div className="min-w-0">
           <p className="text-sm text-white">{label}</p>
           <div className="flex items-center gap-2 mt-1">
-            <span className="px-2 py-0.5 bg-[#02fb5c]/10 rounded-md border border-[#02fb5c]/30 text-[11px] text-[#02fb5c] flex items-center gap-1">
+            <span className="px-2 py-0.5 bg-[#ff005d]/10 rounded-md border border-[#ff005d]/30 text-[11px] text-[#ff005d] flex items-center gap-1">
               <Clock size={12} /> Async
             </span>
             {!enabled && (
@@ -193,7 +193,7 @@ const WebhookRow = ({ label, url, copied, onCopy, enabled }) => {
           onClick={() => hasUrl && enabled && onCopy(url, label)}
           className={`p-2 rounded-lg transition shadow-sm ${
             isCopied
-              ? "bg-[#02fb5c]/20 text-[#02fb5c] border border-[#02fb5c]/30 shadow-[#02fb5c]/20"
+              ? "bg-[#ff005d]/20 text-[#ff005d] border border-[#ff005d]/30 shadow-[#ff005d]/20"
               : "text-gray-300 hover:bg-white/10 shadow-black/10"
           }`}
         >
@@ -255,7 +255,7 @@ export default function Api() {
           {/* HEADER */}
           <HeaderCapsule>
             <div className="flex items-center gap-4">
-              <div className="w-1 h-10 rounded-full bg-[#02fb5c]" />
+              <div className="w-1 h-10 rounded-full bg-[#ff005d]" />
               <div>
                 <h1 className="text-2xl font-semibold text-white">API Integration</h1>
                 <p className="text-gray-400 text-sm">Manage your credentials and webhooks</p>
@@ -265,7 +265,7 @@ export default function Api() {
             <div className="flex flex-wrap items-center gap-3">
               <button
                 onClick={() => setHidden(!hidden)}
-                className="flex items-center gap-2 px-5 py-2 rounded-full bg-[#02fb5c] hover:bg-[#29ff78] text-[#0b0b0b] font-semibold transition shadow-sm shadow-[#02fb5c]/20"
+                className="flex items-center gap-2 px-5 py-2 rounded-full bg-[#ff005d] hover:bg-[#e00052] text-[#0b0b0b] font-semibold transition shadow-sm shadow-[#ff005d]/30"
               >
                 {hidden ? <Eye size={16} /> : <EyeOff size={16} />}
                 {hidden ? "Show Keys" : "Hide Keys"}
@@ -273,7 +273,7 @@ export default function Api() {
 
               <a
                 href="/api/docs"
-                className="flex items-center gap-2 px-5 py-2 rounded-full border border-[#02fb5c]/40 text-[#02fb5c] font-semibold hover:bg-[#02fb5c]/10 transition shadow-sm shadow-[#02fb5c]/20"
+                className="flex items-center gap-2 px-5 py-2 rounded-full border border-[#ff005d]/40 text-[#ff005d] font-semibold hover:bg-[#ff005d]/10 transition shadow-sm shadow-[#ff005d]/20"
               >
                 <BookOpen size={16} />
                 Documentation
@@ -315,7 +315,7 @@ export default function Api() {
           <Card className="p-6">
             <SectionTitle icon={WebhookIcon} title="Webhooks" />
             <div className="mb-4 flex items-center gap-2 text-xs">
-              <span className="px-2 py-1 rounded-md border border-[#02fb5c]/30 bg-[#02fb5c]/10 text-[#02fb5c] flex items-center gap-1">
+              <span className="px-2 py-1 rounded-md border border-[#ff005d]/30 bg-[#ff005d]/10 text-[#ff005d] flex items-center gap-1">
                 <Power size={12} />
                 {webhookEnabled ? "Enabled" : "Disabled"}
               </span>
@@ -342,7 +342,7 @@ export default function Api() {
 
           {/* FOOTER */}
           <div className="flex items-center gap-3 text-gray-500 text-xs">
-            <ShieldCheck size={14} className="text-[#02fb5c]" />
+            <ShieldCheck size={14} className="text-[#ff005d]" />
             <p>Keep your credentials secure at all times.</p>
           </div>
         </div>
