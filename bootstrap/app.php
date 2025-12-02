@@ -13,7 +13,8 @@ use App\Http\Middleware\EnsureAdmin;
 use App\Http\Middleware\EnsureUserActive;
 use App\Http\Middleware\ApiHeaderAuth;
 use App\Http\Middleware\CheckUserStatus;
-use App\Http\Middleware\SetLocale; // ✅ Novo middleware de idioma
+use App\Http\Middleware\SetLocale;
+use App\Http\Middleware\EnsureDashrashOne; // ✅ importante adicionar
 
 // Telescope
 use Laravel\Telescope\Http\Middleware\Authorize as TelescopeAuthorize;
@@ -37,12 +38,6 @@ return Application::configure(basePath: dirname(__DIR__))
 
         /**
          * 🌐 Grupo WEB → ESSENCIAL para o Login funcionar
-         * Aqui devem estar:
-         * - Cookies (EncryptCookies)
-         * - Session
-         * - CSRF Token
-         * - ShareErrorsFromSession
-         * - Bindings
          */
         $middleware->web(prepend: [
             \App\Http\Middleware\EncryptCookies::class,
@@ -56,9 +51,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->web(append: [
             HandleInertiaRequests::class,
             AddLinkHeadersForPreloadedAssets::class,
-
-            // ✅ Adicionado: mantém o idioma salvo na sessão ativo em todas as páginas
-            SetLocale::class,
+            SetLocale::class, // mantém o idioma ativo
         ]);
 
         /**
@@ -76,6 +69,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'ensure.active'     => EnsureUserActive::class,
             'api.header.auth'   => ApiHeaderAuth::class,
             'check.user.status' => CheckUserStatus::class,
+            'dashrash.one'      => EnsureDashrashOne::class, // ✅ adicionado aqui
             'telescope'         => TelescopeAuthorize::class,
         ]);
     })
