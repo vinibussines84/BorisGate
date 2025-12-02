@@ -75,7 +75,7 @@ class TransactionPixController extends Controller
             'user_agent'         => $request->userAgent(),
         ]);
 
-        // 🔗 Payload Pluggou
+        // 🔗 Payload Pluggou (sem postbackUrl)
         $payload = [
             'amount'        => $amountCents,
             'paymentMethod' => 'pix',
@@ -92,11 +92,10 @@ class TransactionPixController extends Controller
                 'name'  => $name,
                 'email' => $email,
                 'document' => [
-                    'number' => '07814854016', // CPF fixo (pode mudar se quiser dinâmico)
+                    'number' => '07814854016', // CPF fixo
                     'type'   => 'cpf',
                 ],
             ],
-            'postbackUrl' => route('webhooks.pluggou'),
             'externalRef' => $externalId,
         ];
 
@@ -170,7 +169,9 @@ class TransactionPixController extends Controller
         ]);
     }
 
-    // 🔍 Consulta via external_id
+    /**
+     * 🔍 Consulta via external_id
+     */
     public function statusByExternal(Request $request, string $externalId)
     {
         $auth   = $request->header('X-Auth-Key');
@@ -216,7 +217,9 @@ class TransactionPixController extends Controller
     // 🔧 Helpers
     private function resolveUser(string $auth, string $secret)
     {
-        return User::where('authkey', $auth)->where('secretkey', $secret)->first();
+        return User::where('authkey', $auth)
+            ->where('secretkey', $secret)
+            ->first();
     }
 
     private function computeFee($user, float $amount): float
