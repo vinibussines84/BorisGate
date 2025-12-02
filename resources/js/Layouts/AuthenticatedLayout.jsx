@@ -28,33 +28,54 @@ function BrandLogo({ className = "block h-[28px] w-auto md:h-[32px]" }) {
   );
 }
 
-/* ---------- Avatar Menu ---------- */
-function UserFavicon({ initials }) {
+/* ---------- Avatar Menu (CORRIGIDO) ---------- */
+function UserFavicon({ initials, closeMobile }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
+
+  const handleLogout = () => {
+    setOpen(false);
+    closeMobile?.(); // fecha menu mobile se aberto
+
+    router.post(route("logout"), {}, {
+      onFinish: () => {
+        document.body.style.overflow = "auto";
+      }
+    });
+  };
+
   useEffect(() => {
-    const handleClick = (e) => ref.current && !ref.current.contains(e.target) && setOpen(false);
+    const handleClick = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) {
+        setOpen(false);
+      }
+    };
+
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
+
   return (
     <div ref={ref} className="relative">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="grid size-9 place-items-center rounded-full bg-neutral-900 text-[13px] font-medium text-neutral-200 ring-1 ring-neutral-700 hover:ring-emerald-500 transition"
+        className="grid size-9 place-items-center rounded-full bg-neutral-900 
+        text-[13px] font-medium text-neutral-200 ring-1 ring-neutral-700 
+        hover:ring-emerald-500 transition"
       >
         {initials}
       </button>
+
       {open && (
-        <div className="absolute right-0 mt-2 w-40 rounded-xl border border-neutral-800/70 bg-neutral-950/95 shadow-xl z-50">
-          <Link
-            href={route("logout")}
-            method="post"
-            as="button"
-            className="flex items-center gap-2 w-full px-4 py-2 text-sm text-neutral-300 hover:bg-neutral-900/80 transition-colors"
+        <div className="absolute right-0 mt-2 w-40 rounded-xl border 
+        border-neutral-800/70 bg-neutral-950 shadow-xl z-50">
+          <button
+            onClick={handleLogout}
+            className="flex items-center gap-2 w-full px-4 py-2 text-sm text-neutral-300 
+            hover:bg-neutral-900/80 transition-colors"
           >
             <LogOut className="h-4 w-4 text-neutral-400" /> Logout
-          </Link>
+          </button>
         </div>
       )}
     </div>
@@ -70,6 +91,8 @@ export default function AuthenticatedLayout({ header, children, boxed = false })
   );
 
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  const closeMobileMenu = () => setMobileOpen(false);
 
   const initials = useMemo(() => {
     const n = (user?.name || "").trim();
@@ -113,6 +136,7 @@ export default function AuthenticatedLayout({ header, children, boxed = false })
 
   return (
     <div className="min-h-screen bg-[#0B0B0B] text-gray-100 flex flex-col" data-dark-root>
+
       {/* ===== TOPBAR ===== */}
       <header className="sticky top-0 z-50 border-b border-neutral-800/60 bg-[#0B0B0B]/95 backdrop-blur">
         <div className="flex items-center justify-between px-5 py-3">
@@ -123,19 +147,22 @@ export default function AuthenticatedLayout({ header, children, boxed = false })
             >
               {mobileOpen ? <X size={18} /> : <Menu size={18} />}
             </button>
+
             <Link href="/dashboard">
               <BrandLogo className="h-[36px] w-auto" />
             </Link>
           </div>
+
           <div className="flex items-center gap-4">
             <NotificationBell />
-            <UserFavicon initials={initials} />
+            <UserFavicon initials={initials} closeMobile={closeMobileMenu} />
           </div>
         </div>
       </header>
 
       {/* ===== SIDEBAR (DESKTOP) ===== */}
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-[282px] lg:flex lg:flex-col lg:border-r lg:border-neutral-800/60 lg:bg-neutral-950">
+        
         <div className="flex items-center gap-3 px-6 py-5 border-b border-neutral-800/70">
           <Link href="/dashboard" className="flex items-center gap-3">
             <BrandLogo />
@@ -151,6 +178,7 @@ export default function AuthenticatedLayout({ header, children, boxed = false })
                     <div className="flex items-center gap-3 text-sm font-medium text-neutral-400 px-3">
                       <item.icon size={17} /> {item.label}
                     </div>
+
                     <ul className="pl-8 space-y-1">
                       {item.children.map((c) => (
                         <li key={c.key}>
@@ -187,7 +215,7 @@ export default function AuthenticatedLayout({ header, children, boxed = false })
         </nav>
 
         <div className="border-t border-neutral-800/70 p-5">
-          <UserFavicon initials={initials} />
+          <UserFavicon initials={initials} closeMobile={closeMobileMenu} />
         </div>
       </aside>
 
