@@ -10,8 +10,8 @@ use Illuminate\Support\Facades\DB;
 class WalletService
 {
     /**
-     * Aplica alterações de saldo de forma SEGURA e ATÔMICA.
-     * Compatível com todos os status atualizados.
+     * Aplica alterações de saldo sem disparar Observer novamente.
+     * TOTALMENTE à prova de loop.
      */
     public function applyStatusChange(Transaction $t, ?TransactionStatus $old, TransactionStatus $new): void
     {
@@ -38,108 +38,113 @@ class WalletService
             $net   = $isCashIn ? $this->calcNetForUser($u, $gross) : $gross;
 
             /** Rastro anterior */
-            $prevAppliedAvail = round((float) $t->applied_available_amount ?? 0, 2);
-            $prevAppliedBlock = round((float) $t->applied_blocked_amount   ?? 0, 2);
+            $prevAppliedAvail = round((float) ($t->applied_available_amount ?? 0), 2);
+            $prevAppliedBlock = round((float) ($t->applied_blocked_amount ?? 0), 2);
 
             /**
-             * ============================================================
-             * STATUS ESPECIAL: UNDER_REVIEW 🟡
-             * - Funciona EXATAMENTE como MED
-             * ============================================================
+             * STATUS UNDER_REVIEW = MED
              */
             if ($new === TransactionStatus::UNDER_REVIEW) {
                 $new = TransactionStatus::MED;
             }
 
-
             /**
-             * ============================================================
-             * ENTRADA EM MED (1ª vez)  → bloqueia BRUTO uma vez
-             * ============================================================
+             * ------------------------------------------
+             * 1️⃣ MED (1ª vez) → Bloqueia BRUTO uma vez
+             * ------------------------------------------
              */
             if ($isCashIn && $new === TransactionStatus::MED && $prevAppliedBlock <= 0) {
 
-                $u->amount_available = round($u->amount_available - $gross, 2);
-                $u->blocked_amount   = round($u->blocked_amount + $gross, 2);
-                $u->save();
+                $u->updateQuietly([
+                    'amount_available' => round($u->amount_available - $gross, 2),
+                    'blocked_amount'   => round($u->blocked_amount + $gross, 2),
+                ]);
 
-                $t->applied_available_amount = 0;
-                $t->applied_blocked_amount   = $gross;
-                $t->save();
+                $t->updateQuietly([
+                    'applied_available_amount' => 0,
+                    'applied_blocked_amount'   => $gross,
+                ]);
+
                 return;
             }
 
-
             /**
-             * ============================================================
-             * MED → alguma coisa
-             * ============================================================
+             * ------------------------------------------
+             * 2️⃣ MED → algum status
+             * ------------------------------------------
              */
             if ($isCashIn && $old === TransactionStatus::MED) {
 
                 // MED → PENDENTE
                 if ($new === TransactionStatus::PENDENTE) {
 
-                    $u->blocked_amount = round($u->blocked_amount - $prevAppliedBlock, 2);
-                    $u->save();
+                    $u->updateQuietly([
+                        'blocked_amount' => round($u->blocked_amount - $prevAppliedBlock, 2),
+                    ]);
 
-                    $t->applied_available_amount = 0;
-                    $t->applied_blocked_amount   = 0;
-                    $t->save();
+                    $t->updateQuietly([
+                        'applied_available_amount' => 0,
+                        'applied_blocked_amount'   => 0,
+                    ]);
+
                     return;
                 }
 
                 // MED → PAGA
                 if ($new === TransactionStatus::PAGA) {
 
-                    $u->blocked_amount   = round($u->blocked_amount - $prevAppliedBlock, 2);
-                    $u->amount_available = round($u->amount_available + $net, 2);
-                    $u->save();
+                    $u->updateQuietly([
+                        'blocked_amount'   => round($u->blocked_amount - $prevAppliedBlock, 2),
+                        'amount_available' => round($u->amount_available + $net, 2),
+                    ]);
 
-                    $t->applied_available_amount = $net;
-                    $t->applied_blocked_amount   = 0;
-                    $t->save();
+                    $t->updateQuietly([
+                        'applied_available_amount' => $net,
+                        'applied_blocked_amount'   => 0,
+                    ]);
+
                     return;
                 }
 
-                // MED → ERRO ou FALHA → não modifica carteira
+                // MED → ERRO/FALHA → não altera carteira
                 if (in_array($new, [TransactionStatus::ERRO, TransactionStatus::FALHA], true)) {
                     return;
                 }
             }
 
-
             /**
-             * ============================================================
-             * PAGA → MED (Reversão rara)
-             * ============================================================
+             * ------------------------------------------------
+             * 3️⃣ PAGA → MED (reversão rara) — bloqueia bruto
+             * ------------------------------------------------
              */
             if ($isCashIn && $old === TransactionStatus::PAGA && $new === TransactionStatus::MED) {
 
-                // Bloqueia novamente o bruto apenas 1x
                 if ($prevAppliedBlock <= 0) {
-                    $u->amount_available = round($u->amount_available - $gross, 2);
-                    $u->blocked_amount   = round($u->blocked_amount + $gross, 2);
-                    $u->save();
 
-                    $t->applied_available_amount = 0;
-                    $t->applied_blocked_amount   = $gross;
-                    $t->save();
+                    $u->updateQuietly([
+                        'amount_available' => round($u->amount_available - $gross, 2),
+                        'blocked_amount'   => round($u->blocked_amount + $gross, 2),
+                    ]);
+
+                    $t->updateQuietly([
+                        'applied_available_amount' => 0,
+                        'applied_blocked_amount'   => $gross,
+                    ]);
                 }
 
                 return;
             }
 
-
             /**
-             * ============================================================
-             * REGRA PADRÃO PARA CASH-IN
-             * ============================================================
+             * ---------------------------------------------
+             * 4️⃣ REGRA PADRÃO (somente Cash-In)
+             * ---------------------------------------------
              */
             $targetAppliedAvail = 0.0;
             $targetAppliedBlock = 0.0;
 
             if ($isCashIn) {
+
                 switch ($new) {
 
                     case TransactionStatus::PAGA:
@@ -152,31 +157,29 @@ class WalletService
                         }
                         break;
 
-                    case TransactionStatus::PENDENTE:
-                    case TransactionStatus::ERRO:
-                    case TransactionStatus::FALHA:
                     default:
+                        // PENDENTE, ERRO, FALHA → zerado mesmo
                         break;
                 }
             }
 
-            /** Deltas financeiros */
+            /** Deltas */
             $deltaBlock = round($targetAppliedBlock - $prevAppliedBlock, 2);
             $deltaAvail = round(($targetAppliedAvail - $prevAppliedAvail) - $deltaBlock, 2);
 
-            /** Atualiza saldos */
-            $u->amount_available = round($u->amount_available + $deltaAvail, 2);
-            $u->blocked_amount   = round($u->blocked_amount + $deltaBlock, 2);
-            $u->save();
+            /** Atualiza saldo */
+            $u->updateQuietly([
+                'amount_available' => round($u->amount_available + $deltaAvail, 2),
+                'blocked_amount'   => round($u->blocked_amount + $deltaBlock, 2),
+            ]);
 
             /** Atualiza rastro */
-            $t->applied_available_amount = $targetAppliedAvail;
-            $t->applied_blocked_amount   = $targetAppliedBlock;
-            $t->save();
+            $t->updateQuietly([
+                'applied_available_amount' => $targetAppliedAvail,
+                'applied_blocked_amount'   => $targetAppliedBlock,
+            ]);
         });
     }
-
-
 
     /**
      * Calcula o líquido do usuário (cash-in)
