@@ -12,16 +12,6 @@ use Carbon\Carbon;
 
 class TaxCheckerController extends Controller
 {
-    /**
-     * 🧾 Exibe a página do Validador de Taxas
-     * ---------------------------------------------------------------
-     * Mostra transações do período selecionado (por padrão, o dia atual)
-     * e calcula:
-     *  - Total bruto recebido
-     *  - Valor líquido após taxa da liquidante
-     *  - Lucro final
-     *  - Saques pagos e suas taxas fixas
-     */
     public function index(Request $request)
     {
         $user = $request->user();
@@ -36,35 +26,34 @@ class TaxCheckerController extends Controller
             abort(403, 'Acesso não autorizado.');
         }
 
-        // 📆 Intervalo de datas (padrão: dia atual)
-        $start = $request->input('start_date')
+        // 🕒 Intervalo de datas (padrão: dia atual)
+        $start = $request->filled('start_date')
             ? Carbon::parse($request->input('start_date'))->startOfDay()
             : Carbon::today()->startOfDay();
 
-        $end = $request->input('end_date')
+        $end = $request->filled('end_date')
             ? Carbon::parse($request->input('end_date'))->endOfDay()
             : Carbon::today()->endOfDay();
 
-        // 🔍 Filtro opcional por usuário
+        // 👤 Filtro por usuário (se enviado)
         $userId = $request->input('user_id');
 
-        // 📦 Transações de entrada (CashIn) no período
+        // 🔍 Transações filtradas por data e usuário
         $query = Transaction::query()
             ->cashIn()
             ->whereBetween('created_at', [$start, $end])
             ->with('user');
 
-        if ($userId) {
+        if ($request->filled('user_id')) {
             $query->where('user_id', $userId);
         }
 
-        // 🔢 Paginação (30 por página)
         $transactions = $query
             ->latest()
             ->paginate(30)
             ->withQueryString();
 
-        // 💰 Calcula líquido, cliente e lucro por transação
+        // 💰 Cálculo de lucro individual
         $transactions->getCollection()->transform(function ($t) {
             $t->expected_liquid = $this->calcLiquidante($t->amount);
             $t->expected_client = $this->calcCliente($t->amount);
@@ -72,15 +61,12 @@ class TaxCheckerController extends Controller
             return $t;
         });
 
-        // 📊 Estatísticas gerais do período
+        // 📊 Estatísticas gerais filtradas
         $stats = $this->getStats($start, $end, $userId);
 
-        // 👥 Lista de usuários para o filtro
-        $users = User::select('id', 'email', 'nome_completo')
-            ->orderBy('nome_completo')
-            ->get();
+        // 👥 Lista de usuários (para o select)
+        $users = User::select('id', 'email', 'nome_completo')->orderBy('nome_completo')->get();
 
-        // 🔙 Retorna para a view Inertia
         return Inertia::render('TaxChecker', [
             'transactions' => $transactions,
             'stats' => $stats,
@@ -94,44 +80,16 @@ class TaxCheckerController extends Controller
     }
 
     /**
-     * 🧮 Simulação de taxas e lucro (AJAX)
-     */
-    public function simulate(Request $request)
-    {
-        $request->validate([
-            'amount' => ['required', 'numeric', 'min:0.01'],
-        ]);
-
-        $amount = (float) $request->amount;
-        $liquid = $this->calcLiquidante($amount);
-        $client = $this->calcCliente($amount);
-        $profit = $liquid - $client;
-
-        return response()->json([
-            'bruto' => $amount,
-            'liquido_liquidante' => $liquid,
-            'liquido_cliente' => $client,
-            'lucro' => $profit,
-        ]);
-    }
-
-    /**
-     * 📊 Estatísticas gerais do período
-     * ---------------------------------------------------------------
-     * Calcula:
-     *  - total bruto
-     *  - total líquido (pós-liquidante)
-     *  - lucro final
-     *  - saques pagos + taxas fixas
+     * 📈 Estatísticas consolidadas (respeitando user_id)
      */
     private function getStats(Carbon $start, Carbon $end, ?int $userId = null): array
     {
-        // 🔍 Transações do período
+        // Transações filtradas
         $txBase = Transaction::query()
             ->cashIn()
             ->whereBetween('created_at', [$start, $end]);
 
-        // 🔍 Saques pagos
+        // Saques pagos filtrados
         $wdBase = Withdraw::query()
             ->whereBetween('created_at', [$start, $end])
             ->where('status', 'pago');
@@ -141,31 +99,24 @@ class TaxCheckerController extends Controller
             $wdBase->where('user_id', $userId);
         }
 
-        // ✅ Contagem de pedidos pagos
+        // Pedidos pagos (status exato)
         $paidOrdersCount = (clone $txBase)->where('status', 'paga')->count();
 
-        // 💵 Total bruto recebido
+        // Entradas (cash-in)
         $totalBruto = (clone $txBase)->sum('amount');
-
-        // 💰 Quantidade de transações (para R$0,10 por entrada)
         $transactionCount = (clone $txBase)->count();
 
-        // 💸 Saques pagos
+        // Saques pagos
         $withdrawCount = (clone $wdBase)->count();
         $withdrawTotal = (clone $wdBase)->sum('gross_amount');
 
-        // 📉 Taxas da liquidante sobre entradas
+        // 🧾 Taxas e lucro
         $taxaLiquidanteEntradas = ($totalBruto * 0.015) + ($transactionCount * 0.10);
-
-        // 📉 Taxas fixas da liquidante sobre saques pagos (R$0.10 por saque)
         $taxaLiquidanteSaques = $withdrawCount * 0.10;
 
-        // 🏦 Valor líquido recebido da liquidante (entradas - taxas)
         $valorLiquidoLiquidante = round($totalBruto - $taxaLiquidanteEntradas, 2);
-
-        // 💸 Lucro final do período
-        // = líquido da liquidante - (2.5% de taxa intermediária sobre o bruto)
         $taxaIntermediario = $totalBruto * 0.025;
+
         $lucro = round($valorLiquidoLiquidante - $taxaIntermediario, 2);
 
         return [
@@ -180,8 +131,7 @@ class TaxCheckerController extends Controller
     }
 
     /**
-     * 💳 Calcula o valor líquido recebido da liquidante
-     * (Bruto - 1.5% - R$0.10 fixo)
+     * 💳 Calcula líquido da liquidante (bruto - 1.5% - R$0,10)
      */
     private function calcLiquidante(float $amount): float
     {
@@ -191,8 +141,7 @@ class TaxCheckerController extends Controller
     }
 
     /**
-     * 💸 Calcula o valor entregue ao cliente
-     * (Bruto - 4% cobrados do cliente)
+     * 💸 Calcula o valor entregue ao cliente (bruto - 4%)
      */
     private function calcCliente(float $amount): float
     {

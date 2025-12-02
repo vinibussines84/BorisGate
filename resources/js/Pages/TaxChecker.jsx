@@ -8,8 +8,17 @@ import {
   Banknote,
   TrendingUp,
   PiggyBank,
-  Eye,
 } from "lucide-react";
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  Legend,
+} from "recharts";
 
 /* ==========================
    Helpers
@@ -48,7 +57,6 @@ export default function TaxChecker({
   const [endDate, setEndDate] = useState(
     date_range?.end?.substring(0, 10) || ""
   );
-  const [reasonView, setReasonView] = useState(null);
 
   const data = transactions?.data ?? [];
   const links = transactions?.links ?? [];
@@ -69,6 +77,18 @@ export default function TaxChecker({
     if (!url) return;
     router.get(url, {}, { preserveScroll: true });
   };
+
+  // ==========================
+  // Gráfico — Bruto × Líquido × Lucro
+  // ==========================
+  const chartData = [
+    {
+      name: "Valores (R$)",
+      Bruto: stats?.total_bruto ?? 0,
+      Liquidante: stats?.valor_liquido_liquidante ?? 0,
+      Lucro: stats?.lucro ?? 0,
+    },
+  ];
 
   return (
     <AuthenticatedLayout>
@@ -175,7 +195,36 @@ export default function TaxChecker({
             />
           </div>
 
-          {/* CARDS DE SAQUES */}
+          {/* GRÁFICO COMPARATIVO */}
+          <div className="bg-[#0b0b0b]/80 border border-white/10 rounded-3xl p-6 backdrop-blur-sm">
+            <h3 className="text-white text-base font-semibold mb-4">
+              Comparativo Financeiro (Bruto x Líquido x Lucro)
+            </h3>
+            <div className="h-72">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={chartData} barSize={60}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#1f1f1f" />
+                  <XAxis dataKey="name" stroke="#aaa" />
+                  <YAxis stroke="#aaa" />
+                  <Tooltip
+                    cursor={{ fill: "#222" }}
+                    formatter={(v) => BRL(v)}
+                    labelStyle={{ color: "#02fb5c" }}
+                  />
+                  <Legend />
+                  <Bar dataKey="Bruto" fill="#3b82f6" radius={[8, 8, 0, 0]} />
+                  <Bar
+                    dataKey="Liquidante"
+                    fill="#02fb5c"
+                    radius={[8, 8, 0, 0]}
+                  />
+                  <Bar dataKey="Lucro" fill="#10b981" radius={[8, 8, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          {/* SAQUES */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <Card
               title="Saques Pagos"
@@ -197,14 +246,11 @@ export default function TaxChecker({
             />
           </div>
 
-          {/* TABELA DE TRANSAÇÕES */}
+          {/* TABELA */}
           <div className="bg-[#0b0b0b]/90 backdrop-blur-sm rounded-3xl border border-white/10 shadow-lg p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-base font-semibold text-white">
-                Transações ({transactions.total})
-              </h3>
-            </div>
-
+            <h3 className="text-base font-semibold text-white mb-4">
+              Transações ({transactions.total})
+            </h3>
             <div className="overflow-x-auto">
               <table className="min-w-full text-sm">
                 <thead>
