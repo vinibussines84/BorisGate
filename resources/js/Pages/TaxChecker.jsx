@@ -6,9 +6,9 @@ import {
   CheckCircle,
   ArrowDownCircle,
   Banknote,
+  TrendingUp,
+  PiggyBank,
   Eye,
-  ChevronLeft,
-  ChevronRight,
 } from "lucide-react";
 
 /* ==========================
@@ -88,7 +88,7 @@ export default function TaxChecker({
                   Validador de Taxas
                 </h1>
                 <p className="text-zinc-400 text-sm mt-1">
-                  Analise suas transações, taxas e lucros entre períodos.
+                  Acompanhe transações, taxas da liquidante e lucro do período.
                 </p>
               </div>
             </div>
@@ -108,7 +108,7 @@ export default function TaxChecker({
                 <option value="">Todos os usuários</option>
                 {users?.map((u) => (
                   <option key={u.id} value={u.id}>
-                    {u.name || u.email}
+                    {u.nome_completo || u.email}
                   </option>
                 ))}
               </select>
@@ -147,25 +147,53 @@ export default function TaxChecker({
             </div>
           </div>
 
-          {/* CARDS DE ESTATÍSTICAS */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {/* CARDS FINANCEIROS */}
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
             <Card
-              title="Pedidos pagos"
-              value={stats?.paid_orders_count ?? 0}
-              color="text-[#02fb5c]"
-              icon={CheckCircle}
+              title="Total Bruto de Entradas"
+              value={BRL(stats?.total_bruto ?? 0)}
+              color="text-blue-400"
+              icon={Banknote}
             />
             <Card
-              title="Saques solicitados"
-              value={stats?.withdraw_count ?? 0}
+              title="Líquido da Liquidante"
+              value={BRL(stats?.valor_liquido_liquidante ?? 0)}
+              color="text-[#02fb5c]"
+              icon={TrendingUp}
+            />
+            <Card
+              title="Lucro do Período"
+              value={BRL(stats?.lucro ?? 0)}
+              color="text-emerald-400"
+              icon={PiggyBank}
+            />
+            <Card
+              title="Pedidos Pagos"
+              value={stats?.paid_orders_count ?? 0}
               color="text-amber-400"
+              icon={CheckCircle}
+            />
+          </div>
+
+          {/* CARDS DE SAQUES */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <Card
+              title="Saques Pagos"
+              value={stats?.withdraw_count ?? 0}
+              color="text-[#02fb5c]"
               icon={ArrowDownCircle}
             />
             <Card
-              title="Valor total sacado"
+              title="Valor Total Sacado"
               value={BRL(stats?.withdraw_total ?? 0)}
               color="text-emerald-400"
               icon={Banknote}
+            />
+            <Card
+              title="Taxas de Saques (R$0,10 por pago)"
+              value={BRL(stats?.taxa_liquidante_saques ?? 0)}
+              color="text-gray-400"
+              icon={Calculator}
             />
           </div>
 
@@ -200,7 +228,7 @@ export default function TaxChecker({
                       >
                         <td className="py-3 text-gray-300 font-mono">#{t.id}</td>
                         <td className="py-3 text-gray-300">
-                          {t.user?.name || t.user?.email || "—"}
+                          {t.user?.nome_completo || t.user?.email || "—"}
                         </td>
                         <td className="py-3 text-white font-semibold">
                           {BRL(t.amount)}
@@ -249,37 +277,6 @@ export default function TaxChecker({
                 ))}
             </div>
           </div>
-
-          {/* MODAL DE DETALHE (opcional futuro) */}
-          {reasonView && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
-              <div className="bg-[#0b0b0b] border border-white/10 rounded-2xl shadow-2xl max-w-md w-full mx-4 p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-base font-semibold text-gray-200 flex items-center gap-2">
-                    <Eye size={16} className="text-[#02fb5c]" />
-                    Detalhes
-                  </h3>
-                  <button
-                    onClick={() => setReasonView(null)}
-                    className="text-gray-400 hover:text-white transition"
-                  >
-                    ✕
-                  </button>
-                </div>
-                <div className="text-sm text-gray-300 leading-relaxed border-y border-white/10 py-4">
-                  {reasonView}
-                </div>
-                <div className="flex justify-end mt-4">
-                  <button
-                    onClick={() => setReasonView(null)}
-                    className="px-4 py-2 rounded-lg border border-white/10 bg-white/5 text-gray-300 hover:bg-white/10 transition text-sm"
-                  >
-                    Fechar
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
         </div>
       </div>
     </AuthenticatedLayout>
