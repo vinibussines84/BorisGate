@@ -5,68 +5,85 @@ namespace App\Observers;
 use App\Enums\TransactionStatus;
 use App\Models\Transaction;
 use App\Models\Notification;
-use App\Services\WalletService;
 use Carbon\CarbonImmutable;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 class TransactionObserver
 {
-    public function __construct(private WalletService $wallet) {}
-
+    /**
+     * Converte valores soltos para Enum real
+     */
     private function asEnum(null|string|TransactionStatus $v): ?TransactionStatus
     {
         if ($v instanceof TransactionStatus) return $v;
         if ($v === null || $v === '') return null;
-        return TransactionStatus::fromLoose((string) $v);
+        return TransactionStatus::fromLoose($v);
     }
 
+    /**
+     * Aplica timestamps corretos baseado na mudança
+     */
     private function applyTimestamps(Transaction $t, ?TransactionStatus $old, TransactionStatus $new): void
     {
         $now = CarbonImmutable::now();
 
+        // PIX pago → seta paid_at se ainda não existe
         if ($new === TransactionStatus::PAGA) {
             $t->paid_at = $t->paid_at ?? $now;
         }
 
+        // Se estava pago e voltou para outro status, remove paid_at
         if ($old === TransactionStatus::PAGA && $new !== TransactionStatus::PAGA) {
             $t->paid_at = null;
         }
 
+        // Quando volta para pendente
         if ($new === TransactionStatus::PENDENTE && empty($t->authorized_at)) {
             $t->authorized_at = $now;
         }
 
+        // Falhas → marca canceled_at
         if (in_array($new, [TransactionStatus::FALHA, TransactionStatus::ERRO], true)) {
             $t->canceled_at ??= $now;
+
+            // Se estava paga e agora virou falha, remove paid_at
             if ($old === TransactionStatus::PAGA) {
                 $t->paid_at = null;
             }
         }
 
+        // Se saiu de erro/falha → limpa canceled_at
         if (in_array($old, [TransactionStatus::FALHA, TransactionStatus::ERRO], true)
-            && ! in_array($new, [TransactionStatus::FALHA, TransactionStatus::ERRO], true)) {
+            && !in_array($new, [TransactionStatus::FALHA, TransactionStatus::ERRO], true)) {
             $t->canceled_at = null;
         }
     }
 
+    /**
+     * Evento saving — antes de salvar
+     */
     public function saving(Transaction $t): void
     {
         $old = $this->asEnum($t->getOriginal('status')) ?? TransactionStatus::PENDENTE;
         $new = $this->asEnum($t->status) ?? TransactionStatus::PENDENTE;
 
+        // Se não houve mudança no status → ignora
         if ($old->value === $new->value) {
             return;
         }
 
+        // Aplica timestamps
         $this->applyTimestamps($t, $old, $new);
     }
 
+    /**
+     * Evento created — logo após criar a transação
+     */
     public function created(Transaction $t): void
     {
         $new = $this->asEnum($t->status) ?? TransactionStatus::PENDENTE;
 
-        // Notificação automática no status PAGA
+        // Criou uma transação paga? (quase impossível, mas permitido)
         if ($new === TransactionStatus::PAGA) {
             Notification::create([
                 'user_id' => $t->user_id,
@@ -75,25 +92,18 @@ class TransactionObserver
             ]);
         }
 
-        // Atualização de carteira
-        if (in_array($new, [TransactionStatus::PAGA, TransactionStatus::MED], true)) {
-            try {
-                DB::transaction(function () use ($t, $new) {
-                    $this->wallet->applyStatusChange($t, TransactionStatus::PENDENTE, $new);
-                });
-            } catch (\Throwable $e) {
-                Log::error('Wallet apply on created failed', [
-                    'tx_id' => $t->id,
-                    'from'  => TransactionStatus::PENDENTE->value,
-                    'to'    => $new->value,
-                    'err'   => $e->getMessage(),
-                ]);
-            }
-        }
-
-        // ❌ Webhook removido DEFINITIVAMENTE
+        /**
+         * 🚫 NÃO MEXE EM CARTEIRA
+         * 🚫 NÃO DISPARA WEBHOOK
+         * 🚫 NÃO REGRAS FINANCEIRAS AQUI
+         *
+         * Tudo isso pertence ao Webhook PodPay Controller.
+         */
     }
 
+    /**
+     * Evento updated — dispara quando status muda
+     */
     public function updated(Transaction $t): void
     {
         if (!$t->wasChanged('status')) {
@@ -103,17 +113,13 @@ class TransactionObserver
         $old = $this->asEnum($t->getOriginal('status')) ?? TransactionStatus::PENDENTE;
         $new = $this->asEnum($t->status) ?? TransactionStatus::PENDENTE;
 
-        if ($old->value === $new->value) {
-            return;
-        }
-
         Log::info('TX status changed', [
             'tx_id' => $t->id,
             'from'  => $old->value,
             'to'    => $new->value,
         ]);
 
-        // Notificação quando muda pra PAGA
+        // Notificação interna
         if ($new === TransactionStatus::PAGA && $old !== TransactionStatus::PAGA) {
             Notification::create([
                 'user_id' => $t->user_id,
@@ -122,21 +128,18 @@ class TransactionObserver
             ]);
         }
 
-        // Atualização de carteira
-        try {
-            DB::transaction(function () use ($t, $old, $new) {
-                $this->wallet->applyStatusChange($t, $old, $new);
-            });
-        } catch (\Throwable $e) {
-            Log::error('Wallet apply on updated failed', [
-                'tx_id' => $t->id,
-                'from'  => $old->value,
-                'to'    => $new->value,
-                'err'   => $e->getMessage(),
-            ]);
-        }
+        /**
+         * 🚫 SEM WALLET SERVICE
+         * 
+         * Quem chama applyStatusChange() é o Webhook PodPay Controller.
+         * Assim sua carteira fica 100% consistente.
+         */
 
-        // ❌ Webhook completamente removido do updated
-        // $this->sendWebhook($t, 'updated');
+        /**
+         * 🚫 SEM WEBHOOK AQUI
+         *
+         * WebhookPixUpdatedJob é disparado pelo
+         * PodPayWebhookController quando recebe status = PAID.
+         */
     }
 }
