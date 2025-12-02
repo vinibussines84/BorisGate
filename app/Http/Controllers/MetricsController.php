@@ -66,7 +66,21 @@ class MetricsController extends Controller
             }
         }
 
-        // 🔹 Volume total Pix do mês
+        // 🔹 Saídas (saques pagos no dia - líquido)
+        $saidasLiquidoDia = (float) Withdraw::query()
+            ->where('user_id', $u->id)
+            ->where('status', 'paid')
+            ->whereBetween('processed_at', [$startUtc, $endUtc])
+            ->sum('amount');
+
+        // 🔹 Quantidade de saques pagos no dia
+        $qtdSaquesDia = Withdraw::query()
+            ->where('user_id', $u->id)
+            ->where('status', 'paid')
+            ->whereBetween('processed_at', [$startUtc, $endUtc])
+            ->count();
+
+        // 🔹 Volume total Pix do mês (bruto)
         $mesInicio = Carbon::now($tz)->startOfMonth()->startOfDay()->utc();
         $mesFim    = Carbon::now($tz)->endOfDay()->utc();
 
@@ -78,22 +92,16 @@ class MetricsController extends Controller
             ->whereBetween('paid_at', [$mesInicio, $mesFim])
             ->sum('amount');
 
-        // 🔹 Saídas (saques pagos no dia)
-        $saidasDia = (float) Withdraw::query()
-            ->where('user_id', $u->id)
-            ->where('status', 'paid')
-            ->whereBetween('processed_at', [$startUtc, $endUtc])
-            ->sum('amount');
-
         return response()->json([
             'success' => true,
             'data' => [
-                'qtdPagasDia'     => $qtdPagasDia,
-                'valorBrutoDia'   => $valorBrutoDia,
-                'valorLiquidoDia' => $valorLiquidoDia,
-                'saidasDia'       => $saidasDia,
-                'volumePixMes'    => $volumePixMes,
-                'periodo'         => $periodo,
+                'qtdPagasDia'       => $qtdPagasDia,
+                'qtdSaquesDia'      => $qtdSaquesDia,
+                'valorBrutoDia'     => $valorBrutoDia,
+                'valorLiquidoDia'   => $valorLiquidoDia,
+                'saidasLiquidoDia'  => $saidasLiquidoDia,
+                'volumePixMes'      => $volumePixMes,
+                'periodo'           => $periodo,
             ],
         ]);
     }

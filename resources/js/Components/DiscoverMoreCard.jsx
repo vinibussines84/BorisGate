@@ -4,8 +4,9 @@ import {
   ArrowDownRight,
   ListChecks,
   CalendarDays,
-  AlertTriangle,
   Zap,
+  DollarSign,
+  Hash,
 } from "lucide-react";
 
 /* =============== Utils =============== */
@@ -104,36 +105,36 @@ export default function DiscoverMoreCard() {
     fetchData();
   }, [fetchData]);
 
-  const entradaBruto = BRL(toNumber(data?.valorBrutoDia) || 0);
-  const entradaLiquido = BRL(toNumber(data?.valorLiquidoDia) || 0);
-  const saidaDia = BRL(toNumber(data?.saidasDia) || 0);
-  const volumePixMes = BRL(toNumber(data?.volumePixMes) || 0);
-  const qtdPagasDia = data?.qtdPagasDia ?? 0;
-  const periodo = data?.periodo ?? todayDate;
+  const incoming = BRL(toNumber(data?.valorLiquidoDia) || 0);
+  const outgoing = BRL(toNumber(data?.saidasLiquidoDia) || 0);
+  const qtdPagas = data?.qtdPagasDia ?? 0;
+  const qtdSaques = data?.qtdSaquesDia ?? 0;
+  const pixVolume = BRL(toNumber(data?.volumePixMes) || 0);
+  const period = data?.periodo ?? todayDate;
 
   return (
     <section className="w-full mx-auto max-w-5xl">
       {/* HEADER */}
       <div className="mb-4 flex items-center justify-between">
         <h3 className="text-sm sm:text-base font-semibold text-neutral-100">
-          Indicadores do Dia
+          Daily Indicators
         </h3>
       </div>
 
-      {/* PERÍODO */}
+      {/* PERIOD */}
       <span className="flex items-center text-[11px] text-neutral-400 mb-3 capitalize">
         <CalendarDays size={12} className="inline mr-1 opacity-80" />
-        {periodo}
+        {period}
       </span>
 
-      {/* ERRO */}
+      {/* ERR */}
       {err && (
         <div className="mb-3 text-sm text-red-300 border border-red-800/50 rounded-lg p-2 bg-red-950/30">
           {err}
         </div>
       )}
 
-      {/* LOADING */}
+      {/* LOADER */}
       {loading ? (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           {[1, 2, 3].map((i) => (
@@ -147,34 +148,44 @@ export default function DiscoverMoreCard() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 auto-rows-[1fr]">
           <KpiTile
             icon={ArrowUpRight}
-            label="Entradas Brutas"
-            value={entradaBruto}
-            hint={`Total de ${qtdPagasDia} transações`}
+            label="Incoming (Net)"
+            value={incoming}
+            hint="Total received via PIX (after fees)"
             iconColor="text-green-500"
           />
 
           <KpiTile
             icon={ArrowDownRight}
-            label="Saídas (Hoje)"
-            value={saidaDia}
+            label="Withdrawals (Net)"
+            value={outgoing}
+            hint="Total withdrawals made today"
             iconColor="text-red-500"
           />
 
           <KpiTile
             icon={Zap}
-            label="Volume PIX (Mês)"
-            value={volumePixMes}
-            hint="Total Pix processado no mês"
+            label="Monthly PIX Volume"
+            value={pixVolume}
+            hint="Total PIX processed this month"
             iconColor="text-sky-400"
           />
 
           <KpiTile
             icon={ListChecks}
-            label="Entradas Líquidas"
-            value={entradaLiquido}
-            hint="Após taxas aplicadas"
+            label="Paid Transactions"
+            value={String(qtdPagas)}
+            hint="Number of PIX paid today"
             iconColor="text-emerald-400"
-            className="md:col-span-2 md:col-start-2"
+            className="md:col-span-2 md:col-start-1"
+          />
+
+          <KpiTile
+            icon={Hash}
+            label="Withdrawals Made"
+            value={String(qtdSaques)}
+            hint="Number of withdrawals completed today"
+            iconColor="text-yellow-400"
+            className="md:col-span-1"
           />
         </div>
       )}
