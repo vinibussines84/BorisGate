@@ -1,4 +1,3 @@
-// resources/js/Pages/Saque/Index.jsx
 import React, { useState, useEffect, useMemo, Suspense, lazy } from "react";
 import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout";
 import { Head } from "@inertiajs/react";
@@ -7,8 +6,6 @@ import axios from "axios";
 /* === Lazy components === */
 const SaqueHeader = lazy(() => import("@/Components/SaqueHeader"));
 const SaqueTable = lazy(() => import("@/Components/SaqueTable"));
-const FloatingWithdrawButton = lazy(() => import("@/Components/FloatingWithdrawButton"));
-const ReceiptModal = lazy(() => import("@/Components/ReceiptModal"));
 
 /* === Simple fallback skeleton === */
 const SkeletonBlock = ({ height = 180 }) => (
@@ -25,8 +22,8 @@ export default function Saque() {
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [openReceipt, setOpenReceipt] = useState(false);
-  const [receiptData, setReceiptData] = useState(null);
+  const [page, setPage] = useState(1);
+  const perPage = 10;
   const CACHE_KEY = "saques_cache_v1";
 
   /* ============================================
@@ -100,7 +97,7 @@ export default function Saque() {
   };
 
   /* ============================================
-     🔍 Filtro e busca
+     🔍 Filtro, busca e paginação
   ============================================ */
   const filtered = useMemo(() => {
     let f = saques;
@@ -118,6 +115,12 @@ export default function Saque() {
     }
     return f;
   }, [saques, statusFilter, query]);
+
+  const totalPages = Math.ceil(filtered.length / perPage);
+  const paginated = useMemo(() => {
+    const start = (page - 1) * perPage;
+    return filtered.slice(start, start + perPage);
+  }, [filtered, page]);
 
   /* ============================================
      ⚙️ Render principal
@@ -139,30 +142,19 @@ export default function Saque() {
           <Suspense fallback={<SkeletonBlock height={420} />}>
             <SaqueTable
               loading={loading}
-              filtered={filtered}
+              filtered={paginated}
+              fullList={filtered}
               statusFilter={statusFilter}
               setStatusFilter={setStatusFilter}
               query={query}
               setQuery={setQuery}
-              onOpenReceipt={setReceiptData}
-              setOpenReceipt={setOpenReceipt}
+              page={page}
+              setPage={setPage}
+              totalPages={totalPages}
             />
           </Suspense>
         </div>
       </div>
-
-      {/* === Floating button + receipt modal === */}
-      <Suspense>
-        <FloatingWithdrawButton />
-      </Suspense>
-
-      <Suspense fallback={null}>
-        <ReceiptModal
-          open={openReceipt}
-          data={receiptData}
-          onClose={() => setOpenReceipt(false)}
-        />
-      </Suspense>
     </AuthenticatedLayout>
   );
 }

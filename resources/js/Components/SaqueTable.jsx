@@ -1,10 +1,9 @@
 import React, { useMemo, useCallback } from "react";
-import { Eye, Search } from "lucide-react";
-import StatusPill from "@/Components/StatusPill";
+import { Search } from "lucide-react";
 import OriginPill from "@/Components/OriginPill";
 
 /* =======================================================
-   🔧 Format Helpers (Memoized)
+   🔧 Helpers
 ======================================================= */
 const BRL = (v) =>
   (Number(v) || 0).toLocaleString("pt-BR", {
@@ -22,21 +21,41 @@ const fmtDate = (iso) => {
 };
 
 const STATUS_TABS = [
-  { key: "all", label: "All" },
-  { key: "pending", label: "Pending" },
-  { key: "processing", label: "Processing" },
-  { key: "approved", label: "Approved" },
-  { key: "paid", label: "Paid" },
-  { key: "canceled", label: "Canceled" },
-  { key: "failed", label: "Failed" },
+  { key: "all", label: "Todos" },
+  { key: "pending", label: "Pendente" },
+  { key: "processing", label: "Processando" },
+  { key: "approved", label: "Aprovado" },
+  { key: "paid", label: "Pago" },
+  { key: "failed", label: "Falhou" },
+  { key: "rejected", label: "Rejeitado" },
+  { key: "canceled", label: "Cancelado" },
 ];
 
 /* =======================================================
-   SkeletonRow — memoized to avoid re-render
+   🔵 Status Color Pill
+======================================================= */
+const StatusPill = ({ status }) => {
+  const base =
+    "px-3 py-1 rounded-lg text-xs font-medium inline-flex items-center gap-1 border capitalize";
+  const colorMap = {
+    paid: "bg-emerald-500/10 text-emerald-400 border-emerald-500/30",
+    approved: "bg-emerald-500/10 text-emerald-400 border-emerald-500/30",
+    processing: "bg-sky-500/10 text-sky-400 border-sky-500/30",
+    pending: "bg-amber-500/10 text-amber-400 border-amber-500/30",
+    failed: "bg-rose-500/10 text-rose-400 border-rose-500/30",
+    rejected: "bg-rose-500/10 text-rose-400 border-rose-500/30",
+    canceled: "bg-gray-500/10 text-gray-400 border-gray-500/30",
+  };
+  const style = colorMap[status?.toLowerCase()] || "bg-white/5 text-gray-400 border-white/10";
+  return <span className={`${base} ${style}`}>{status}</span>;
+};
+
+/* =======================================================
+   Skeleton Row
 ======================================================= */
 const SkeletonRow = React.memo(() => (
   <tr className="border-b border-white/5">
-    {Array.from({ length: 7 }).map((_, i) => (
+    {Array.from({ length: 6 }).map((_, i) => (
       <td key={i} className="py-2 px-4">
         <div className="h-4 w-full max-w-[100px] bg-white/10 rounded animate-pulse" />
       </td>
@@ -47,28 +66,35 @@ const SkeletonRow = React.memo(() => (
 /* =======================================================
    Main Component
 ======================================================= */
-export default function WithdrawTable({
+export default function SaqueTable({
   filtered,
+  fullList,
   loading,
   statusFilter,
   setStatusFilter,
   query,
   setQuery,
-  onOpenReceipt,
-  setOpenReceipt,
+  page,
+  setPage,
+  totalPages,
 }) {
-  /* =======================================================
-     🧠 useMemo para reduzir re-renderizações de lista
-  ======================================================= */
+  const handleSearch = useCallback((e) => setQuery(e.target.value), [setQuery]);
+  const handleStatusChange = useCallback(
+    (key) => {
+      setStatusFilter(key);
+      setPage(1);
+    },
+    [setStatusFilter, setPage]
+  );
+
   const renderedRows = useMemo(() => {
     if (loading)
       return Array.from({ length: 6 }).map((_, i) => <SkeletonRow key={i} />);
-
     if (!filtered?.length)
       return (
         <tr>
-          <td colSpan={7} className="py-10 text-center text-gray-500 text-sm">
-            No withdrawals found.
+          <td colSpan={6} className="py-10 text-center text-gray-500 text-sm">
+            Nenhum saque encontrado.
           </td>
         </tr>
       );
@@ -78,7 +104,7 @@ export default function WithdrawTable({
         key={s.id}
         className="border-b border-white/5 hover:bg-[#141414]/60 transition-colors"
       >
-        <td className="py-3 px-4 text-gray-300 font-mono text-xs">#{s.id}</td>
+        <td className="py-3 px-4 text-gray-400 font-mono text-xs">#{s.id}</td>
         <td className="py-3 px-4 text-right text-white font-semibold">
           {BRL(s.amount)}
         </td>
@@ -92,45 +118,10 @@ export default function WithdrawTable({
           <StatusPill status={s.status} />
         </td>
         <td className="py-3 px-4 text-gray-400">{fmtDate(s.created_at)}</td>
-        <td className="py-3 px-4 text-center">
-          {s.status === "paid" ? (
-            <button
-              onClick={() => {
-                onOpenReceipt(s);
-                setOpenReceipt(true);
-              }}
-              className="inline-flex items-center gap-1 px-3 py-1.5 text-xs rounded-lg border border-[#02fb5c]/30 text-[#02fb5c] hover:bg-[#02fb5c]/10 hover:text-[#02fb5c] transition"
-            >
-              <Eye size={13} />
-              View
-            </button>
-          ) : (
-            <span className="inline-flex items-center gap-1 px-3 py-1.5 text-xs rounded-lg border border-white/10 text-gray-600 cursor-not-allowed opacity-60">
-              <Eye size={13} />
-              View
-            </span>
-          )}
-        </td>
       </tr>
     ));
-  }, [loading, filtered, onOpenReceipt, setOpenReceipt]);
+  }, [loading, filtered]);
 
-  /* =======================================================
-     🧠 useCallback para handlers
-  ======================================================= */
-  const handleSearch = useCallback(
-    (e) => setQuery(e.target.value),
-    [setQuery]
-  );
-
-  const handleStatusChange = useCallback(
-    (key) => setStatusFilter(key),
-    [setStatusFilter]
-  );
-
-  /* =======================================================
-     UI — nenhuma mudança visual
-  ======================================================= */
   return (
     <div className="bg-[#0b0b0b]/95 border border-white/10 rounded-3xl p-5 backdrop-blur-sm shadow-[0_0_40px_-10px_rgba(0,0,0,0.8)] space-y-5 transition">
       {/* Status Tabs */}
@@ -150,7 +141,7 @@ export default function WithdrawTable({
         ))}
       </div>
 
-      {/* Search Field */}
+      {/* Search */}
       <label className="relative block">
         <Search
           size={14}
@@ -159,7 +150,7 @@ export default function WithdrawTable({
         <input
           value={query}
           onChange={handleSearch}
-          placeholder="Search by ID, PIX key or end-to-end"
+          placeholder="Buscar por ID, chave PIX..."
           className="w-full pl-9 pr-3 py-2 text-xs rounded-lg bg-[#0a0a0a]/70 border border-white/10 text-gray-200 placeholder:text-gray-500 focus:ring-2 focus:ring-[#02fb5c]/40 focus:border-[#02fb5c]/40 outline-none transition-all duration-200"
         />
       </label>
@@ -170,17 +161,39 @@ export default function WithdrawTable({
           <thead className="bg-[#0a0a0a]/95 border-b border-white/10 text-gray-400">
             <tr>
               <th className="py-3 px-4 text-left">ID</th>
-              <th className="py-3 px-4 text-right">Amount</th>
-              <th className="py-3 px-4 text-right">Fee</th>
-              <th className="py-3 px-4 text-left">Origin</th>
+              <th className="py-3 px-4 text-right">Valor</th>
+              <th className="py-3 px-4 text-right">Taxa</th>
+              <th className="py-3 px-4 text-left">Origem</th>
               <th className="py-3 px-4 text-left">Status</th>
-              <th className="py-3 px-4 text-left">Date</th>
-              <th className="py-3 px-4 text-center">Action</th>
+              <th className="py-3 px-4 text-left">Data</th>
             </tr>
           </thead>
           <tbody>{renderedRows}</tbody>
         </table>
       </div>
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-center gap-2 pt-4 text-xs text-gray-400">
+          <button
+            onClick={() => setPage((p) => Math.max(p - 1, 1))}
+            disabled={page === 1}
+            className="px-3 py-1 rounded-lg border border-white/10 bg-[#111]/60 hover:bg-[#222]/60 disabled:opacity-50"
+          >
+            ← Anterior
+          </button>
+          <span>
+            Página {page} de {totalPages}
+          </span>
+          <button
+            onClick={() => setPage((p) => Math.min(p + 1, totalPages))}
+            disabled={page === totalPages}
+            className="px-3 py-1 rounded-lg border border-white/10 bg-[#111]/60 hover:bg-[#222]/60 disabled:opacity-50"
+          >
+            Próxima →
+          </button>
+        </div>
+      )}
     </div>
   );
 }
