@@ -173,6 +173,7 @@ class WithdrawService
 
     /**
      * Marca como PAGO (sem estorno) e adiciona E2E exatamente como no original
+     * + dispara o job SendWebhookWithdrawUpdatedJob
      */
     private function markAsPaid(Withdraw $withdraw, array $payload)
     {
@@ -192,6 +193,21 @@ class WithdrawService
                 'meta'         => $meta,
             ]);
         });
+
+        // 🚀 Despacha o job de webhook OUT (fora da transaction)
+        dispatch(new \App\Jobs\SendWebhookWithdrawUpdatedJob(
+            $withdraw->user_id,
+            $withdraw->id,
+            'APPROVED',
+            $withdraw->external_id,
+            $payload
+        ))->onQueue('webhooks');
+
+        Log::info('📤 Job de webhook OUT (withdraw.updated) despachado', [
+            'withdraw_id' => $withdraw->id,
+            'user_id'     => $withdraw->user_id,
+            'external_id' => $withdraw->external_id,
+        ]);
     }
 
     /**
