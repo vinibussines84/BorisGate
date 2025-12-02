@@ -6,19 +6,18 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use App\Models\Transaction;
-use App\Models\Withdraw;
-use App\Enums\TransactionStatus;
-use App\Services\Pluggou\PluggouService;
 use App\Models\User;
+use App\Enums\TransactionStatus;
+use App\Services\Lumnis\LumnisService;
 use App\Jobs\SendWebhookPixCreatedJob;
 use Carbon\Carbon;
 
 class TransactionPixController extends Controller
 {
     /**
-     * 🧾 Criação de uma nova transação PIX (Cash In) — usando Pluggou
+     * 🧾 Criação de nova transação PIX usando Lumnis
      */
-    public function store(Request $request, PluggouService $pluggou)
+    public function store(Request $request, LumnisService $lumnis)
     {
         // 🔐 Autenticação via headers
         $auth   = $request->header('X-Auth-Key');
@@ -33,7 +32,7 @@ class TransactionPixController extends Controller
             return response()->json(['success' => false, 'error' => 'Invalid credentials.'], 401);
         }
 
-        // 🧩 Validação dos dados recebidos
+        // 🧩 Validação
         $data = $request->validate([
             'amount'      => ['required', 'numeric', 'min:0.01'],
             'name'        => ['sometimes', 'string', 'max:100'],
@@ -44,6 +43,8 @@ class TransactionPixController extends Controller
         $amountReais = (float) $data['amount'];
         $amountCents = (int) round($amountReais * 100);
         $externalId  = $data['external_id'];
+        $name        = $data['name'] ?? $user->name ?? 'Cliente';
+        $email       = $data['email'] ?? $user->email ?? 'no-email@placeholder.com';
 
         // ❌ Evitar duplicidade
         if (Transaction::where('user_id', $user->id)
@@ -55,10 +56,7 @@ class TransactionPixController extends Controller
             ], 409);
         }
 
-        $name  = $data['name']  ?? $user->name ?? 'Cliente';
-        $email = $data['email'] ?? $user->email ?? 'no-email@placeholder.com';
-
-        // 🧮 Cria transação local
+        // 🧮 Criação local
         $tx = Transaction::create([
             'tenant_id'          => $user->tenant_id,
             'user_id'            => $user->id,
@@ -66,7 +64,7 @@ class TransactionPixController extends Controller
             'status'             => TransactionStatus::PENDENTE,
             'currency'           => 'BRL',
             'method'             => 'pix',
-            'provider'           => 'Pluggou',
+            'provider'           => 'Lumnis',
             'amount'             => $amountReais,
             'fee'                => $this->computeFee($user, $amountReais),
             'external_reference' => $externalId,
@@ -75,68 +73,84 @@ class TransactionPixController extends Controller
             'user_agent'         => $request->userAgent(),
         ]);
 
-        // 🔗 Payload Pluggou (sem postbackUrl)
+        // 📦 Payload Lumnis (100% conforme documentação oficial)
         $payload = [
-            'amount'        => $amountCents,
-            'paymentMethod' => 'pix',
-            'pix' => [
-                'expiresInDays' => 1,
+            'amount'      => $amountCents,
+            'externalRef' => $externalId,
+            'postback'    => route('webhooks.lumnis.pix'),
+
+            'customer' => [
+                'name'     => $name,
+                'email'    => $email,
+                'phone'    => $user->phone ?? '11 99999-9999',
+                'document' => $user->document ?? '000.000.000-00',
+
+                'address'  => [
+                    'street'  => $user->address_street  ?? 'N/A',
+                    'number'  => $user->address_number  ?? '0',
+                    'city'    => $user->address_city    ?? 'N/A',
+                    'state'   => $user->address_state   ?? 'XX',
+                    'country' => 'Brasil',
+                    'zip'     => $user->address_zip     ?? '00000-000',
+                ],
             ],
+
             'items' => [[
-                'title'     => 'Pix',
+                'title'     => 'PIX',
                 'unitPrice' => $amountCents,
                 'quantity'  => 1,
                 'tangible'  => false,
             ]],
-            'customer' => [
-                'name'  => $name,
-                'email' => $email,
-                'document' => [
-                    'number' => '07814854016', // CPF fixo
-                    'type'   => 'cpf',
-                ],
-            ],
-            'externalRef' => $externalId,
+
+            'method' => 'PIX',
         ];
 
-        // 🚀 Envia requisição à API Pluggou
+        // 🚀 Enviar à API Lumnis
         try {
-            $response = $pluggou->createTransaction($payload);
+            $response = $lumnis->createTransaction($payload);
 
             if (!in_array($response['status'], [200, 201])) {
                 throw new \Exception(json_encode($response['body']));
             }
 
-            $body          = $response['body'];
+            $body = $response['body'];
+
             $transactionId = data_get($body, 'data.id');
-            $qrCodeText    = data_get($body, 'data.pix.qrcode') ?? data_get($body, 'data.qrcode');
+            $qrCodeText    = data_get($body, 'data.pix.qrcode');
 
             if (!$transactionId || !$qrCodeText) {
-                throw new \Exception('Invalid Pluggou response');
+                throw new \Exception("Invalid Lumnis response");
             }
+
         } catch (\Throwable $e) {
-            Log::error('PLUGGOU_PIX_CREATE_ERROR', [
+
+            Log::error('LUMNIS_PIX_CREATE_ERROR', [
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
+                'response' => $response['body'] ?? null,
             ]);
+
             $tx->updateQuietly(['status' => TransactionStatus::FALHA]);
-            return response()->json(['success' => false, 'error' => 'Failed to create PIX transaction.'], 500);
+
+            return response()->json([
+                'success' => false,
+                'error'   => 'Failed to create PIX transaction.',
+            ], 500);
         }
 
         // 🕒 Ajuste de timezone
         $createdAtBr = Carbon::now('America/Sao_Paulo')->toDateTimeString();
 
-        // 🧩 Atualiza transação (sem observer)
+        // 🧩 Atualizar transação local
         $cleanRaw = [
             'id'           => $transactionId,
-            'total'        => data_get($body, 'data.amount'),
-            'method'       => 'PIX',
             'qrcode'       => $qrCodeText,
-            'status'       => data_get($body, 'data.status', 'PENDING'),
+            'total'        => $amountCents,
             'currency'     => 'BRL',
+            'method'       => 'PIX',
+            'status'       => 'PENDING',
             'customer'     => $payload['customer'],
-            'created_at'   => $createdAtBr,
             'external_ref' => $externalId,
+            'created_at'   => $createdAtBr,
         ];
 
         $tx->updateQuietly([
@@ -145,13 +159,12 @@ class TransactionPixController extends Controller
             'provider_payload'        => [
                 'name'         => $name,
                 'email'        => $email,
-                'cpf'          => '07814854016',
                 'qr_code_text' => $qrCodeText,
                 'provider_raw' => $cleanRaw,
             ],
         ]);
 
-        // 📡 Dispara webhook Pix Criado
+        // 📡 Webhook Pix Criado
         if ($user->webhook_enabled && $user->webhook_in_url) {
             SendWebhookPixCreatedJob::dispatch($user->id, $tx->id);
         }
