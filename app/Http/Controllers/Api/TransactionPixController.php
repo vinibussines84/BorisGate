@@ -46,11 +46,6 @@ class TransactionPixController extends Controller
 
         $amountReais = (float) $data['amount'];
 
-        /*
-        |--------------------------------------------------------------------------
-        | 🛑 LIMITE MÁXIMO PIX IN: R$ 4.000,00
-        |--------------------------------------------------------------------------
-        */
         if ($amountReais > 4000) {
             return response()->json([
                 'success' => false,
@@ -129,19 +124,29 @@ class TransactionPixController extends Controller
         try {
             $response = $lumnis->createTransaction($payload);
 
+            Log::info("LUMNIS_RAW_RESPONSE", $response);
+
             if (!in_array($response['status'], [200, 201])) {
                 throw new \Exception("Provider error");
             }
 
             $body = $response['body'];
 
-            // Ajustar campos conforme retorno Lumnis
-            $transactionId = data_get($body, 'id');
-            $qrCodeText    = data_get($body, 'pix.qrCodeText');
+            // 🔍 Aceita TODOS os formatos possíveis
+            $transactionId = data_get($body, 'id')
+                ?? data_get($body, 'transaction.id');
+
+            $qrCodeText = data_get($body, 'pix.qrCodeText')
+                ?? data_get($body, 'pix.qrCode')
+                ?? data_get($body, 'pix.emv')
+                ?? data_get($body, 'transaction.pix.qrCodeText')
+                ?? data_get($body, 'transaction.pix.qrCode')
+                ?? data_get($body, 'transaction.pix.emv');
 
             if (!$transactionId || !$qrCodeText) {
                 throw new \Exception("Invalid provider response");
             }
+
         } catch (\Throwable $e) {
 
             $tx->updateQuietly(['status' => TransactionStatus::FALHA]);
@@ -149,6 +154,7 @@ class TransactionPixController extends Controller
             return response()->json([
                 'success' => false,
                 'error'   => 'Failed to create PIX transaction.',
+                'debug'   => $e->getMessage(),
             ], 500);
         }
 
@@ -165,16 +171,10 @@ class TransactionPixController extends Controller
             ],
         ]);
 
-        // Webhook IN
         if ($user->webhook_enabled && $user->webhook_in_url) {
             SendWebhookPixCreatedJob::dispatch($user->id, $tx->id);
         }
 
-        /*
-        |--------------------------------------------------------------------------
-        | 🔥 RETORNO FINAL — SEMPRE "pendente"
-        |--------------------------------------------------------------------------
-        */
         return response()->json([
             'success'        => true,
             'transaction_id' => $tx->id,
@@ -206,11 +206,7 @@ class TransactionPixController extends Controller
             return response()->json(['success' => false, 'error' => 'Invalid credentials.'], 401);
         }
 
-        /*
-        |--------------------------------------------------------------------------
-        | 1) PIX
-        |--------------------------------------------------------------------------
-        */
+        // 🔎 PIX
         $tx = Transaction::where('external_reference', $externalId)
             ->where('user_id', $user->id)
             ->first();
@@ -233,11 +229,7 @@ class TransactionPixController extends Controller
             ]);
         }
 
-        /*
-        |--------------------------------------------------------------------------
-        | 2) Saque
-        |--------------------------------------------------------------------------
-        */
+        // 🔎 Saque
         $withdraw = Withdraw::where('external_id', $externalId)
             ->where('user_id', $user->id)
             ->first();
@@ -273,10 +265,9 @@ class TransactionPixController extends Controller
         return response()->json(['success' => false, 'error' => 'Transaction not found.'], 404);
     }
 
-
     /*
     |--------------------------------------------------------------------------
-    | Status PT-BR para PIX IN
+    | utils
     |--------------------------------------------------------------------------
     */
     private function normalizeStatusPtBr(string $status): string
@@ -284,23 +275,16 @@ class TransactionPixController extends Controller
         return match (strtolower($status)) {
             'paid', 'paga', 'approved', 'completed' => 'aprovado',
             'failed', 'erro', 'error', 'rejected', 'canceled', 'cancelled' => 'falhou',
-            'pending', 'pendente', 'processing', 'under_review' => 'pendente',
-            default => strtolower($status),
+            default => 'pendente',
         };
     }
 
-    /*
-    |--------------------------------------------------------------------------
-    | Status EN-US para WEBHOOK Withdraw
-    |--------------------------------------------------------------------------
-    */
     private function normalizeStatus(string $status): string
     {
         return match (strtolower($status)) {
             'paid', 'paga', 'approved', 'completed' => 'APPROVED',
             'failed', 'erro', 'error', 'rejected', 'canceled', 'cancelled' => 'FAILED',
-            'pending', 'pendente', 'processing', 'under_review' => 'PENDING',
-            default => strtoupper($status),
+            default => 'PENDING',
         };
     }
 
