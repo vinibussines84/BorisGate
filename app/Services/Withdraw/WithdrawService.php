@@ -129,11 +129,11 @@ class WithdrawService
         $isCompleted = ($status === 'COMPLETED');
 
         Log::info('🔎 Webhook PodPay recebido', [
-            'withdraw_id' => $withdraw->id,
-            'status' => $status,
-            'desc' => $desc,
-            'isFailed' => $isFailed,
-            'isCompleted' => $isCompleted,
+            'withdraw_id'   => $withdraw->id,
+            'status'        => $status,
+            'desc'          => $desc,
+            'isFailed'      => $isFailed,
+            'isCompleted'   => $isCompleted,
         ]);
 
         if ($isFailed) {
@@ -151,8 +151,10 @@ class WithdrawService
 
     /**
      * Estorna via webhook — estorna o BRUTO e marca como FAILED + dispara webhook OUT
+     *
+     * 🔥 AGORA PÚBLICO
      */
-    private function refundWebhookFailed(Withdraw $withdraw, array $payload)
+    public function refundWebhookFailed(Withdraw $withdraw, array $payload)
     {
         Log::error('❌ Saque FAILED via webhook', ['withdraw_id' => $withdraw->id]);
 
@@ -175,7 +177,6 @@ class WithdrawService
             ]);
         });
 
-        // 🚀 Dispara webhook OUT (withdraw.updated - FAILED)
         dispatch(new SendWebhookWithdrawUpdatedJob(
             userId: $withdraw->user_id,
             withdrawId: $withdraw->id,
@@ -186,14 +187,16 @@ class WithdrawService
 
         Log::info('📤 Webhook OUT disparado (withdraw.updated FAILED)', [
             'withdraw_id' => $withdraw->id,
-            'user_id' => $withdraw->user_id,
+            'user_id'     => $withdraw->user_id,
         ]);
     }
 
     /**
      * Marca como PAGO e dispara webhook OUT (withdraw.updated - APPROVED)
+     *
+     * 🔥 AGORA PÚBLICO
      */
-    private function markAsPaid(Withdraw $withdraw, array $payload)
+    public function markAsPaid(Withdraw $withdraw, array $payload)
     {
         DB::transaction(function () use ($withdraw, $payload) {
             $e2e = $this->generatePixE2E($withdraw);
@@ -210,7 +213,6 @@ class WithdrawService
             ]);
         });
 
-        // 🚀 Dispara webhook OUT (withdraw.updated - APPROVED)
         dispatch(new SendWebhookWithdrawUpdatedJob(
             userId: $withdraw->user_id,
             withdrawId: $withdraw->id,
