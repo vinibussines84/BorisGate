@@ -15,6 +15,11 @@ use Carbon\Carbon;
 
 class TransactionPixController extends Controller
 {
+    /*
+    |--------------------------------------------------------------------------
+    | 🔥 Criar PIX (Cash-in)
+    |--------------------------------------------------------------------------
+    */
     public function store(Request $request, PluggouService $pluggou)
     {
         // 🔐 Auth
@@ -129,16 +134,7 @@ class TransactionPixController extends Controller
         // 🕒 Data BR
         $createdAtBr = Carbon::now('America/Sao_Paulo')->toDateTimeString();
 
-        // 🧩 Atualiza local com dados da Pluggou
-        $cleanRaw = [
-            'id'           => $transactionId,
-            'amount'       => $amountCents,
-            'emv'          => $qrCodeText,
-            'status'       => 'pending',
-            'external_id'  => $externalId,
-            'created_at'   => $createdAtBr,
-        ];
-
+        // 🧩 Atualiza local
         $tx->updateQuietly([
             'txid'                    => $transactionId,
             'provider_transaction_id' => $transactionId,
@@ -147,21 +143,28 @@ class TransactionPixController extends Controller
                 'document'     => $document,
                 'phone'        => $phone,
                 'qr_code_text' => $qrCodeText,
-                'provider_raw' => $cleanRaw,
+                'provider_raw' => [
+                    'id'         => $transactionId,
+                    'amount'     => $amountCents,
+                    'emv'        => $qrCodeText,
+                    'status'     => 'pending',
+                    'external_id'=> $externalId,
+                    'created_at' => $createdAtBr,
+                ],
             ],
         ]);
 
-        // 📡 Webhook de criação (interno)
+        // 📡 Webhook de criação
         if ($user->webhook_enabled && $user->webhook_in_url) {
             SendWebhookPixCreatedJob::dispatch($user->id, $tx->id);
         }
 
-        // 🟦 Retorno final — IGUAL AO MODELO ANTIGO
+        // 🔥 Retorno final padronizado
         return response()->json([
             'success'        => true,
             'transaction_id' => $tx->id,
             'external_id'    => $externalId,
-            'status'         => $tx->status,
+            'status'         => $this->normalizeStatus($tx->status),
             'amount'         => number_format($amountReais, 2, '.', ''),
             'fee'            => number_format($tx->fee, 2, '.', ''),
             'txid'           => $transactionId,
@@ -171,7 +174,7 @@ class TransactionPixController extends Controller
 
     /*
     |--------------------------------------------------------------------------
-    | 🔥 NOVO STATUS UNIFICADO (Transaction + Withdraw)
+    | 🔥 Consultar por external_id (PIX + Withdraw unificados)
     |--------------------------------------------------------------------------
     */
     public function statusByExternal(Request $request, string $externalId)
@@ -190,7 +193,7 @@ class TransactionPixController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | 1) Primeiro tenta achar PIX (cash-in)
+        | 1) Tenta achar PIX (cash-in)
         |--------------------------------------------------------------------------
         */
         $tx = Transaction::where('external_reference', $externalId)
@@ -204,7 +207,7 @@ class TransactionPixController extends Controller
                 'data' => [
                     'id'              => $tx->id,
                     'external_id'     => $tx->external_reference,
-                    'status'          => $tx->status,
+                    'status'          => $this->normalizeStatus($tx->status),
                     'amount'          => (float) $tx->amount,
                     'fee'             => (float) $tx->fee,
                     'txid'            => $tx->txid,
@@ -217,7 +220,7 @@ class TransactionPixController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | 2) Se não for PIX, tenta achar WITHDRAW (cash-out)
+        | 2) Tenta achar Saque (cash-out)
         |--------------------------------------------------------------------------
         */
         $withdraw = Withdraw::where('external_id', $externalId)
@@ -235,7 +238,7 @@ class TransactionPixController extends Controller
                 'event'   => 'withdraw.updated',
                 'data' => [
                     'id'         => data_get($meta, 'internal_reference', $withdraw->id),
-                    'status'     => strtoupper($withdraw->status),
+                    'status'     => $this->normalizeStatus($withdraw->status),
                     'requested'  => (float) $withdraw->gross_amount,
                     'paid'       => (float) $withdraw->amount,
                     'operation'  => [
@@ -253,10 +256,25 @@ class TransactionPixController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | 3) Não achou nada
+        | 3) Nada encontrado
         |--------------------------------------------------------------------------
         */
         return response()->json(['success' => false, 'error' => 'Transaction not found.'], 404);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | 🔁 Normalização Oficial de Status
+    |--------------------------------------------------------------------------
+    */
+    private function normalizeStatus(string $status): string
+    {
+        return match (strtolower($status)) {
+            'paid', 'paga', 'approved', 'completed' => 'APPROVED',
+            'failed', 'erro', 'error', 'rejected', 'canceled', 'cancelled' => 'FAILED',
+            'pending', 'pendente', 'processing', 'under_review' => 'PENDING',
+            default => strtoupper($status),
+        };
     }
 
     private function resolveUser(string $auth, string $secret)

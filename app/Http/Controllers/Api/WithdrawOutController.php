@@ -103,21 +103,21 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 6) Calcular taxas (Pluggou cobra 0.20 fixo)
+            | 6) TAXA PLUGGOU → você absorve
             |--------------------------------------------------------------------------
             |
-            | Cliente solicita: 13.00
-            | Cliente deve receber: 13.00
-            | Pluggou cobra: 0.20
-            | Enviar para Pluggou: 13.20
+            | Cliente solicita      → 13.00
+            | Cliente recebe        → 13.00
+            | Pluggou cobra         → 0.20
+            | Valor enviado à API   → 13.20
             |--------------------------------------------------------------------------
             */
-            $pluggouFee = 0.20; // taxa fixa
+            $pluggouFee   = 0.20;  // fixo
+            $amountToSend = $gross + $pluggouFee;
 
-            $fee = 0;           // você absorve a taxa
-            $net = $gross;      // o cliente recebe o valor exato solicitado
-
-            $amountToSend = $gross + $pluggouFee; // valor enviado à Pluggou
+            // local
+            $fee = 0;
+            $net = $gross;
 
             /*
             |--------------------------------------------------------------------------
@@ -137,21 +137,21 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 8) Criar saque local (cliente recebe exatamente o solicitado)
+            | 8) Criar saque local
             |--------------------------------------------------------------------------
             */
             try {
                 $withdraw = $this->withdrawService->create(
                     $user,
-                    $gross,  // gross = valor solicitado
-                    $net,    // net = valor recebido (13.00)
-                    $fee,    // fee = 0
+                    $gross,
+                    $net,
+                    $fee,
                     [
                         'key'         => $data['key'],
                         'key_type'    => strtolower($data['key_type']),
                         'external_id' => $externalId,
                         'internal_ref'=> $internalRef,
-                        'provider'    => 'Internal',
+                        'provider'    => 'pluggou',
                     ]
                 );
             } catch (\Throwable $e) {
@@ -160,32 +160,27 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 9) Payload para Pluggou com valor bruto ajustado
+            | 9) Payload Pluggou (valor bruto ajustado)
             |--------------------------------------------------------------------------
             */
             $payload = [
-                "amount"    => (int) round($amountToSend * 100), // aqui está o segredo
+                "amount"    => (int) round($amountToSend * 100),
                 "key_type"  => strtolower($data['key_type']),
                 "key_value" => $data['key'],
             ];
 
             /*
             |--------------------------------------------------------------------------
-            | 10) Cria saque na API da Pluggou
+            | 10) Enviar para Pluggou
             |--------------------------------------------------------------------------
             */
             $resp = $this->pluggou->createWithdrawal($payload);
 
-            /*
-            |--------------------------------------------------------------------------
-            | 11) Falha no provedor
-            |--------------------------------------------------------------------------
-            */
             if (!$resp['success']) {
 
                 $reason = $resp['data']['message']
                     ?? ($resp['validation_errors'] ?? null)
-                    ?? "Erro ao criar saque na Pluggou";
+                    ?? "Erro ao criar saque";
 
                 $this->withdrawService->refundLocal($withdraw, 'provider_error');
 
@@ -194,19 +189,19 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 12) Extração de referência
+            | 11) Provider ID
             |--------------------------------------------------------------------------
             */
             $providerRef = data_get($resp, 'data.data.id');
 
             if (!$providerRef) {
                 $this->withdrawService->refundLocal($withdraw, 'missing_provider_id');
-                return $this->error("Não foi possível obter ID do saque na Pluggou.");
+                return $this->error("Erro: não retornou ID do saque.");
             }
 
             /*
             |--------------------------------------------------------------------------
-            | 13) Status inicial
+            | 12) Normalizar status inicial
             |--------------------------------------------------------------------------
             */
             $providerStatus = strtolower(data_get($resp, 'data.data.status')) ?? 'pending';
@@ -219,7 +214,7 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 14) Atualização local
+            | 13) Atualizar local
             |--------------------------------------------------------------------------
             */
             $this->withdrawService->updateProviderReference(
@@ -231,7 +226,7 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 15) Webhook OUT
+            | 14) Webhook OUT
             |--------------------------------------------------------------------------
             */
             if ($user->webhook_enabled && $user->webhook_out_url) {
@@ -245,7 +240,7 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 16) Retorno final
+            | 15) Retorno final
             |--------------------------------------------------------------------------
             */
             return response()->json([
@@ -260,13 +255,13 @@ class WithdrawOutController extends Controller
                     'pix_key_type'  => $withdraw->pixkey_type,
                     'status'        => $status,
                     'reference'     => $providerRef,
-                    'provider'      => 'pluggou',
+                    'provider'      => 'Internal',
                 ],
             ]);
 
         } catch (\Throwable $e) {
 
-            Log::error('🚨 Erro ao criar saque com Pluggou', [
+            Log::error('🚨 Erro ao criar saque', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
             ]);
