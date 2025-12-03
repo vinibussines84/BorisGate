@@ -95,7 +95,7 @@ class TransactionPixController extends Controller
             "paymentMethod" => "pix",
 
             "pix" => [
-                "expiresInDays" => 1
+                "expiresInDays" => 1,
             ],
 
             "items" => [
@@ -103,8 +103,8 @@ class TransactionPixController extends Controller
                     "title"     => "PIX",
                     "unitPrice" => $amountCents,
                     "quantity"  => 1,
-                    "tangible"  => false
-                ]
+                    "tangible"  => false,
+                ],
             ],
 
             "customer" => [
@@ -112,11 +112,11 @@ class TransactionPixController extends Controller
                 "email" => $user->email,
                 "document" => [
                     "type"   => "cpf",
-                    "number" => $document
-                ]
+                    "number" => $document,
+                ],
             ],
 
-            // 🔥 POSTBACK SEMPRE DO SEU SERVIDOR
+            // 🔥 POSTBACK DO SEU SERVIDOR
             "postbackUrl" => url('/api/webhooks/podpay'),
 
             "externalRef" => $externalId,
@@ -134,13 +134,13 @@ class TransactionPixController extends Controller
 
             $body = $response['body'];
 
-            // 🔍 RETORNO PREVISTO PODPAY
+            // 🔍 RETORNO PODPAY (ajustado com qrcode)
             $transactionId = data_get($body, 'id');
-            $qrCodeText    = data_get($body, 'pix.code');
+            $qrCodeText    = data_get($body, 'pix.qrcode');
 
             if (!$transactionId || !$qrCodeText) {
                 Log::error("PODPAY_INVALID_RESPONSE", ['body' => $body]);
-                throw new \Exception("Invalid PodPay response (missing id or pix.code)");
+                throw new \Exception("Invalid PodPay response (missing id or pix.qrcode)");
             }
 
         } catch (\Throwable $e) {
@@ -261,7 +261,6 @@ class TransactionPixController extends Controller
         return response()->json(['success' => false, 'error' => 'Transaction not found.'], 404);
     }
 
-
     /*
     |--------------------------------------------------------------------------
     | Utils
@@ -287,7 +286,9 @@ class TransactionPixController extends Controller
 
     private function resolveUser(string $auth, string $secret)
     {
-        return User::where('authkey', $auth)->where('secretkey', $secret)->first();
+        return User::where('authkey', $auth)
+            ->where('secretkey', $secret)
+            ->first();
     }
 
     private function computeFee($user, float $amount): float
