@@ -73,7 +73,7 @@ class PluggouWithdrawService
 
             // Garante sempre array
             if (!is_array($json)) {
-                $json = ['message' => 'Resposta inválida da API Pluggou'];
+                $json = ['message' => 'Resposta inválida da API'];
             }
 
             Log::info('[Pluggou Withdraw] HTTP Response', [
@@ -111,7 +111,7 @@ class PluggouWithdrawService
                 'success' => false,
                 'status'  => 500,
                 'data'    => [
-                    'message'   => 'Erro inesperado ao chamar a API da Pluggou.',
+                    'message'   => 'Erro inesperado ao chamar API.',
                     'exception' => $e->getMessage(),
                 ],
             ];

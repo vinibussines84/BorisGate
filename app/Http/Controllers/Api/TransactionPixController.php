@@ -66,7 +66,7 @@ class TransactionPixController extends Controller
             'status'             => TransactionStatus::PENDENTE,
             'currency'           => 'BRL',
             'method'             => 'pix',
-            'provider'           => 'Pluggou',
+            'provider'           => 'Interno',
             'amount'             => $amountReais,
             'fee'                => $this->computeFee($user, $amountReais),
             'external_reference' => $externalId,
@@ -92,7 +92,7 @@ class TransactionPixController extends Controller
             $response = $pluggou->createTransaction($payload);
 
             if (!in_array($response['status'], [200, 201])) {
-                Log::error('PLUGGOU_ERRO_RESPOSTA', [
+                Log::error('ERRO_RESPOSTA', [
                     'status' => $response['status'],
                     'body'   => $response['body'],
                     'payload'=> $payload,
@@ -107,13 +107,13 @@ class TransactionPixController extends Controller
             $qrCodeText    = data_get($body, 'data.pix.emv');
 
             if (!$transactionId || !$qrCodeText) {
-                Log::error('PLUGGOU_INVALID_RESPONSE', ['body' => $body]);
-                throw new \Exception("Invalid Pluggou response: Missing id or EMV qrcode");
+                Log::error('INVALID_RESPONSE', ['body' => $body]);
+                throw new \Exception("Invalid response: Missing id or EMV qrcode");
             }
 
         } catch (\Throwable $e) {
 
-            Log::error('PLUGGOU_PIX_CREATE_ERROR', [
+            Log::error('PIX_CREATE_ERROR', [
                 'error'    => $e->getMessage(),
                 'response' => $response['raw'] ?? null,
             ]);
