@@ -8,7 +8,7 @@ use App\Models\User;
 use App\Models\Withdraw;
 use App\Services\Pix\KeyValidator;
 use App\Services\Withdraw\WithdrawService;
-use App\Services\Lumnis\LumnisCashoutService;
+use App\Services\Pluggou\PluggouWithdrawService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
@@ -16,22 +16,24 @@ use Illuminate\Validation\Rule;
 class WithdrawOutController extends Controller
 {
     public function __construct(
-        private readonly WithdrawService      $withdrawService,
-        private readonly LumnisCashoutService $lumnis
+        private readonly WithdrawService         $withdrawService,
+        private readonly PluggouWithdrawService  $pluggou
     ) {}
 
     public function store(Request $request)
     {
         try {
 
-            /* ============================================================
-             * 🔐 Autenticação via Headers
-             * ============================================================ */
+            /*
+            |--------------------------------------------------------------------------
+            | 1) Autenticação
+            |--------------------------------------------------------------------------
+            */
             $authKey   = $request->header('X-Auth-Key');
             $secretKey = $request->header('X-Secret-Key');
 
             if (!$authKey || !$secretKey) {
-                return $this->error('Headers ausentes.');
+                return $this->error("Headers ausentes.");
             }
 
             $user = User::where('authkey', $authKey)
@@ -39,17 +41,19 @@ class WithdrawOutController extends Controller
                 ->first();
 
             if (!$user) {
-                return $this->error('Credenciais inválidas.');
+                return $this->error("Credenciais inválidas.");
             }
 
-            /* ============================================================
-             * 🔤 Normalizar key_type
-             * ============================================================ */
-            $request->merge(['key_type' => strtolower($request->input('key_type'))]);
+            /*
+            |--------------------------------------------------------------------------
+            | 2) Normalizações
+            |--------------------------------------------------------------------------
+            */
+            $request->merge([
+                'key_type' => strtolower($request->input('key_type')),
+            ]);
 
-            /* ============================================================
-             * 📞 Normalizar telefone
-             * ============================================================ */
+            // Normalizar telefone
             if ($request->input('key_type') === 'phone') {
 
                 $phone = preg_replace('/\D/', '', $request->input('key'));
@@ -61,69 +65,76 @@ class WithdrawOutController extends Controller
                 $request->merge(['key' => $phone]);
             }
 
-            /* ============================================================
-             * 🧾 Validação
-             * ============================================================ */
+            /*
+            |--------------------------------------------------------------------------
+            | 3) Validação
+            |--------------------------------------------------------------------------
+            */
             $data = $request->validate([
                 'amount'       => ['required', 'numeric', 'min:0.01'],
                 'key'          => ['required', 'string'],
-                'key_type'     => ['required', Rule::in(['cpf', 'cnpj', 'email', 'phone', 'evp', 'copypaste'])],
+                'key_type'     => ['required', Rule::in(['cpf', 'cnpj', 'email', 'phone', 'random'])],
                 'description'  => ['nullable', 'string', 'max:255'],
                 'external_id'  => ['nullable', 'string', 'max:64'],
-
-                // Details obrigatórios para Lumnis
-                'details' => ['required', 'array'],
-                'details.name' => ['required', 'string', 'max:80'],
-                'details.document' => ['required', 'string', 'max:20'],
             ]);
 
-            /* ============================================================
-             * 💸 Valor mínimo
-             * ============================================================ */
+            /*
+            |--------------------------------------------------------------------------
+            | 4) Valor mínimo
+            |--------------------------------------------------------------------------
+            */
             $gross = (float) $data['amount'];
 
             if ($gross < 5) {
-                return $this->error('Valor mínimo para saque é R$ 5,00.');
+                return $this->error("Valor mínimo para saque é R$ 5,00.");
             }
 
-            /* ============================================================
-             * 🔎 Validar chave PIX
-             * ============================================================ */
+            /*
+            |--------------------------------------------------------------------------
+            | 5) Validar chave PIX
+            |--------------------------------------------------------------------------
+            */
             if (!KeyValidator::validate($data['key'], strtoupper($data['key_type']))) {
-                return $this->error('Chave PIX inválida.');
+                return $this->error("Chave PIX inválida.");
             }
 
             if (!$user->tax_out_enabled) {
-                return $this->error('Cashout desabilitado.');
+                return $this->error("Cashout desabilitado.");
             }
 
-            /* ============================================================
-             * 💰 Cálculo de taxas
-             * ============================================================ */
+            /*
+            |--------------------------------------------------------------------------
+            | 6) Calcular taxas
+            |--------------------------------------------------------------------------
+            */
             $fee = round(($user->tax_out_fixed ?? 0) + ($gross * ($user->tax_out_percent ?? 0) / 100), 2);
             $net = round($gross - $fee, 2);
 
             if ($net <= 0) {
-                return $this->error('Valor líquido inválido.');
+                return $this->error("Valor líquido inválido.");
             }
 
-            /* ============================================================
-             * 🔢 External ID + Idempotência
-             * ============================================================ */
-            $externalId = $data['external_id'] ??
-                'WD_' . now()->timestamp . '_' . random_int(1000, 9999);
+            /*
+            |--------------------------------------------------------------------------
+            | 7) Idempotência (external_id)
+            |--------------------------------------------------------------------------
+            */
+            $externalId = $data['external_id']
+                ?: 'WD_' . now()->timestamp . '_' . random_int(1000, 9999);
 
             if (Withdraw::where('user_id', $user->id)
                 ->where('external_id', $externalId)
                 ->exists()) {
-                return $this->error('External ID duplicado.');
+                return $this->error("External ID duplicado.");
             }
 
             $internalRef = 'withdraw_' . now()->timestamp . '_' . random_int(1000, 9999);
 
-            /* ============================================================
-             * 🧾 Criar saque local
-             * ============================================================ */
+            /*
+            |--------------------------------------------------------------------------
+            | 8) Criar saque local
+            |--------------------------------------------------------------------------
+            */
             try {
                 $withdraw = $this->withdrawService->create(
                     $user,
@@ -135,69 +146,78 @@ class WithdrawOutController extends Controller
                         'key_type'    => strtolower($data['key_type']),
                         'external_id' => $externalId,
                         'internal_ref'=> $internalRef,
-                        'provider'    => 'lumnis',
-                        'details'     => $data['details'],
+                        'provider'    => 'pluggou',
                     ]
                 );
             } catch (\Throwable $e) {
                 return $this->error($e->getMessage());
             }
 
-            /* ============================================================
-             * 🚀 Criar saque na Lumnis
-             * ============================================================ */
+            /*
+            |--------------------------------------------------------------------------
+            | 9) Payload oficial da PLUGGOU
+            |--------------------------------------------------------------------------
+            */
             $payload = [
-                "amount"       => (int) round($gross * 100),
-                "key"          => $data['key'],
-                "key_type"     => strtoupper($data['key_type']),
-                "description"  => $data['description'] ?? '',
-                "external_ref" => $externalId,
-"postback" => route('webhooks.lumnis.withdraw'),
-
-                // 🔥 MANTÉM EXATAMENTE COMO VEIO NO BODY
-                "details"      => [
-                    "name"     => $data['details']['name'],
-                    "document" => preg_replace('/\D/', '', $data['details']['document']),
-                ],
+                "amount"    => (int) round($gross * 100),
+                "key_type"  => strtolower($data['key_type']),
+                "key_value" => $data['key'],
             ];
 
-            $resp = $this->lumnis->createWithdrawal($payload);
+            /*
+            |--------------------------------------------------------------------------
+            | 10) Cria saque na API da Pluggou
+            |--------------------------------------------------------------------------
+            */
+            $resp = $this->pluggou->createWithdrawal($payload);
 
-            /* ============================================================
-             * ❌ Erro do provedor
-             * ============================================================ */
+            /*
+            |--------------------------------------------------------------------------
+            | 11) Falha do provedor
+            |--------------------------------------------------------------------------
+            */
             if (!$resp['success']) {
+
+                $reason = $resp['data']['message']
+                    ?? ($resp['validation_errors'] ?? null)
+                    ?? "Erro ao criar saque na Pluggou";
+
                 $this->withdrawService->refundLocal($withdraw, 'provider_error');
-                return $this->error($resp['message'] ?? 'Erro ao criar saque na Lumnis.');
+
+                return $this->error($reason);
             }
 
-            /* ============================================================
-             * 📌 Obter referência
-             * ============================================================ */
-            $providerRef = data_get($resp, 'data.id')
-                ?? data_get($resp, 'data.identifier')
-                ?? null;
+            /*
+            |--------------------------------------------------------------------------
+            | 12) Extrair referência do provedor
+            |--------------------------------------------------------------------------
+            */
+            $providerRef = data_get($resp, 'data.data.id');
 
             if (!$providerRef) {
                 $this->withdrawService->refundLocal($withdraw, 'missing_provider_id');
-                return $this->error('Não foi possível obter referência da Lumnis.');
+                return $this->error("Não foi possível obter ID do saque na Pluggou.");
             }
 
-            /* ============================================================
-             * 🔄 Normalizar status
-             * ============================================================ */
-            $providerStatus = strtoupper(data_get($resp, 'data.status', 'PENDING'));
+            /*
+            |--------------------------------------------------------------------------
+            | 13) Normalizar status inicial
+            |--------------------------------------------------------------------------
+            */
+            $providerStatus = strtolower(data_get($resp, 'data.data.status')) ?? 'pending';
 
             $status = match ($providerStatus) {
-                'PAID', 'COMPLETED', 'SUCCESS' => 'paid',
-                'FAILED', 'ERROR', 'CANCELED', 'CANCELLED' => 'failed',
-                'PROCESSING', 'SENDING', 'SENT', 'PENDING' => 'processing',
-                default => 'pending',
+                'paid', 'success', 'completed' => 'paid',
+                'failed', 'error', 'canceled', 'cancelled' => 'failed',
+                'processing', 'sending', 'sent', 'pending' => 'processing',
+                default => 'processing',
             };
 
-            /* ============================================================
-             * 💾 Atualizar saque local
-             * ============================================================ */
+            /*
+            |--------------------------------------------------------------------------
+            | 14) Atualizar saque local
+            |--------------------------------------------------------------------------
+            */
             $this->withdrawService->updateProviderReference(
                 $withdraw,
                 $providerRef,
@@ -205,9 +225,11 @@ class WithdrawOutController extends Controller
                 $resp
             );
 
-            /* ============================================================
-             * 🌐 Webhook OUT
-             * ============================================================ */
+            /*
+            |--------------------------------------------------------------------------
+            | 15) Webhook OUT
+            |--------------------------------------------------------------------------
+            */
             if ($user->webhook_enabled && $user->webhook_out_url) {
                 SendWebhookWithdrawCreatedJob::dispatch(
                     $user->id,
@@ -217,9 +239,11 @@ class WithdrawOutController extends Controller
                 );
             }
 
-            /* ============================================================
-             * 🟢 Sucesso
-             * ============================================================ */
+            /*
+            |--------------------------------------------------------------------------
+            | 16) Retorno final
+            |--------------------------------------------------------------------------
+            */
             return response()->json([
                 'success' => true,
                 'message' => 'Saque solicitado com sucesso!',
@@ -232,18 +256,18 @@ class WithdrawOutController extends Controller
                     'pix_key_type'  => $withdraw->pixkey_type,
                     'status'        => $status,
                     'reference'     => $providerRef,
-                    'provider'      => 'lumnis',
+                    'provider'      => 'pluggou',
                 ],
             ]);
 
         } catch (\Throwable $e) {
 
-            Log::error('🚨 Erro ao criar saque', [
+            Log::error('🚨 Erro ao criar saque com Pluggou', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
             ]);
 
-            return $this->error('Erro interno ao processar saque.');
+            return $this->error("Erro interno ao processar saque.");
         }
     }
 
