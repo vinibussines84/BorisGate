@@ -84,8 +84,8 @@ class WithdrawOutController extends Controller
             */
             $gross = (float) $data['amount'];
 
-            if ($gross < 5) {
-                return $this->error("Valor mínimo para saque é R$ 5,00.");
+            if ($gross < 10) {
+                return $this->error("Valor mínimo para saque é R$ 10,00.");
             }
 
             /*

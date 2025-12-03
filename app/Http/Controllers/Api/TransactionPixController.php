@@ -90,9 +90,7 @@ class TransactionPixController extends Controller
             ],
         ];
 
-        Log::info('PLUGGOU_ENVIANDO_PAYLOAD', $payload);
-
-        // 🚀 Envia para Pluggou
+        // 🚀 Envia para provedor
         try {
             $response = $pluggou->createTransaction($payload);
 
@@ -107,21 +105,14 @@ class TransactionPixController extends Controller
 
             $body = $response['body'];
 
-            // 🔥 Pluggou retorna EMV dentro de: data.pix.emv
             $transactionId = data_get($body, 'data.id');
             $qrCodeText    = data_get($body, 'data.pix.emv');
 
             if (!$transactionId || !$qrCodeText) {
-                Log::error('INVALID_RESPONSE', ['body' => $body]);
                 throw new \Exception("Invalid response: Missing id or EMV qrcode");
             }
 
         } catch (\Throwable $e) {
-
-            Log::error('PIX_CREATE_ERROR', [
-                'error'    => $e->getMessage(),
-                'response' => $response['raw'] ?? null,
-            ]);
 
             $tx->updateQuietly(['status' => TransactionStatus::FALHA]);
 
@@ -131,10 +122,7 @@ class TransactionPixController extends Controller
             ], 500);
         }
 
-        // 🕒 Data BR
-        $createdAtBr = Carbon::now('America/Sao_Paulo')->toDateTimeString();
-
-        // 🧩 Atualiza local
+        // 🕒 Atualiza local
         $tx->updateQuietly([
             'txid'                    => $transactionId,
             'provider_transaction_id' => $transactionId,
@@ -149,7 +137,7 @@ class TransactionPixController extends Controller
                     'emv'        => $qrCodeText,
                     'status'     => 'pending',
                     'external_id'=> $externalId,
-                    'created_at' => $createdAtBr,
+                    'created_at' => Carbon::now('America/Sao_Paulo')->toDateTimeString(),
                 ],
             ],
         ]);
@@ -159,7 +147,7 @@ class TransactionPixController extends Controller
             SendWebhookPixCreatedJob::dispatch($user->id, $tx->id);
         }
 
-        // 🔥 Retorno final padronizado
+        // Retorno
         return response()->json([
             'success'        => true,
             'transaction_id' => $tx->id,
@@ -174,7 +162,7 @@ class TransactionPixController extends Controller
 
     /*
     |--------------------------------------------------------------------------
-    | 🔥 Consultar por external_id (PIX + Withdraw unificados)
+    | 🔥 Consultar por external_id (PIX + WITHDRAW)
     |--------------------------------------------------------------------------
     */
     public function statusByExternal(Request $request, string $externalId)
@@ -193,7 +181,7 @@ class TransactionPixController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | 1) Tenta achar PIX (cash-in)
+        | 1) Consulta PIX
         |--------------------------------------------------------------------------
         */
         $tx = Transaction::where('external_reference', $externalId)
@@ -220,7 +208,7 @@ class TransactionPixController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | 2) Tenta achar Saque (cash-out)
+        | 2) Consulta Withdraw
         |--------------------------------------------------------------------------
         */
         $withdraw = Withdraw::where('external_id', $externalId)
@@ -239,8 +227,11 @@ class TransactionPixController extends Controller
                 'data' => [
                     'id'         => data_get($meta, 'internal_reference', $withdraw->id),
                     'status'     => $this->normalizeStatus($withdraw->status),
+                    'E2E'        => data_get($meta, 'e2e', null), // 🔥 AGORA RETORNA O E2E
+
                     'requested'  => (float) $withdraw->gross_amount,
                     'paid'       => (float) $withdraw->amount,
+
                     'operation'  => [
                         'amount'      => (float) $withdraw->amount,
                         'key'         => $withdraw->pixkey,
@@ -248,6 +239,7 @@ class TransactionPixController extends Controller
                         'description' => 'Withdraw',
                         'details'     => data_get($meta, 'details', []),
                     ],
+
                     'receipt'     => $receipt,
                     'external_id' => $withdraw->external_id,
                 ],
