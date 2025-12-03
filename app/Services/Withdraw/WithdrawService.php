@@ -49,6 +49,8 @@ class WithdrawService
 
     /**
      * Se falhar ANTES da criação no provider: estorna o BRUTO e marca como failed
+     *
+     * ✔️ Agora envia webhook withdraw.updated FAILED
      */
     public function refundLocal(Withdraw $withdraw, string $reason): void
     {
@@ -58,20 +60,42 @@ class WithdrawService
         ]);
 
         DB::transaction(function () use ($withdraw, $reason) {
-            $u = User::where('id', $withdraw->user_id)->lockForUpdate()->first();
 
+            $u = User::where('id', $withdraw->user_id)->lockForUpdate()->first();
             $u->amount_available = round($u->amount_available + $withdraw->gross_amount, 2);
             $u->save();
 
             $meta = $withdraw->meta ?? [];
             $meta['error'] = $reason;
             $meta['refund_done'] = true;
+            $meta['failed_at'] = now();
 
             $withdraw->update([
                 'status' => 'failed',
                 'meta'   => $meta,
             ]);
         });
+
+        /**
+         * 🔥 Envia webhook FAILED (somente quando não veio provider_reference)
+         */
+        SendWebhookWithdrawUpdatedJob::dispatch(
+            userId: $withdraw->user_id,
+            withdrawId: $withdraw->id,
+            status: 'FAILED',
+            reference: (string) ($withdraw->provider_reference ?? $withdraw->meta['internal_reference'] ?? $withdraw->id),
+            raw: [
+                'data' => [
+                    'description' => $reason
+                ]
+            ]
+        )->onQueue('webhooks');
+
+        Log::info('📤 Webhook OUT disparado (FAILED - refundLocal)', [
+            'withdraw_id' => $withdraw->id,
+            'user_id'     => $withdraw->user_id,
+            'reason'      => $reason,
+        ]);
     }
 
     /**
@@ -151,14 +175,13 @@ class WithdrawService
 
     /**
      * Estorna via webhook — estorna o BRUTO e marca como FAILED + dispara webhook OUT
-     *
-     * 🔥 AGORA PÚBLICO
      */
     public function refundWebhookFailed(Withdraw $withdraw, array $payload)
     {
         Log::error('❌ Saque FAILED via webhook', ['withdraw_id' => $withdraw->id]);
 
         DB::transaction(function () use ($withdraw, $payload) {
+
             $u = User::where('id', $withdraw->user_id)->lockForUpdate()->first();
 
             if (!($withdraw->meta['refund_done'] ?? false)) {
@@ -193,8 +216,6 @@ class WithdrawService
 
     /**
      * Marca como PAGO e dispara webhook OUT (withdraw.updated - APPROVED)
-     *
-     * 🔥 AGORA PÚBLICO
      */
     public function markAsPaid(Withdraw $withdraw, array $payload)
     {
