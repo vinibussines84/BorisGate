@@ -1,160 +1,217 @@
 <?php
 
-namespace App\Services\Lumnis;
+namespace App\Http\Controllers\Api;
 
-use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Cache;
+use App\Http\Controllers\Controller;
+use App\Jobs\ProcessWithdrawJob;
+use App\Jobs\SendWebhookWithdrawCreatedJob;
+use App\Models\User;
+use App\Models\Withdraw;
+use App\Services\Pix\KeyValidator;
+use App\Services\Lumnis\LumnisCashoutService;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\Rule;
 
-class LumnisCashoutService
+class WithdrawOutController extends Controller
 {
-    protected string $baseUrl;
-    protected string $code;
-    protected string $token;
-    protected int $timeout;
+    public function __construct(
+        private readonly LumnisCashoutService $withdrawService
+    ) {}
 
-    public function __construct()
-    {
-        $this->baseUrl = config('services.lumnis.base_url', 'https://api.lumnisolucoes.com.br');
-        $this->code    = config('services.lumnis.code');
-        $this->token   = config('services.lumnis.token');
-        $this->timeout = (int) config('services.lumnis.timeout', 15);
-    }
-
-    /**
-     * 🔑 Obtém token de acesso (cacheado por 59 minutos)
-     */
-    protected function getAccessToken(): ?string
-    {
-        return Cache::remember('lumnis.access_token', now()->addMinutes(59), function () {
-            $response = Http::timeout($this->timeout)
-                ->withHeaders(['Content-Type' => 'application/json'])
-                ->post("{$this->baseUrl}/auth/token", [
-                    'code'  => $this->code,
-                    'token' => $this->token,
-                ]);
-
-            if ($response->failed()) {
-                Log::error('❌ Falha na autenticação com a Lumnis (Cashout)', [
-                    'status' => $response->status(),
-                    'body'   => $response->json(),
-                ]);
-                throw new \Exception('Falha na autenticação com a Lumnis API.');
-            }
-
-            $token = $response->json('access_token');
-
-            if (!$token) {
-                Log::error('❌ Token de acesso ausente na resposta da Lumnis', [
-                    'body' => $response->json(),
-                ]);
-                throw new \Exception('Token ausente na autenticação com a Lumnis API.');
-            }
-
-            return $token;
-        });
-    }
-
-    /**
-     * 💸 Cria um saque Pix (cashout)
-     */
-    public function createWithdrawal(array $payload): array
+    public function store(Request $request)
     {
         try {
-            $accessToken = $this->getAccessToken();
+            /*
+            |--------------------------------------------------------------------------
+            | 1) Autenticação
+            |--------------------------------------------------------------------------
+            */
+            $authKey   = $request->header('X-Auth-Key');
+            $secretKey = $request->header('X-Secret-Key');
 
-            $response = Http::timeout($this->timeout)
-                ->withHeaders([
-                    'Authorization' => "Bearer {$accessToken}",
-                    'Content-Type'  => 'application/json',
-                ])
-                ->post("{$this->baseUrl}/withdraw/pix", $payload);
-
-            // Se o token expirou → reautentica
-            if ($response->status() === 401) {
-                Cache::forget('lumnis.access_token');
-
-                $accessToken = $this->getAccessToken();
-
-                $response = Http::timeout($this->timeout)
-                    ->withHeaders([
-                        'Authorization' => "Bearer {$accessToken}",
-                        'Content-Type'  => 'application/json',
-                    ])
-                    ->post("{$this->baseUrl}/withdraw/pix", $payload);
+            if (!$authKey || !$secretKey) {
+                return $this->error("Headers ausentes.");
             }
 
-            $data = $response->json() ?? [];
+            $user = User::where('authkey', $authKey)
+                ->where('secretkey', $secretKey)
+                ->first();
 
-            // 🔧 Normaliza estrutura de resposta
-            $normalized = [
-                'id'          => data_get($data, 'id')
-                                ?? data_get($data, 'data.id')
-                                ?? data_get($data, 'data.0.id')
-                                ?? data_get($data, 'data.data.0.id')
-                                ?? null,
-                'identifier'  => data_get($data, 'identifier')
-                                ?? data_get($data, 'data.identifier')
-                                ?? data_get($data, 'data.0.identifier')
-                                ?? data_get($data, 'data.data.0.identifier')
-                                ?? null,
-                'status'      => data_get($data, 'status')
-                                ?? data_get($data, 'data.status')
-                                ?? data_get($data, 'data.0.status')
-                                ?? data_get($data, 'data.data.0.status')
-                                ?? null,
-            ];
+            if (!$user) {
+                return $this->error("Credenciais inválidas.");
+            }
 
-            // 🔍 Log da resposta bruta e normalizada
-            Log::info('📦 Lumnis createWithdrawal response', [
-                'payload'     => $payload,
-                'raw'         => $data,
-                'normalized'  => $normalized,
-                'status_code' => $response->status(),
+            /*
+            |--------------------------------------------------------------------------
+            | 2) Normalizações
+            |--------------------------------------------------------------------------
+            */
+            $request->merge([
+                'key_type' => strtolower($request->input('key_type')),
             ]);
 
-            // ❌ Falha HTTP
-            if (!$response->successful()) {
-                $msg = $data['message'] ?? $data['error'] ?? 'Erro Lumnis Cashout';
-                if (is_array($msg)) {
-                    $msg = implode('; ', $msg);
+            if ($request->input('key_type') === 'phone') {
+                $phone = preg_replace('/\D/', '', $request->input('key'));
+                if (str_starts_with($phone, '55')) {
+                    $phone = substr($phone, 2);
                 }
-
-                Log::error('❌ Erro Lumnis Cashout', [
-                    'status'  => $response->status(),
-                    'body'    => $data,
-                    'payload' => $payload,
-                ]);
-
-                return [
-                    'success' => false,
-                    'status'  => $response->status(),
-                    'message' => $msg,
-                    'data'    => $data,
-                ];
+                $request->merge(['key' => $phone]);
             }
 
-            // ✅ Sucesso
-            return [
-                'success' => true,
-                'status'  => $response->status(),
-                'message' => $data['message'] ?? 'WITHDRAW_REQUEST',
-                'data'    => array_merge($data, $normalized),
+            /*
+            |--------------------------------------------------------------------------
+            | 3) Validação
+            |--------------------------------------------------------------------------
+            */
+            $data = $request->validate([
+                'amount'       => ['required', 'numeric', 'min:0.01'],
+                'key'          => ['required', 'string'],
+                'key_type'     => ['required', Rule::in(['cpf','cnpj','email','phone','random','evp'])],
+                'description'  => ['nullable','string','max:255'],
+                'external_id'  => ['nullable','string','max:64'],
+            ]);
+
+            /*
+            |--------------------------------------------------------------------------
+            | 4) Valor mínimo
+            |--------------------------------------------------------------------------
+            */
+            $gross = (float) $data['amount'];
+
+            if ($gross < 10) {
+                return $this->error("Valor mínimo para saque é R$ 10,00.");
+            }
+
+            /*
+            |--------------------------------------------------------------------------
+            | 5) Validar chave PIX
+            |--------------------------------------------------------------------------
+            */
+            if (!KeyValidator::validate($data['key'], strtoupper($data['key_type']))) {
+                return $this->error("Chave PIX inválida.");
+            }
+
+            /*
+            |--------------------------------------------------------------------------
+            | 6) Taxas
+            |--------------------------------------------------------------------------
+            */
+            $fee = 0;
+            $net = $gross;
+
+            /*
+            |--------------------------------------------------------------------------
+            | 7) Idempotência
+            |--------------------------------------------------------------------------
+            */
+            $externalId = $data['external_id']
+                ?: 'WD_' . now()->timestamp . '_' . rand(1000,9999);
+
+            if (Withdraw::where('user_id',$user->id)
+                ->where('external_id',$externalId)
+                ->exists()) {
+                return $this->error("External ID duplicado.");
+            }
+
+            $internalRef = 'withdraw_' . now()->timestamp . '_' . rand(1000,9999);
+
+            /*
+            |--------------------------------------------------------------------------
+            | 8) Criar saque LOCAL
+            |--------------------------------------------------------------------------
+            */
+            $withdraw = Withdraw::create([
+                'user_id'        => $user->id,
+                'gross_amount'   => $gross,
+                'amount'         => $net,
+                'fee'            => $fee,
+                'status'         => 'processing',
+                'pixkey'         => $data['key'],
+                'pixkey_type'    => $data['key_type'],
+                'external_id'    => $externalId,
+                'meta' => [
+                    'internal_reference' => $internalRef,
+                    'provider' => 'lumnis',
+                ],
+            ]);
+
+            /*
+            |--------------------------------------------------------------------------
+            | 9) PAYLOAD CORRETO PARA LUMNIS
+            |--------------------------------------------------------------------------
+            */
+            $payload = [
+                "amount"       => (int) round($gross * 100),
+                "key"          => $data['key'],
+                "key_type"     => strtoupper($data['key_type']),
+                "description"  => $data['description'] ?? "Withdraw",
+                "details"      => [
+                    "name"     => $user->name,
+                    "document" => $user->document ?? "00000000000",
+                ],
+                "postback"     => $user->webhook_out_url,
+                "external_ref" => $externalId,
             ];
+
+            /*
+            |--------------------------------------------------------------------------
+            | 10) FILA - não esperar Lumnis
+            |--------------------------------------------------------------------------
+            */
+            dispatch(new ProcessWithdrawJob($withdraw, $payload));
+
+            /*
+            |--------------------------------------------------------------------------
+            | 11) Webhook OUT
+            |--------------------------------------------------------------------------
+            */
+            if ($user->webhook_enabled && $user->webhook_out_url) {
+                SendWebhookWithdrawCreatedJob::dispatch(
+                    $user->id,
+                    $withdraw->id,
+                    'processing',
+                    null
+                );
+            }
+
+            /*
+            |--------------------------------------------------------------------------
+            | 12) Resposta imediata
+            |--------------------------------------------------------------------------
+            */
+            return response()->json([
+                'success' => true,
+                'message' => 'Saque enviado para processamento.',
+                'data' => [
+                    'id'            => $withdraw->id,
+                    'external_id'   => $externalId,
+                    'amount'        => $withdraw->gross_amount,
+                    'liquid_amount' => $withdraw->amount,
+                    'pix_key'       => $withdraw->pixkey,
+                    'pix_key_type'  => $withdraw->pixkey_type,
+                    'status'        => 'processing',
+                    'reference'     => null,
+                    'provider'      => 'Internal',
+                ]
+            ]);
 
         } catch (\Throwable $e) {
-            Log::error('🚨 Exceção Lumnis Cashout', [
-                'message' => $e->getMessage(),
-                'payload' => $payload,
-                'trace'   => $e->getTraceAsString(),
+
+            Log::error('🚨 Erro ao criar saque', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
             ]);
 
-            return [
-                'success' => false,
-                'status'  => 500,
-                'message' => 'Erro interno ao chamar Lumnis',
-                'error'   => $e->getMessage(),
-            ];
+            return $this->error("Erro interno ao processar saque.");
         }
+    }
+
+    private function error(string $message)
+    {
+        return response()->json([
+            'success' => false,
+            'error'   => $message,
+        ]);
     }
 }
