@@ -52,7 +52,7 @@ class WithdrawOutController extends Controller
                 'key_type' => strtolower($request->input('key_type')),
             ]);
 
-            // Normaliza telefone
+            // Normalização para telefone
             if ($request->input('key_type') === 'phone') {
                 $phone = preg_replace('/\D/', '', $request->input('key'));
                 if (str_starts_with($phone, '55')) {
@@ -76,7 +76,7 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 4) Valor mínimo
+            | 4) Valor mínimo permitido
             |--------------------------------------------------------------------------
             */
             $gross = (float) $data['amount'];
@@ -124,7 +124,7 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 8) Criar saque local
+            | 8) Criar saque local imediatamente
             |--------------------------------------------------------------------------
             */
             $withdraw = $this->withdrawService->create(
@@ -134,7 +134,7 @@ class WithdrawOutController extends Controller
                 $fee,
                 [
                     'key'         => $data['key'],
-                    'key_type'    => $data['key_type'],
+                    'key_type'    => $data['key_type'],  // mantém minúsculo
                     'external_id' => $externalId,
                     'internal_ref'=> $internalRef,
                     'provider'    => 'podpay',
@@ -147,24 +147,24 @@ class WithdrawOutController extends Controller
             |--------------------------------------------------------------------------
             */
             $payload = [
-                "amount"      => (int) round($gross * 100),         // BRUTO
-                "netPayout"   => true,                              // RECEBE LÍQUIDO
+                "amount"      => (int) round($gross * 100),         // valor BRUTO
+                "netPayout"   => true,                              // recebe líquido
                 "pixKey"      => $data['key'],
-                "pixKeyType"  => strtolower($data['key_type']),     // OBRIGATORIAMENTE MINÚSCULO
+                "pixKeyType"  => strtolower($data['key_type']),     // OBRIGATORIAMENTE minúsculo
                 "postbackUrl" => url('/api/webhooks/podpay/withdraw'),
                 "externalRef" => $externalId,
             ];
 
             /*
             |--------------------------------------------------------------------------
-            | 10) Enviar job (fila)
+            | 10) Enviar job para fila
             |--------------------------------------------------------------------------
             */
             dispatch(new ProcessWithdrawJob($withdraw, $payload));
 
             /*
             |--------------------------------------------------------------------------
-            | 11) Webhook imediato (withdraw.created)
+            | 11) webhook OUT imediato — withdraw.created
             |--------------------------------------------------------------------------
             */
             if ($user->webhook_enabled && $user->webhook_out_url) {
@@ -178,7 +178,7 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 12) Retorno final
+            | 12) Resposta final
             |--------------------------------------------------------------------------
             */
             return response()->json([
