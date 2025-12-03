@@ -9,18 +9,17 @@ use App\Models\Transaction;
 use App\Models\Withdraw;
 use App\Models\User;
 use App\Enums\TransactionStatus;
-use App\Services\Lumnis\LumnisService;
+use App\Services\PodPay\PodPayService;
 use App\Jobs\SendWebhookPixCreatedJob;
-use Carbon\Carbon;
 
 class TransactionPixController extends Controller
 {
     /*
     |--------------------------------------------------------------------------
-    | 🔥 Criar PIX (Cash-in)
+    | PIX CASH-IN (PODPAY)
     |--------------------------------------------------------------------------
     */
-    public function store(Request $request, LumnisService $lumnis)
+    public function store(Request $request, PodPayService $podpay)
     {
         // 🔐 Auth
         $auth   = $request->header('X-Auth-Key');
@@ -77,7 +76,7 @@ class TransactionPixController extends Controller
             'status'             => TransactionStatus::PENDENTE,
             'currency'           => 'BRL',
             'method'             => 'pix',
-            'provider'           => 'Lumnis',
+            'provider'           => 'PodPay',
             'amount'             => $amountReais,
             'fee'                => $this->computeFee($user, $amountReais),
             'external_reference' => $externalId,
@@ -87,58 +86,61 @@ class TransactionPixController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | 🔧 Payload no formato LUMNIS — SOMENTE PIX
+        |  PAYLOAD CORRETO — PODPAY
         |--------------------------------------------------------------------------
         */
         $payload = [
-            "amount"      => $amountCents,
-            "externalRef" => $externalId,
-            "postback"    => $user->webhook_in_url ?? null,
-            "method"      => "PIX",
-            "installments"=> 1,
-            "customer" => [
-                "name"     => $name,
-                "email"    => $user->email,
-                "phone"    => $phone,
-                "document" => $document,
-                "address"  => [
-                    "street"  => "N/D",
-                    "number"  => "0",
-                    "city"    => "N/D",
-                    "state"   => "SP",
-                    "country" => "Brasil",
-                    "zip"     => "00000-000"
-                ]
+            "amount"        => $amountCents,
+            "currency"      => "BRL",
+            "paymentMethod" => "pix",
+
+            "pix" => [
+                "expiresInDays" => 1
             ],
+
             "items" => [
                 [
-                    "title"     => "PIX Deposit",
+                    "title"     => "PIX",
                     "unitPrice" => $amountCents,
                     "quantity"  => 1,
                     "tangible"  => false
                 ]
-            ]
+            ],
+
+            "customer" => [
+                "name"  => $name,
+                "email" => $user->email,
+                "document" => [
+                    "type"   => "cpf",
+                    "number" => $document
+                ]
+            ],
+
+            // 🔥 POSTBACK SEMPRE DO SEU SERVIDOR
+            "postbackUrl" => url('/api/webhooks/podpay'),
+
+            "externalRef" => $externalId,
         ];
 
-        // 🚀 Envia para Lumnis
+        // 🚀 Envia para PodPay
         try {
-            $response = $lumnis->createTransaction($payload);
+            $response = $podpay->createPixTransaction($payload);
 
-            Log::info("LUMNIS_RAW_RESPONSE", $response);
+            Log::info("PODPAY_PIX_RESPONSE", $response);
 
-            if (!in_array($response['status'], [200, 201])) {
-                throw new \Exception("Provider error");
+            if (!$response['success']) {
+                throw new \Exception("PodPay error");
             }
 
             $body = $response['body'];
 
-            // 🔍 CORREÇÃO BASEADA NO RETORNO REAL
-            $transactionId = data_get($body, 'id');   
-            $qrCodeText    = data_get($body, 'qrcode');
+            // 🔍 RETORNO PREVISTO PODPAY
+            $transactionId = data_get($body, 'id');
+            $qrCodeText    = data_get($body, 'pix.code');
 
             if (!$transactionId || !$qrCodeText) {
-                Log::error("LUMNIS_INVALID_RESPONSE", ['body' => $body]);
-                throw new \Exception("Invalid provider response: missing id or qrcode");
+                Log::error("PODPAY_INVALID_RESPONSE", ['body' => $body]);
+                throw new \Exception("Invalid PodPay response (missing id or pix.code)");
             }
 
         } catch (\Throwable $e) {
@@ -183,7 +185,7 @@ class TransactionPixController extends Controller
 
     /*
     |--------------------------------------------------------------------------
-    | 🔥 Consultar (PIX + Saque)
+    | STATUS POR EXTERNAL_ID (mantido igual)
     |--------------------------------------------------------------------------
     */
     public function statusByExternal(Request $request, string $externalId)
@@ -200,7 +202,7 @@ class TransactionPixController extends Controller
             return response()->json(['success' => false, 'error' => 'Invalid credentials.'], 401);
         }
 
-        // 🔎 PIX
+        // 🔍 PIX
         $tx = Transaction::where('external_reference', $externalId)
             ->where('user_id', $user->id)
             ->first();
@@ -223,7 +225,7 @@ class TransactionPixController extends Controller
             ]);
         }
 
-        // 🔎 Saque
+        // 🔍 WITHDRAW (igual)
         $withdraw = Withdraw::where('external_id', $externalId)
             ->where('user_id', $user->id)
             ->first();
@@ -259,16 +261,17 @@ class TransactionPixController extends Controller
         return response()->json(['success' => false, 'error' => 'Transaction not found.'], 404);
     }
 
+
     /*
     |--------------------------------------------------------------------------
-    | utils
+    | Utils
     |--------------------------------------------------------------------------
     */
     private function normalizeStatusPtBr(string $status): string
     {
         return match (strtolower($status)) {
-            'paid', 'paga', 'approved', 'completed' => 'aprovado',
-            'failed', 'erro', 'error', 'rejected', 'canceled', 'cancelled' => 'falhou',
+            'paid', 'approved', 'completed' => 'aprovado',
+            'failed', 'error', 'rejected', 'canceled' => 'falhou',
             default => 'pendente',
         };
     }
@@ -276,17 +279,15 @@ class TransactionPixController extends Controller
     private function normalizeStatus(string $status): string
     {
         return match (strtolower($status)) {
-            'paid', 'paga', 'approved', 'completed' => 'APPROVED',
-            'failed', 'erro', 'error', 'rejected', 'canceled', 'cancelled' => 'FAILED',
+            'paid', 'approved', 'completed' => 'APPROVED',
+            'failed', 'error', 'rejected', 'canceled' => 'FAILED',
             default => 'PENDING',
         };
     }
 
     private function resolveUser(string $auth, string $secret)
     {
-        return User::where('authkey', $auth)
-            ->where('secretkey', $secret)
-            ->first();
+        return User::where('authkey', $auth)->where('secretkey', $secret)->first();
     }
 
     private function computeFee($user, float $amount): float
