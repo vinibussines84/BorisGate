@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use App\Models\Transaction;
+use App\Models\Withdraw;
 use App\Models\User;
 use App\Enums\TransactionStatus;
 use App\Services\Pluggou\PluggouService;
@@ -145,7 +146,7 @@ class TransactionPixController extends Controller
                 'name'         => $name,
                 'document'     => $document,
                 'phone'        => $phone,
-                'qr_code_text' => $qrCodeText,   // 🔥 mantém igual ao antigo
+                'qr_code_text' => $qrCodeText,
                 'provider_raw' => $cleanRaw,
             ],
         ]);
@@ -160,15 +161,19 @@ class TransactionPixController extends Controller
             'success'        => true,
             'transaction_id' => $tx->id,
             'external_id'    => $externalId,
-            'status'         => $tx->status, // “pendente”
+            'status'         => $tx->status,
             'amount'         => number_format($amountReais, 2, '.', ''),
             'fee'            => number_format($tx->fee, 2, '.', ''),
             'txid'           => $transactionId,
-            'qr_code_text'   => $qrCodeText, // 🔥 compatível com apps antigos
+            'qr_code_text'   => $qrCodeText,
         ]);
     }
 
-
+    /*
+    |--------------------------------------------------------------------------
+    | 🔥 NOVO STATUS UNIFICADO (Transaction + Withdraw)
+    |--------------------------------------------------------------------------
+    */
     public function statusByExternal(Request $request, string $externalId)
     {
         $auth   = $request->header('X-Auth-Key');
@@ -183,28 +188,75 @@ class TransactionPixController extends Controller
             return response()->json(['success' => false, 'error' => 'Invalid credentials.'], 401);
         }
 
+        /*
+        |--------------------------------------------------------------------------
+        | 1) Primeiro tenta achar PIX (cash-in)
+        |--------------------------------------------------------------------------
+        */
         $tx = Transaction::where('external_reference', $externalId)
             ->where('user_id', $user->id)
             ->first();
 
-        if (!$tx) {
-            return response()->json(['success' => false, 'error' => 'Transaction not found.'], 404);
+        if ($tx) {
+            return response()->json([
+                'success' => true,
+                'type'    => 'pix',
+                'data' => [
+                    'id'              => $tx->id,
+                    'external_id'     => $tx->external_reference,
+                    'status'          => $tx->status,
+                    'amount'          => (float) $tx->amount,
+                    'fee'             => (float) $tx->fee,
+                    'txid'            => $tx->txid,
+                    'provider_payload'=> $tx->provider_payload,
+                    'created_at'      => $tx->created_at,
+                    'updated_at'      => $tx->updated_at,
+                ],
+            ]);
         }
 
-        return response()->json([
-            'success' => true,
-            'data' => [
-                'id'              => $tx->id,
-                'external_id'     => $tx->external_reference,
-                'status'          => $tx->status,
-                'amount'          => (float) $tx->amount,
-                'fee'             => (float) $tx->fee,
-                'txid'            => $tx->txid,
-                'provider_payload'=> $tx->provider_payload,
-                'created_at'      => $tx->created_at,
-                'updated_at'      => $tx->updated_at,
-            ],
-        ]);
+        /*
+        |--------------------------------------------------------------------------
+        | 2) Se não for PIX, tenta achar WITHDRAW (cash-out)
+        |--------------------------------------------------------------------------
+        */
+        $withdraw = Withdraw::where('external_id', $externalId)
+            ->where('user_id', $user->id)
+            ->first();
+
+        if ($withdraw) {
+
+            $meta = $withdraw->meta ?? [];
+            $receipt = data_get($meta, 'receipt', []);
+
+            return response()->json([
+                'success' => true,
+                'type'    => 'withdraw',
+                'event'   => 'withdraw.updated',
+                'data' => [
+                    'id'         => data_get($meta, 'internal_reference', $withdraw->id),
+                    'status'     => strtoupper($withdraw->status),
+                    'requested'  => (float) $withdraw->gross_amount,
+                    'paid'       => (float) $withdraw->amount,
+                    'operation'  => [
+                        'amount'      => (float) $withdraw->amount,
+                        'key'         => $withdraw->pixkey,
+                        'key_type'    => strtoupper($withdraw->pixkey_type),
+                        'description' => 'Withdraw',
+                        'details'     => data_get($meta, 'details', []),
+                    ],
+                    'receipt'     => $receipt,
+                    'external_id' => $withdraw->external_id,
+                ],
+            ]);
+        }
+
+        /*
+        |--------------------------------------------------------------------------
+        | 3) Não achou nada
+        |--------------------------------------------------------------------------
+        */
+        return response()->json(['success' => false, 'error' => 'Transaction not found.'], 404);
     }
 
     private function resolveUser(string $auth, string $secret)
