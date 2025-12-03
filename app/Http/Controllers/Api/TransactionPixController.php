@@ -8,32 +8,37 @@ use Illuminate\Support\Facades\Log;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Enums\TransactionStatus;
-use App\Services\Lumnis\LumnisService;
+use App\Services\Pluggou\PluggouService;
 use App\Jobs\SendWebhookPixCreatedJob;
 use Carbon\Carbon;
 
 class TransactionPixController extends Controller
 {
-    public function store(Request $request, LumnisService $lumnis)
+    public function store(Request $request, PluggouService $pluggou)
     {
         // 🔐 Auth
         $auth   = $request->header('X-Auth-Key');
         $secret = $request->header('X-Secret-Key');
 
         if (!$auth || !$secret) {
-            return response()->json(['success' => false, 'error' => 'Missing authentication headers.'], 401);
+            return response()->json([
+                'success' => false, 
+                'error' => 'Missing authentication headers.'
+            ], 401);
         }
 
         $user = $this->resolveUser($auth, $secret);
         if (!$user) {
-            return response()->json(['success' => false, 'error' => 'Invalid credentials.'], 401);
+            return response()->json([
+                'success' => false, 
+                'error' => 'Invalid credentials.'
+            ], 401);
         }
 
         // 🧩 Validação
         $data = $request->validate([
             'amount'      => ['required', 'numeric', 'min:0.01'],
             'name'        => ['sometimes', 'string', 'max:100'],
-            'email'       => ['sometimes', 'email', 'max:120'],
             'document'    => ['required', 'string', 'min:11', 'max:18'],
             'phone'       => ['sometimes', 'string', 'max:20'],
             'external_id' => ['required', 'string', 'max:64', 'regex:/^[A-Za-z0-9\-_]+$/'],
@@ -42,11 +47,11 @@ class TransactionPixController extends Controller
         $amountReais = (float) $data['amount'];
         $amountCents = (int) round($amountReais * 100);
 
-        $externalId  = $data['external_id'];
-        $name        = $data['name']     ?? $user->name     ?? 'Cliente';
-        $email       = $data['email']    ?? $user->email    ?? 'no-email@placeholder.com';
-        $phone       = $data['phone']    ?? $user->phone    ?? '11999999999';
-        $document    = preg_replace('/\D/', '', $data['document']);
+        $externalId = $data['external_id'];
+
+        $name     = $data['name']  ?? $user->name ?? 'Cliente';
+        $document = preg_replace('/\D/', '', $data['document']);
+        $phone    = $data['phone'] ?? $user->phone ?? '11999999999';
 
         // ❌ Duplicidade
         if (Transaction::where('user_id', $user->id)
@@ -66,54 +71,33 @@ class TransactionPixController extends Controller
             'status'             => TransactionStatus::PENDENTE,
             'currency'           => 'BRL',
             'method'             => 'pix',
-            'provider'           => 'Lumnis',
+            'provider'           => 'Pluggou',
             'amount'             => $amountReais,
             'fee'                => $this->computeFee($user, $amountReais),
             'external_reference' => $externalId,
-            'provider_payload'   => compact('name', 'email', 'document'),
             'ip'                 => $request->ip(),
             'user_agent'         => $request->userAgent(),
         ]);
 
-        // 📦 Payload oficial da Lumnis
+        // 📦 Payload oficial da Pluggou
         $payload = [
-            'amount'      => $amountCents,
-            'externalRef' => $externalId,
-            'postback'    => route('webhooks.lumnis'),
-
-            'customer' => [
-                'name'     => $name,
-                'email'    => $email,
-                'phone'    => $phone,
-                'document' => $document,
-                'address'  => [
-                    'street'  => $user->address_street  ?? 'N/A',
-                    'number'  => $user->address_number  ?? '0',
-                    'city'    => $user->address_city    ?? 'N/A',
-                    'state'   => $user->address_state   ?? 'XX',
-                    'country' => 'Brasil',
-                    'zip'     => $user->address_zip     ?? '00000-000',
-                ],
+            'payment_method' => 'pix',
+            'amount'         => $amountCents,
+            'buyer' => [
+                'buyer_name'     => $name,
+                'buyer_document' => $document,
+                'buyer_phone'    => $phone,
             ],
-
-            'items' => [[
-                'title'     => 'PIX',
-                'unitPrice' => $amountCents,
-                'quantity'  => 1,
-                'tangible'  => false,
-            ]],
-
-            'method' => 'PIX',
         ];
 
-        Log::info('LUMNIS_ENVIANDO_PAYLOAD', $payload);
+        Log::info('PLUGGOU_ENVIANDO_PAYLOAD', $payload);
 
-        // 🚀 Envia para Lumnis
+        // 🚀 Envia para Pluggou
         try {
-            $response = $lumnis->createTransaction($payload);
+            $response = $pluggou->createTransaction($payload);
 
             if (!in_array($response['status'], [200, 201])) {
-                Log::error('LUMNIS_ERRO_RESPOSTA', [
+                Log::error('PLUGGOU_ERRO_RESPOSTA', [
                     'status'  => $response['status'],
                     'body'    => $response['body'],
                     'payload' => $payload,
@@ -123,19 +107,19 @@ class TransactionPixController extends Controller
 
             $body = $response['body'];
 
-            // 🔥 Aqui é a correção:
-            $transactionId = data_get($body, 'id');
-            $qrCodeText    = data_get($body, 'qrcode');
+            // 👇 Aqui depende da resposta real da Pluggou
+            $transactionId = data_get($body, 'data.id');
+            $qrCodeText    = data_get($body, 'data.qr_code_text');
 
             if (!$transactionId || !$qrCodeText) {
-                throw new \Exception("Invalid Lumnis response");
+                throw new \Exception("Invalid Pluggou response");
             }
 
         } catch (\Throwable $e) {
 
-            Log::error('LUMNIS_PIX_CREATE_ERROR', [
+            Log::error('PLUGGOU_PIX_CREATE_ERROR', [
                 'error'    => $e->getMessage(),
-                'response' => $response['body'] ?? null,
+                'response' => $response['raw'] ?? null,
             ]);
 
             $tx->updateQuietly(['status' => TransactionStatus::FALHA]);
@@ -151,15 +135,13 @@ class TransactionPixController extends Controller
 
         // 🧩 Atualiza local
         $cleanRaw = [
-            'id'           => $transactionId,
-            'qrcode'       => $qrCodeText,
-            'total'        => $amountCents,
-            'currency'     => 'BRL',
-            'method'       => 'PIX',
-            'status'       => $body['status'] ?? 'PENDING',
-            'customer'     => $body['customer'] ?? [],
-            'external_ref' => $externalId,
-            'created_at'   => $createdAtBr,
+            'id'         => $transactionId,
+            'qrcode'     => $qrCodeText,
+            'amount'     => $amountCents,
+            'method'     => 'PIX',
+            'status'     => $body['data']['status'] ?? 'pending',
+            'external_id'=> $externalId,
+            'created_at' => $createdAtBr,
         ];
 
         $tx->updateQuietly([
@@ -167,8 +149,8 @@ class TransactionPixController extends Controller
             'provider_transaction_id' => $transactionId,
             'provider_payload'        => [
                 'name'         => $name,
-                'email'        => $email,
                 'document'     => $document,
+                'phone'        => $phone,
                 'qr_code_text' => $qrCodeText,
                 'provider_raw' => $cleanRaw,
             ],
@@ -179,7 +161,7 @@ class TransactionPixController extends Controller
             SendWebhookPixCreatedJob::dispatch($user->id, $tx->id);
         }
 
-        // 🟦 Retorno FINAL — o mesmo que você já usa
+        // 🟦 Retorno Final
         return response()->json([
             'success'        => true,
             'transaction_id' => $tx->id,
@@ -193,18 +175,27 @@ class TransactionPixController extends Controller
     }
 
 
+    /**
+     * Status por external_id (sem alterações)
+     */
     public function statusByExternal(Request $request, string $externalId)
     {
         $auth   = $request->header('X-Auth-Key');
         $secret = $request->header('X-Secret-Key');
 
         if (!$auth || !$secret) {
-            return response()->json(['success' => false, 'error' => 'Missing authentication headers.'], 401);
+            return response()->json([
+                'success' => false,
+                'error' => 'Missing authentication headers.'
+            ], 401);
         }
 
         $user = $this->resolveUser($auth, $secret);
         if (!$user) {
-            return response()->json(['success' => false, 'error' => 'Invalid credentials.'], 401);
+            return response()->json([
+                'success' => false, 
+                'error' => 'Invalid credentials.'
+            ], 401);
         }
 
         $tx = Transaction::where('external_reference', $externalId)
@@ -212,12 +203,11 @@ class TransactionPixController extends Controller
             ->first();
 
         if (!$tx) {
-            return response()->json(['success' => false, 'error' => 'Transaction not found.'], 404);
+            return response()->json([
+                'success' => false,
+                'error' => 'Transaction not found.'
+            ], 404);
         }
-
-        $payload = is_array($tx->provider_payload)
-            ? $tx->provider_payload
-            : json_decode($tx->provider_payload ?? '{}', true);
 
         return response()->json([
             'success' => true,
@@ -228,12 +218,13 @@ class TransactionPixController extends Controller
                 'amount'          => (float) $tx->amount,
                 'fee'             => (float) $tx->fee,
                 'txid'            => $tx->txid,
-                'provider_payload'=> $payload,
+                'provider_payload'=> $tx->provider_payload,
                 'created_at'      => $tx->created_at,
                 'updated_at'      => $tx->updated_at,
             ],
         ]);
     }
+
 
     // Helpers
     private function resolveUser(string $auth, string $secret)
@@ -245,9 +236,12 @@ class TransactionPixController extends Controller
 
     private function computeFee($user, float $amount): float
     {
-        if (!($user->tax_in_enabled ?? false)) return 0.0;
+        if (!($user->tax_in_enabled ?? false)) 
+            return 0.0;
+
         $fixed   = (float) ($user->tax_in_fixed ?? 0);
         $percent = (float) ($user->tax_in_percent ?? 0);
+
         return round(max(0, min($fixed + ($amount * $percent / 100), $amount)), 2);
     }
 }
