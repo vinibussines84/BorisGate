@@ -32,27 +32,25 @@ class PodPayWithdrawWebhookController extends Controller
 
             /**
              * -----------------------------------------------------
-             * 2) Extrair referencia do saque
-             *    A PodPay SEMPRE envia `objectId`
+             * 2) Extrair referencia do saque (objectId)
              * -----------------------------------------------------
              */
-            $providerId = data_get($payload, 'objectId');
+            $providerId = (string) data_get($payload, 'objectId');
             $data       = data_get($payload, 'data', []);
 
             if (!$providerId) {
                 Log::warning('⚠️ Webhook PodPay Withdraw sem objectId.', [
                     'payload' => $payload
                 ]);
-
                 return response()->json(['error' => 'missing_reference'], 422);
             }
 
             /**
              * -----------------------------------------------------
-             * 3) Mapear status PodPay → sistema
+             * 3) Mapeamento de status (segundo documentação PodPay)
              * -----------------------------------------------------
              */
-            $providerStatus = strtoupper(data_get($data, 'status', 'UNKNOWN'));
+            $providerStatus = strtoupper(trim(data_get($data, 'status', 'UNKNOWN')));
 
             $map = [
                 'COMPLETED'        => 'paid',
@@ -67,26 +65,30 @@ class PodPayWithdrawWebhookController extends Controller
 
             if (!$newStatus) {
                 Log::info('ℹ️ Webhook PodPay ignorado — status não mapeado', [
-                    'providerStatus' => $providerStatus
+                    'status_raw' => $providerStatus,
+                    'providerId' => $providerId
                 ]);
 
-                return response()->json(['success' => true, 'ignored' => true]);
+                return response()->json([
+                    'success' => true,
+                    'ignored' => true
+                ]);
             }
 
             /**
              * -----------------------------------------------------
-             * 4) Enviar para WithdrawService (já trata tudo)
+             * 4) Processar via WithdrawService
              * -----------------------------------------------------
              */
             $result = $this->withdrawService->handleWebhook([
-                'provider_id' => $providerId,
+                'provider_id'     => $providerId,
                 'provider_status' => $newStatus,
-                'raw' => $payload,
+                'raw'             => $payload,
             ]);
 
             /**
              * -----------------------------------------------------
-             * 5) Retornos consistentes
+             * 5) Resposta final
              * -----------------------------------------------------
              */
             if (isset($result['paid'])) {
@@ -105,7 +107,7 @@ class PodPayWithdrawWebhookController extends Controller
 
             return response()->json([
                 'success' => true,
-                'ignored' => true,
+                'status'  => 'processing',
             ]);
 
         } catch (\Throwable $e) {

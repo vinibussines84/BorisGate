@@ -72,7 +72,7 @@ class ProcessWithdrawJob implements ShouldQueue
 
         /*
         |--------------------------------------------------------------------------
-        | 2) Pegar provider_reference
+        | 2) Obter provider_reference
         |--------------------------------------------------------------------------
         */
         $providerId = data_get($resp, 'data.id');
@@ -89,15 +89,20 @@ class ProcessWithdrawJob implements ShouldQueue
 
         /*
         |--------------------------------------------------------------------------
-        | 3) Mapear status PodPay corretamente
+        | 3) Mapear status PodPay
         |--------------------------------------------------------------------------
         */
+        $providerStatusRaw = data_get($resp, 'data.status', 'PROCESSING');
+        $providerStatus = strtoupper(trim($providerStatusRaw));
 
-        $providerStatus = strtoupper(data_get($resp, 'data.status', 'PROCESSING'));
+        Log::info('[ProcessWithdrawJob] Status recebido da PodPay', [
+            'withdraw_id' => $this->withdraw->id,
+            'provider_status_raw' => $providerStatusRaw
+        ]);
 
         $status = match ($providerStatus) {
             'COMPLETED'        => 'paid',
-            'CANCELLED', 
+            'CANCELLED',
             'REFUSED'          => 'failed',
             'PROCESSING',
             'PENDING_QUEUE',
@@ -107,7 +112,7 @@ class ProcessWithdrawJob implements ShouldQueue
 
         /*
         |--------------------------------------------------------------------------
-        | 4) Atualizar withdraw local
+        | 4) Atualizar withdrawal local
         |--------------------------------------------------------------------------
         */
         $withdrawService->updateProviderReference(
@@ -119,11 +124,12 @@ class ProcessWithdrawJob implements ShouldQueue
 
         /*
         |--------------------------------------------------------------------------
-        | 5) Se veio PAGO → finalizar na hora
+        | 5) Se já vier pago → finaliza imediatamente
         |--------------------------------------------------------------------------
         */
         if ($status === 'paid') {
-            Log::info('[ProcessWithdrawJob] Saque aprovado imediatamente (PodPay)', [
+
+            Log::info('[ProcessWithdrawJob] Saque pago imediatamente (PodPay)', [
                 'withdraw_id' => $this->withdraw->id,
             ]);
 
@@ -133,7 +139,7 @@ class ProcessWithdrawJob implements ShouldQueue
 
         /*
         |--------------------------------------------------------------------------
-        | 6) Caso contrário, aguardar webhook PodPay
+        | 6) Caso contrário aguarda webhook
         |--------------------------------------------------------------------------
         */
         Log::info('[ProcessWithdrawJob] Saque enviado e aguardando webhook PodPay', [
