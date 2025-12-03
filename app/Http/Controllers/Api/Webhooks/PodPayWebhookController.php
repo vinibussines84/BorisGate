@@ -4,7 +4,6 @@ namespace App\Http\Controllers\Api\Webhooks;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use App\Models\Transaction;
 use App\Enums\TransactionStatus;
@@ -28,27 +27,30 @@ class PodPayWebhookController extends Controller
 
             $data = data_get($raw, 'data', []);
 
-            $externalRef = data_get($data, 'externalRef');
-            $txid        = data_get($data, 'id');
+            $externalRef = data_get($data, 'externalRef');   // ID que VOCÊ enviou
+            $providerId  = data_get($data, 'id');            // ID da PodPay
+            $secureId    = data_get($data, 'secureId');      // Também pode ser usado como fallback
             $status      = strtolower(data_get($data, 'status', 'unknown'));
 
-            if (!$externalRef && !$txid) {
+            if (!$externalRef && !$providerId && !$secureId) {
                 return response()->json(['error' => 'missing_reference'], 422);
             }
 
             /* ---------------------------------------------------------
-             * 2️⃣ Buscar transação com LOCK
+             * 2️⃣ Buscar transação (3 níveis de fallback)
              * ---------------------------------------------------------*/
             $tx = Transaction::query()
                 ->when($externalRef, fn($q) => $q->where('external_reference', $externalRef))
-                ->when(!$externalRef && $txid, fn($q) => $q->where('txid', $txid))
+                ->when(!$externalRef && $providerId, fn($q) => $q->where('provider_transaction_id', $providerId))
+                ->when(!$externalRef && !$providerId && $secureId, fn($q) => $q->where('txid', $secureId))
                 ->lockForUpdate()
                 ->first();
 
             if (!$tx) {
                 Log::warning("⚠️ TX não encontrada para webhook PodPay", [
                     'externalRef' => $externalRef,
-                    'txid'        => $txid,
+                    'providerId'  => $providerId,
+                    'secureId'    => $secureId,
                 ]);
                 return response()->json(['error' => 'Transaction not found'], 404);
             }
@@ -64,53 +66,60 @@ class PodPayWebhookController extends Controller
             }
 
             /* ---------------------------------------------------------
-             * 4️⃣ Mapeamento real
-             * ---------------------------------------------------------*/
+             * 4️⃣ Mapeamento OFICIAL PodPay → Sistema
+             * ---------------------------------------------------------
+             *
+             * Status reais do PIX PodPay para Entrada:
+             * waiting_payment → pendente
+             * processing       → em média
+             * completed        → pago
+             * refused/error    → falhou
+             */
             $map = [
-                'paid'       => TransactionStatus::PAGA,
-                'approved'   => TransactionStatus::PAGA,
-                'confirmed'  => TransactionStatus::PAGA,
-                'completed'  => TransactionStatus::PAGA,
+                'paid'             => TransactionStatus::PAGA,
+                'completed'        => TransactionStatus::PAGA,
 
-                'pending'         => TransactionStatus::PENDENTE,
-                'waiting'         => TransactionStatus::PENDENTE,
-                'waiting_payment' => TransactionStatus::PENDENTE,
+                'pending'          => TransactionStatus::PENDENTE,
+                'waiting_payment'  => TransactionStatus::PENDENTE,
+                'waiting'          => TransactionStatus::PENDENTE,
 
-                'created'    => TransactionStatus::MED,
-                'processing' => TransactionStatus::MED,
-                'authorized' => TransactionStatus::MED,
+                'processing'       => TransactionStatus::MED,
+                'created'          => TransactionStatus::MED,
 
-                'failed'     => TransactionStatus::FALHA,
-                'error'      => TransactionStatus::FALHA,
-                'canceled'   => TransactionStatus::FALHA,
-                'cancelled'  => TransactionStatus::FALHA,
-                'denied'     => TransactionStatus::FALHA,
-                'rejected'   => TransactionStatus::FALHA,
-                'refused'    => TransactionStatus::FALHA,
-                'returned'   => TransactionStatus::FALHA,
-                'expired'    => TransactionStatus::FALHA,
+                'failed'           => TransactionStatus::FALHA,
+                'error'            => TransactionStatus::FALHA,
+                'canceled'         => TransactionStatus::FALHA,
+                'cancelled'        => TransactionStatus::FALHA,
+                'refused'          => TransactionStatus::FALHA,
+                'denied'           => TransactionStatus::FALHA,
+                'rejected'         => TransactionStatus::FALHA,
+                'returned'         => TransactionStatus::FALHA,
+                'expired'          => TransactionStatus::FALHA,
             ];
 
             $newStatus = $map[$status] ?? null;
 
             if (!$newStatus) {
+                Log::info("ℹ️ Webhook PodPay ignorado — status não mapeado", [
+                    'status' => $status,
+                ]);
                 return response()->json(['ignored' => true]);
             }
 
             $oldStatus = TransactionStatus::tryFrom($tx->status);
 
             /* ---------------------------------------------------------
-             * 5️⃣ ATUALIZAÇÃO FINANCEIRA (não dispara observer)
+             * 5️⃣ Aplicar lógica financeira
              * ---------------------------------------------------------*/
             $wallet->applyStatusChange($tx, $oldStatus, $newStatus);
 
             /* ---------------------------------------------------------
-             * 6️⃣ Atualizar TX sem acionar Observer
+             * 6️⃣ Atualizar TX silenciosamente
              * ---------------------------------------------------------*/
             $this->updateTransactionQuietly($tx, $newStatus, $data);
 
             /* ---------------------------------------------------------
-             * 7️⃣ Enviar webhook IN ao cliente APENAS uma vez
+             * 7️⃣ Disparar webhook interno APENAS quando pago
              * ---------------------------------------------------------*/
             if (
                 $newStatus === TransactionStatus::PAGA &&
@@ -137,9 +146,8 @@ class PodPayWebhookController extends Controller
         }
     }
 
-
     /**
-     * Atualiza TX SEM disparar observer
+     * Atualiza TX sem observer
      */
     private function updateTransactionQuietly(Transaction $tx, TransactionStatus $newStatus, array $data)
     {
