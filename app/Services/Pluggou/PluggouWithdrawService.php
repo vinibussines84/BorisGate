@@ -111,7 +111,7 @@ class PluggouWithdrawService
                 'success' => false,
                 'status'  => 500,
                 'data'    => [
-                    'message'   => 'Erro inesperado ao chamar API.',
+                    'message'   => 'DICT:KEYINVALID',
                     'exception' => $e->getMessage(),
                 ],
             ];
