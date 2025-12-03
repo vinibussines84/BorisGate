@@ -16,6 +16,9 @@ class SendWebhookWithdrawUpdatedJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
+    public $tries   = 5;
+    public $timeout = 10;
+
     protected int $userId;
     protected int $withdrawId;
     protected string $status;
@@ -29,101 +32,94 @@ class SendWebhookWithdrawUpdatedJob implements ShouldQueue
         string $reference,
         array $raw = []
     ) {
-        $this->userId = $userId;
+        $this->userId    = $userId;
         $this->withdrawId = $withdrawId;
-        $this->status = strtoupper($status);
-        $this->reference = $reference;
-        $this->raw = $raw;
+        $this->status     = strtoupper($status); // APPROVED, FAILED
+        $this->reference  = $reference;
+        $this->raw        = $raw;
 
-        // fila separada
         $this->onQueue('webhooks');
     }
 
     public function handle(): void
     {
-        $user = User::find($this->userId);
+        $user     = User::find($this->userId);
         $withdraw = Withdraw::find($this->withdrawId);
 
         if (!$user || !$withdraw) {
-            Log::warning('⚠️ Webhook OUT ignorado: usuário ou saque não encontrados.', [
-                'user_id'     => $this->userId,
+            Log::warning('⚠️ withdraw.updated ignorado — registro não encontrado.', [
                 'withdraw_id' => $this->withdrawId,
             ]);
             return;
         }
 
-        try {
-            /* ============================================================
-             * 1️⃣ Usuário não configurou webhook → ignorar
-             * ============================================================ */
-            if (!$user->webhook_enabled || !$user->webhook_out_url) {
-                Log::info('ℹ️ Webhook OUT ignorado (usuário sem webhook configurado).', [
-                    'user_id' => $user->id,
-                ]);
-                return;
-            }
+        if (!$user->webhook_enabled || !$user->webhook_out_url) {
+            Log::info('ℹ️ withdraw.updated ignorado — webhook desabilitado.', [
+                'user_id' => $user->id,
+            ]);
+            return;
+        }
 
-            /* ============================================================
-             * 2️⃣ Montando payload final
-             * ============================================================ */
+        /**
+         * ▶ Preparar dados
+         */
+        $meta = $withdraw->meta ?? [];
 
-            $e2e = $withdraw->meta['e2e'] ?? null;
-            $receiverName = $withdraw->meta['receiver_name'] ?? $user->name;
-            $receiverBank = $withdraw->meta['receiver_bank'] ?? 'Bank N/A';
-            $receiverIspb = $withdraw->meta['receiver_ispb'] ?? '90400888';
+        $payload = [
+            'event' => 'withdraw.updated',
+            'data'  => [
+                'id'        => $meta['internal_reference'] ?? $withdraw->id,
+                'status'    => $this->status,
+                'E2E'       => $meta['e2e'] ?? null,
+                'requested' => (float) $withdraw->gross_amount,
+                'paid'      => (float) $withdraw->amount,
 
-            $failedReason =
-                $this->status !== 'APPROVED'
-                    ? ($this->raw['data']['description'] ?? 'Withdraw Failed')
-                    : null;
-
-            $payload = [
-                'id'        => $this->reference,
-                'status'    => $this->status,                   // APPROVED ou FAILED
-                'requested' => (float) $withdraw->gross_amount, // valor solicitado
-                'paid'      => (float) $withdraw->amount,       // valor líquido
                 'operation' => [
-                    'amount'      => (float) $withdraw->gross_amount,
+                    'amount'      => (float) $withdraw->amount,
                     'key'         => $withdraw->pixkey,
                     'key_type'    => strtoupper($withdraw->pixkey_type),
                     'description' => 'Withdraw',
-                    'details'     => [
-                        'name'      => $user->name,
-                        'document'  => $user->cpf_cnpj ?? '00000000000',
-                    ],
+                    'details'     => $meta['details'] ?? [],
                 ],
+
                 'receipt' => [[
                     'status'             => $this->status,
-                    'endtoend'           => $e2e,
+                    'endtoend'           => $meta['e2e'] ?? null,
                     'identifier'         => $this->reference,
-                    'receiver_name'      => $receiverName,
-                    'receiver_bank'      => $receiverBank,
-                    'receiver_bank_ispb' => $receiverIspb,
-                    'refused_reason'     => $failedReason,
+                    'receiver_name'      => $meta['receiver_name'] ?? $user->name,
+                    'receiver_bank'      => $meta['receiver_bank'] ?? 'Bank N/A',
+                    'receiver_bank_ispb' => $meta['receiver_ispb'] ?? '90400888',
+                    'refused_reason'     => $this->status !== 'APPROVED'
+                        ? ($this->raw['data']['description'] ?? 'Withdraw Failed')
+                        : null,
                 ]],
+
                 'external_id' => $withdraw->external_id,
-            ];
+            ],
+        ];
 
-            /* ============================================================
-             * 3️⃣ Enviar webhook OUT para o cliente
-             * ============================================================ */
+        /**
+         * ▶ Assinatura
+         */
+        $signature = hash_hmac('sha256', json_encode($payload), $user->secretkey);
 
-            $response = Http::timeout(12)->post($user->webhook_out_url, [
-                'event' => 'withdraw.updated',
-                'data'  => $payload,
-            ]);
+        try {
+            $response = Http::timeout(8)
+                ->retry(3, 200)
+                ->withHeaders([
+                    'X-Signature'      => $signature,
+                    'X-Webhook-Event'  => 'withdraw.updated',
+                ])
+                ->post($user->webhook_out_url, $payload);
 
-            Log::info('📤 Webhook OUT enviado (withdraw.updated)', [
-                'user_id'     => $user->id,
+            Log::info('📤 webhook withdraw.updated enviado', [
                 'withdraw_id' => $withdraw->id,
-                'status'      => $this->status,
-                'http_code'   => $response->status(),
+                'status'      => $response->status(),
             ]);
 
         } catch (\Throwable $e) {
-            Log::warning('⚠️ Falha ao enviar webhook OUT (withdraw.updated)', [
+            Log::error("❌ Falha ao enviar webhook withdraw.updated", [
                 'withdraw_id' => $withdraw->id,
-                'user_id'     => $user->id ?? null,
                 'error'       => $e->getMessage(),
             ]);
         }
