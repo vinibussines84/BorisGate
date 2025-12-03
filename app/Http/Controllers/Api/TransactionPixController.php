@@ -46,12 +46,10 @@ class TransactionPixController extends Controller
 
         $amountReais = (float) $data['amount'];
         $amountCents = (int) round($amountReais * 100);
-
-        $externalId = $data['external_id'];
-
-        $name     = $data['name'] ?? $user->name ?? 'Cliente';
-        $document = preg_replace('/\D/', '', $data['document']);
-        $phone    = $data['phone'] ?? $user->phone ?? '11999999999';
+        $externalId  = $data['external_id'];
+        $name        = $data['name'] ?? $user->name ?? 'Cliente';
+        $document    = preg_replace('/\D/', '', $data['document']);
+        $phone       = $data['phone'] ?? $user->phone ?? '11999999999';
 
         // ❌ Duplicidade
         if (Transaction::where('user_id', $user->id)
@@ -63,7 +61,7 @@ class TransactionPixController extends Controller
             ], 409);
         }
 
-        // 🧮 Criação local — PENDENTE até webhook
+        // 🧮 Criar local
         $tx = Transaction::create([
             'tenant_id'          => $user->tenant_id,
             'user_id'            => $user->id,
@@ -79,7 +77,7 @@ class TransactionPixController extends Controller
             'user_agent'         => $request->userAgent(),
         ]);
 
-        // 📦 Payload oficial da Pluggou
+        // Payload
         $payload = [
             'payment_method' => 'pix',
             'amount'         => $amountCents,
@@ -90,28 +88,21 @@ class TransactionPixController extends Controller
             ],
         ];
 
-        // 🚀 Envia para provedor
+        // 🚀 Envia para Pluggou
         try {
             $response = $pluggou->createTransaction($payload);
 
             if (!in_array($response['status'], [200, 201])) {
-                Log::error('ERRO_RESPOSTA', [
-                    'status' => $response['status'],
-                    'body'   => $response['body'],
-                    'payload'=> $payload,
-                ]);
-                throw new \Exception(json_encode($response['body']));
+                throw new \Exception("Provider error");
             }
 
             $body = $response['body'];
-
             $transactionId = data_get($body, 'data.id');
             $qrCodeText    = data_get($body, 'data.pix.emv');
 
             if (!$transactionId || !$qrCodeText) {
-                throw new \Exception("Invalid response: Missing id or EMV qrcode");
+                throw new \Exception("Invalid provider response");
             }
-
         } catch (\Throwable $e) {
 
             $tx->updateQuietly(['status' => TransactionStatus::FALHA]);
@@ -122,7 +113,7 @@ class TransactionPixController extends Controller
             ], 500);
         }
 
-        // 🕒 Atualiza local
+        // Atualiza local
         $tx->updateQuietly([
             'txid'                    => $transactionId,
             'provider_transaction_id' => $transactionId,
@@ -142,17 +133,21 @@ class TransactionPixController extends Controller
             ],
         ]);
 
-        // 📡 Webhook de criação
+        // Webhook IN
         if ($user->webhook_enabled && $user->webhook_in_url) {
             SendWebhookPixCreatedJob::dispatch($user->id, $tx->id);
         }
 
-        // Retorno
+        /*
+        |--------------------------------------------------------------------------
+        | 🔥 RETORNO FINAL — SEMPRE "pendente"
+        |--------------------------------------------------------------------------
+        */
         return response()->json([
             'success'        => true,
             'transaction_id' => $tx->id,
             'external_id'    => $externalId,
-            'status'         => $this->normalizeStatus($tx->status),
+            'status'         => 'pendente', // 🔥 minúsculo e PT-BR conforme solicitado
             'amount'         => number_format($amountReais, 2, '.', ''),
             'fee'            => number_format($tx->fee, 2, '.', ''),
             'txid'           => $transactionId,
@@ -162,7 +157,7 @@ class TransactionPixController extends Controller
 
     /*
     |--------------------------------------------------------------------------
-    | 🔥 Consultar por external_id (PIX + WITHDRAW)
+    | 🔥 Consultar (PIX + Saque)
     |--------------------------------------------------------------------------
     */
     public function statusByExternal(Request $request, string $externalId)
@@ -181,7 +176,7 @@ class TransactionPixController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | 1) Consulta PIX
+        | 1) PIX
         |--------------------------------------------------------------------------
         */
         $tx = Transaction::where('external_reference', $externalId)
@@ -195,7 +190,7 @@ class TransactionPixController extends Controller
                 'data' => [
                     'id'              => $tx->id,
                     'external_id'     => $tx->external_reference,
-                    'status'          => $this->normalizeStatus($tx->status),
+                    'status'          => $this->normalizeStatusPtBr($tx->status),
                     'amount'          => (float) $tx->amount,
                     'fee'             => (float) $tx->fee,
                     'txid'            => $tx->txid,
@@ -208,7 +203,7 @@ class TransactionPixController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | 2) Consulta Withdraw
+        | 2) Saque
         |--------------------------------------------------------------------------
         */
         $withdraw = Withdraw::where('external_id', $externalId)
@@ -217,7 +212,7 @@ class TransactionPixController extends Controller
 
         if ($withdraw) {
 
-            $meta = $withdraw->meta ?? [];
+            $meta    = $withdraw->meta ?? [];
             $receipt = data_get($meta, 'receipt', []);
 
             return response()->json([
@@ -227,11 +222,9 @@ class TransactionPixController extends Controller
                 'data' => [
                     'id'         => data_get($meta, 'internal_reference', $withdraw->id),
                     'status'     => $this->normalizeStatus($withdraw->status),
-                    'E2E'        => data_get($meta, 'e2e', null), // 🔥 AGORA RETORNA O E2E
-
+                    'E2E'        => data_get($meta, 'e2e'),
                     'requested'  => (float) $withdraw->gross_amount,
                     'paid'       => (float) $withdraw->amount,
-
                     'operation'  => [
                         'amount'      => (float) $withdraw->amount,
                         'key'         => $withdraw->pixkey,
@@ -239,24 +232,34 @@ class TransactionPixController extends Controller
                         'description' => 'Withdraw',
                         'details'     => data_get($meta, 'details', []),
                     ],
-
                     'receipt'     => $receipt,
                     'external_id' => $withdraw->external_id,
                 ],
             ]);
         }
 
-        /*
-        |--------------------------------------------------------------------------
-        | 3) Nada encontrado
-        |--------------------------------------------------------------------------
-        */
         return response()->json(['success' => false, 'error' => 'Transaction not found.'], 404);
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Status PT-BR para PIX IN
+    |--------------------------------------------------------------------------
+    */
+    private function normalizeStatusPtBr(string $status): string
+    {
+        return match (strtolower($status)) {
+            'paid', 'paga', 'approved', 'completed' => 'aprovado',
+            'failed', 'erro', 'error', 'rejected', 'canceled', 'cancelled' => 'falhou',
+            'pending', 'pendente', 'processing', 'under_review' => 'pendente',
+            default => strtolower($status),
+        };
     }
 
     /*
     |--------------------------------------------------------------------------
-    | 🔁 Normalização Oficial de Status
+    | Status EN-US para WEBHOOK Withdraw
     |--------------------------------------------------------------------------
     */
     private function normalizeStatus(string $status): string
