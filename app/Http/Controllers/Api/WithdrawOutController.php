@@ -68,7 +68,7 @@ class WithdrawOutController extends Controller
             $data = $request->validate([
                 'amount'       => ['required', 'numeric', 'min:0.01'],
                 'key'          => ['required', 'string'],
-                'key_type'     => ['required', Rule::in(['cpf','cnpj','email','phone','random'])],
+                'key_type'     => ['required', Rule::in(['cpf','cnpj','email','phone','random','evp'])],
                 'description'  => ['nullable','string','max:255'],
                 'external_id'  => ['nullable','string','max:64'],
             ]);
@@ -99,12 +99,10 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 6) Taxa da Pluggou é absorvida
+            | 6) Taxas
             |--------------------------------------------------------------------------
+            | Na PodPay: netPayout = true → envia BRUTO e recebe LÍQUIDO
             */
-            $pluggouFee = 0.20;
-            $amountToSend = $gross + $pluggouFee;
-
             $fee = 0;
             $net = $gross;
 
@@ -139,31 +137,34 @@ class WithdrawOutController extends Controller
                     'key_type'    => $data['key_type'],
                     'external_id' => $externalId,
                     'internal_ref'=> $internalRef,
-                    'provider'    => 'pluggou',
+                    'provider'    => 'podpay',
                 ]
             );
 
             /*
             |--------------------------------------------------------------------------
-            | 9) Criar payload p/ fila
+            | 9) PAYLOAD CORRETO PARA PODPAY
             |--------------------------------------------------------------------------
             */
             $payload = [
-                "amount"    => (int) round($amountToSend * 100),
-                "key_type"  => strtolower($data['key_type']),
-                "key_value" => $data['key'],
+                "amount"      => (int) round($gross * 100),  // ENVIA BRUTO
+                "netPayout"   => true,                       // RECEBE LÍQUIDO
+                "pixKey"      => $data['key'],
+                "pixKeyType"  => strtoupper($data['key_type']),
+                "postbackUrl" => url('/api/webhooks/podpay/withdraw'),
+                "externalRef" => $externalId,
             ];
 
             /*
             |--------------------------------------------------------------------------
-            | 10) Enviar para a FILA — não esperar a Pluggou
+            | 10) Enviar job p/ fila
             |--------------------------------------------------------------------------
             */
             dispatch(new ProcessWithdrawJob($withdraw, $payload));
 
             /*
             |--------------------------------------------------------------------------
-            | 11) Webhook OUT "withdraw.created"
+            | 11) Webhook OUT imediato ("withdraw.created")
             |--------------------------------------------------------------------------
             */
             if ($user->webhook_enabled && $user->webhook_out_url) {
@@ -177,7 +178,7 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 12) Retorno imediato (SEM esperar a Pluggou)
+            | 12) Retorno imediato
             |--------------------------------------------------------------------------
             */
             return response()->json([

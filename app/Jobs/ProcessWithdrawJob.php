@@ -3,8 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\Withdraw;
-use App\Models\User;
-use App\Services\Pluggou\PluggouWithdrawService;
+use App\Services\PodPay\PodPayCashoutService;
 use App\Services\Withdraw\WithdrawService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -27,21 +26,20 @@ class ProcessWithdrawJob implements ShouldQueue
     {
         $this->withdraw = $withdraw;
         $this->payload  = $payload;
-
-        $this->onQueue('withdraws'); // ✔ Ideal para Horizon
+        $this->onQueue('withdraws');
     }
 
     public function handle(
-        PluggouWithdrawService $pluggou,
+        PodPayCashoutService $podpay,
         WithdrawService $withdrawService
     ) {
-        Log::info('[ProcessWithdrawJob] Iniciando job', [
+        Log::info('[ProcessWithdrawJob] Iniciando job (PodPay)', [
             'withdraw_id' => $this->withdraw->id,
             'payload'     => $this->payload,
         ]);
 
-        // Verifica se já está finalizado
-        if (in_array($this->withdraw->status, ['paid','failed'], true)) {
+        // Se já finalizado → ignora
+        if (in_array($this->withdraw->status, ['paid', 'failed'], true)) {
             Log::warning('[ProcessWithdrawJob] Ignorado — saque já finalizado', [
                 'id'     => $this->withdraw->id,
                 'status' => $this->withdraw->status,
@@ -51,36 +49,35 @@ class ProcessWithdrawJob implements ShouldQueue
 
         /*
         |--------------------------------------------------------------------------
-        | 1) Enviar para Pluggou
+        | 1) Enviar saque para a PodPay
         |--------------------------------------------------------------------------
         */
-        $resp = $pluggou->createWithdrawal($this->payload);
+        $resp = $podpay->createWithdrawal($this->payload);
 
         if (!$resp['success']) {
 
-            $reason = $resp['data']['message']
-                ?? ($resp['validation_errors'] ?? null)
-                ?? "Erro ao criar saque na Pluggou";
+            $reason = $resp['response']['message']
+                ?? $resp['exception']
+                ?? 'Erro PodPay Cashout';
 
-            Log::error('[ProcessWithdrawJob] Falha ao enviar saque p/ Pluggou', [
+            Log::error('[ProcessWithdrawJob] Falha no cashout PodPay', [
                 'withdraw_id' => $this->withdraw->id,
                 'reason'      => $reason,
                 'response'    => $resp,
             ]);
 
             $withdrawService->refundLocal($this->withdraw, $reason);
-
             return;
         }
 
         /*
         |--------------------------------------------------------------------------
-        | 2) Extrair o provider_reference
+        | 2) Pegar provider_reference
         |--------------------------------------------------------------------------
         */
-        $providerRef = data_get($resp, 'data.data.id');
+        $providerId = data_get($resp, 'data.id');
 
-        if (!$providerRef) {
+        if (!$providerId) {
             Log::error('[ProcessWithdrawJob] Sem provider_reference', [
                 'withdraw_id' => $this->withdraw->id,
                 'response'    => $resp,
@@ -92,48 +89,56 @@ class ProcessWithdrawJob implements ShouldQueue
 
         /*
         |--------------------------------------------------------------------------
-        | 3) Atualizar o withdraw local com a referência
+        | 3) Mapear status PodPay corretamente
         |--------------------------------------------------------------------------
         */
-        $providerStatus = strtolower(data_get($resp, 'data.data.status', 'processing'));
+
+        $providerStatus = strtoupper(data_get($resp, 'data.status', 'PROCESSING'));
 
         $status = match ($providerStatus) {
-            'paid','success','completed' => 'paid',
-            'failed','error','canceled','cancelled' => 'failed',
-            default => 'processing',
+            'COMPLETED'        => 'paid',
+            'CANCELLED', 
+            'REFUSED'          => 'failed',
+            'PROCESSING',
+            'PENDING_QUEUE',
+            'PENDING_ANALYSIS' => 'processing',
+            default            => 'processing',
         };
 
+        /*
+        |--------------------------------------------------------------------------
+        | 4) Atualizar withdraw local
+        |--------------------------------------------------------------------------
+        */
         $withdrawService->updateProviderReference(
             $this->withdraw,
-            $providerRef,
+            $providerId,
             $status,
             $resp
         );
 
         /*
         |--------------------------------------------------------------------------
-        | 4) Se o saque já vier como PAGO, finaliza agora mesmo
+        | 5) Se veio PAGO → finalizar na hora
         |--------------------------------------------------------------------------
         */
         if ($status === 'paid') {
-
-            Log::info('[ProcessWithdrawJob] Saque aprovado imediatamente', [
+            Log::info('[ProcessWithdrawJob] Saque aprovado imediatamente (PodPay)', [
                 'withdraw_id' => $this->withdraw->id,
             ]);
 
             $withdrawService->markAsPaid($this->withdraw, $resp);
-
             return;
         }
 
         /*
         |--------------------------------------------------------------------------
-        | 5) Caso contrário, aguarda o webhook da Pluggou
+        | 6) Caso contrário, aguardar webhook PodPay
         |--------------------------------------------------------------------------
         */
-        Log::info('[ProcessWithdrawJob] Saque enviado e aguardando webhook', [
+        Log::info('[ProcessWithdrawJob] Saque enviado e aguardando webhook PodPay', [
             'withdraw_id' => $this->withdraw->id,
-            'provider_ref'=> $providerRef,
+            'provider_ref'=> $providerId,
             'status'      => $status,
         ]);
     }
