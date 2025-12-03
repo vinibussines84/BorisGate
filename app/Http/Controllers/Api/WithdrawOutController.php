@@ -48,18 +48,21 @@ class WithdrawOutController extends Controller
             | 2) Normalização da key_type
             |--------------------------------------------------------------------------
             */
-            $request->merge([
-                'key_type' => strtolower($request->input('key_type')),
-            ]);
+            $keyType = strtolower($request->input('key_type'));
+            $key     = $request->input('key');
 
-            // Normalização para telefone
-            if ($request->input('key_type') === 'phone') {
-                $phone = preg_replace('/\D/', '', $request->input('key'));
+            if ($keyType === 'phone') {
+                $phone = preg_replace('/\D/', '', $key);
                 if (str_starts_with($phone, '55')) {
                     $phone = substr($phone, 2);
                 }
-                $request->merge(['key' => $phone]);
+                $key = $phone;
             }
+
+            $request->merge([
+                'key'      => $key,
+                'key_type' => $keyType
+            ]);
 
             /*
             |--------------------------------------------------------------------------
@@ -76,7 +79,7 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 4) Valor mínimo permitido
+            | 4) Valor mínimo
             |--------------------------------------------------------------------------
             */
             $gross = (float) $data['amount'];
@@ -87,7 +90,7 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 5) Validação da chave PIX
+            | 5) Validar chave PIX
             |--------------------------------------------------------------------------
             */
             if (!KeyValidator::validate($data['key'], strtoupper($data['key_type']))) {
@@ -124,7 +127,7 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 8) Criar saque local imediatamente
+            | 8) Criar saque local
             |--------------------------------------------------------------------------
             */
             $withdraw = $this->withdrawService->create(
@@ -134,7 +137,7 @@ class WithdrawOutController extends Controller
                 $fee,
                 [
                     'key'         => $data['key'],
-                    'key_type'    => $data['key_type'],  // mantém minúsculo
+                    'key_type'    => $data['key_type'],
                     'external_id' => $externalId,
                     'internal_ref'=> $internalRef,
                     'provider'    => 'podpay',
@@ -143,28 +146,29 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 9) PAYLOAD CORRETO para PodPay
+            | 9) Payload PodPay
             |--------------------------------------------------------------------------
             */
             $payload = [
-                "amount"      => (int) round($gross * 100),         // valor BRUTO
-                "netPayout"   => true,                              // recebe líquido
+                "amount"      => (int) round($gross * 100),
+                "netPayout"   => true,
                 "pixKey"      => $data['key'],
-                "pixKeyType"  => strtolower($data['key_type']),     // OBRIGATORIAMENTE minúsculo
+                "pixKeyType"  => strtolower($data['key_type']),
                 "postbackUrl" => url('/api/webhooks/podpay/withdraw'),
                 "externalRef" => $externalId,
             ];
 
             /*
             |--------------------------------------------------------------------------
-            | 10) Enviar job para fila
+            | 10) Enviar job PARA A FILA CORRETA (withdraws)
             |--------------------------------------------------------------------------
             */
-            dispatch(new ProcessWithdrawJob($withdraw, $payload));
+            ProcessWithdrawJob::dispatch($withdraw, $payload)
+                ->onQueue('withdraws');
 
             /*
             |--------------------------------------------------------------------------
-            | 11) webhook OUT imediato — withdraw.created
+            | 11) Webhook OUT imediato
             |--------------------------------------------------------------------------
             */
             if ($user->webhook_enabled && $user->webhook_out_url) {
@@ -173,7 +177,7 @@ class WithdrawOutController extends Controller
                     $withdraw->id,
                     'processing',
                     null
-                );
+                )->onQueue('webhooks');
             }
 
             /*
