@@ -62,13 +62,14 @@ return [
     */
 
     'waits' => [
-        'redis:default' => 60,
-        'redis:webhooks' => 60,
+        'redis:default'   => 60,
+        'redis:webhooks'  => 60,
+        'redis:withdraws' => 60,
     ],
 
     /*
     |--------------------------------------------------------------------------
-    | Job Trimming Times (em minutos)
+    | Job Trimming Times
     |--------------------------------------------------------------------------
     */
 
@@ -76,19 +77,18 @@ return [
         'recent'        => 60,
         'pending'       => 60,
         'completed'     => 60,
-        'recent_failed' => 10080, // 7 dias
-        'failed'        => 10080, // 7 dias
+        'recent_failed' => 10080,
+        'failed'        => 10080,
         'monitored'     => 10080,
     ],
 
     /*
     |--------------------------------------------------------------------------
-    | Silenced Jobs
+    | Silenced Jobs / Tags
     |--------------------------------------------------------------------------
     */
 
     'silenced' => [],
-
     'silenced_tags' => [],
 
     /*
@@ -114,7 +114,7 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Memory Limit (MB)
+    | Memory Limit
     |--------------------------------------------------------------------------
     */
 
@@ -130,7 +130,7 @@ return [
 
         /*
         |--------------------------------------------------------------------------
-        | SUPERVISOR DEFAULT → FILA NORMAL
+        | 🟢 SUPERVISOR DEFAULT (fila normal)
         |--------------------------------------------------------------------------
         */
         'supervisor-default' => [
@@ -142,34 +142,56 @@ return [
             'maxProcesses' => 10,
             'minProcesses' => 1,
 
-            'maxTime' => 0,
-            'maxJobs' => 0,
-            'memory'  => 256,
-            'tries'   => 3,
-            'timeout' => 90,
-            'nice'    => 0,
+            'maxTime'   => 0,
+            'maxJobs'   => 0,
+            'memory'    => 256,
+            'tries'     => 3,
+            'timeout'   => 90,
+            'nice'      => 0,
         ],
 
         /*
         |--------------------------------------------------------------------------
-        | SUPERVISOR WEBHOOKS → FILA EXCLUSIVA
+        | 🔵 SUPERVISOR WEBHOOKS (fila exclusiva)
         |--------------------------------------------------------------------------
         */
         'supervisor-webhooks' => [
             'connection' => 'redis',
-            'queue'      => ['webhooks'], // 🔥 SOMENTE WEBHOOKS
+            'queue'      => ['webhooks'],
+            'balance'    => 'auto',
+            'autoScalingStrategy' => 'time',
+
+            'maxProcesses' => 8,
+            'minProcesses' => 1,
+
+            'maxTime'   => 0,
+            'maxJobs'   => 0,
+            'memory'    => 256,
+            'tries'     => 3,
+            'timeout'   => 120,
+            'nice'      => 0,
+        ],
+
+        /*
+        |--------------------------------------------------------------------------
+        | 🟣 SUPERVISOR WITHDRAWS (fila exclusiva)
+        |--------------------------------------------------------------------------
+        */
+        'supervisor-withdraws' => [
+            'connection' => 'redis',
+            'queue'      => ['withdraws'],   // 🔥 AGORA A FILA EXISTE
             'balance'    => 'auto',
             'autoScalingStrategy' => 'time',
 
             'maxProcesses' => 5,
             'minProcesses' => 1,
 
-            'maxTime' => 0,
-            'maxJobs' => 0,
-            'memory'  => 256,
-            'tries'   => 3,
-            'timeout' => 120,
-            'nice'    => 0,
+            'maxTime'   => 0,
+            'maxJobs'   => 0,
+            'memory'    => 256,
+            'tries'     => 3,
+            'timeout'   => 120,
+            'nice'      => 0,
         ],
     ],
 
@@ -184,15 +206,21 @@ return [
         'production' => [
 
             'supervisor-default' => [
-                'maxProcesses'     => 15,
-                'balanceMaxShift'  => 1,
-                'balanceCooldown'  => 3,
+                'maxProcesses'    => 15,
+                'balanceMaxShift' => 1,
+                'balanceCooldown' => 3,
             ],
 
             'supervisor-webhooks' => [
-                'maxProcesses'     => 8,
-                'balanceMaxShift'  => 1,
-                'balanceCooldown'  => 3,
+                'maxProcesses'    => 10,
+                'balanceMaxShift' => 1,
+                'balanceCooldown' => 3,
+            ],
+
+            'supervisor-withdraws' => [
+                'maxProcesses'    => 8,
+                'balanceMaxShift' => 1,
+                'balanceCooldown' => 3,
             ],
         ],
 
@@ -203,6 +231,10 @@ return [
             ],
 
             'supervisor-webhooks' => [
+                'maxProcesses' => 2,
+            ],
+
+            'supervisor-withdraws' => [
                 'maxProcesses' => 2,
             ],
         ],
