@@ -16,12 +16,6 @@ class PodPayWithdrawWebhookController extends Controller
     public function __invoke(Request $request)
     {
         try {
-
-            /**
-             * -----------------------------------------------------
-             * 1) Normaliza payload
-             * -----------------------------------------------------
-             */
             $payload = $request->json()->all()
                 ?: json_decode($request->getContent(), true)
                 ?: [];
@@ -30,27 +24,14 @@ class PodPayWithdrawWebhookController extends Controller
                 'payload' => $payload
             ]);
 
-            /**
-             * -----------------------------------------------------
-             * 2) Extrair referencia do saque (objectId)
-             * -----------------------------------------------------
-             */
             $providerId = (string) data_get($payload, 'objectId');
             $data       = data_get($payload, 'data', []);
 
             if (!$providerId) {
-                Log::warning('⚠️ Webhook PodPay Withdraw sem objectId.', [
-                    'payload' => $payload
-                ]);
                 return response()->json(['error' => 'missing_reference'], 422);
             }
 
-            /**
-             * -----------------------------------------------------
-             * 3) Mapeamento de status (segundo documentação PodPay)
-             * -----------------------------------------------------
-             */
-            $providerStatus = strtoupper(trim(data_get($data, 'status', 'UNKNOWN')));
+            $providerStatus = strtoupper(data_get($data, 'status', 'UNKNOWN'));
 
             $map = [
                 'COMPLETED'        => 'paid',
@@ -64,50 +45,18 @@ class PodPayWithdrawWebhookController extends Controller
             $newStatus = $map[$providerStatus] ?? null;
 
             if (!$newStatus) {
-                Log::info('ℹ️ Webhook PodPay ignorado — status não mapeado', [
-                    'status_raw' => $providerStatus,
-                    'providerId' => $providerId
-                ]);
-
-                return response()->json([
-                    'success' => true,
-                    'ignored' => true
-                ]);
+                return response()->json(['success' => true, 'ignored' => true]);
             }
 
-            /**
-             * -----------------------------------------------------
-             * 4) Processar via WithdrawService
-             * -----------------------------------------------------
-             */
             $result = $this->withdrawService->handleWebhook([
                 'provider_id'     => $providerId,
                 'provider_status' => $newStatus,
                 'raw'             => $payload,
             ]);
 
-            /**
-             * -----------------------------------------------------
-             * 5) Resposta final
-             * -----------------------------------------------------
-             */
-            if (isset($result['paid'])) {
-                return response()->json([
-                    'success' => true,
-                    'status'  => 'paid',
-                ]);
-            }
-
-            if (isset($result['failed'])) {
-                return response()->json([
-                    'success' => true,
-                    'status'  => 'failed',
-                ]);
-            }
-
             return response()->json([
                 'success' => true,
-                'status'  => 'processing',
+                'status'  => $newStatus,
             ]);
 
         } catch (\Throwable $e) {
