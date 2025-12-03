@@ -9,7 +9,7 @@ use App\Models\Transaction;
 use App\Models\Withdraw;
 use App\Models\User;
 use App\Enums\TransactionStatus;
-use App\Services\Pluggou\PluggouService;
+use App\Services\Lumnis\LumnisService;
 use App\Jobs\SendWebhookPixCreatedJob;
 use Carbon\Carbon;
 
@@ -20,7 +20,7 @@ class TransactionPixController extends Controller
     | 🔥 Criar PIX (Cash-in)
     |--------------------------------------------------------------------------
     */
-    public function store(Request $request, PluggouService $pluggou)
+    public function store(Request $request, LumnisService $lumnis)
     {
         // 🔐 Auth
         $auth   = $request->header('X-Auth-Key');
@@ -82,7 +82,7 @@ class TransactionPixController extends Controller
             'status'             => TransactionStatus::PENDENTE,
             'currency'           => 'BRL',
             'method'             => 'pix',
-            'provider'           => 'Interno',
+            'provider'           => 'Lumnis',
             'amount'             => $amountReais,
             'fee'                => $this->computeFee($user, $amountReais),
             'external_reference' => $externalId,
@@ -90,28 +90,54 @@ class TransactionPixController extends Controller
             'user_agent'         => $request->userAgent(),
         ]);
 
-        // Payload
+        /*
+        |--------------------------------------------------------------------------
+        | 🔧 Payload no formato LUMNIS — SOMENTE PIX
+        |--------------------------------------------------------------------------
+        */
         $payload = [
-            'payment_method' => 'pix',
-            'amount'         => $amountCents,
-            'buyer' => [
-                'buyer_name'     => $name,
-                'buyer_document' => $document,
-                'buyer_phone'    => $phone,
+            "amount"      => $amountCents,
+            "externalRef" => $externalId,
+            "postback"    => $user->webhook_in_url ?? null,
+            "method"      => "PIX",
+            "installments"=> 1,
+            "customer" => [
+                "name"     => $name,
+                "email"    => $user->email,
+                "phone"    => $phone,
+                "document" => $document,
+                "address"  => [
+                    "street"  => "N/D",
+                    "number"  => "0",
+                    "city"    => "N/D",
+                    "state"   => "SP",
+                    "country" => "Brasil",
+                    "zip"     => "00000-000"
+                ]
             ],
+            "items" => [
+                [
+                    "title"     => "PIX Deposit",
+                    "unitPrice" => $amountCents,
+                    "quantity"  => 1,
+                    "tangible"  => false
+                ]
+            ]
         ];
 
-        // 🚀 Envia para Pluggou
+        // 🚀 Envia para Lumnis
         try {
-            $response = $pluggou->createTransaction($payload);
+            $response = $lumnis->createTransaction($payload);
 
             if (!in_array($response['status'], [200, 201])) {
                 throw new \Exception("Provider error");
             }
 
             $body = $response['body'];
-            $transactionId = data_get($body, 'data.id');
-            $qrCodeText    = data_get($body, 'data.pix.emv');
+
+            // Ajustar campos conforme retorno Lumnis
+            $transactionId = data_get($body, 'id');
+            $qrCodeText    = data_get($body, 'pix.qrCodeText');
 
             if (!$transactionId || !$qrCodeText) {
                 throw new \Exception("Invalid provider response");
@@ -135,14 +161,7 @@ class TransactionPixController extends Controller
                 'document'     => $document,
                 'phone'        => $phone,
                 'qr_code_text' => $qrCodeText,
-                'provider_raw' => [
-                    'id'         => $transactionId,
-                    'amount'     => $amountCents,
-                    'emv'        => $qrCodeText,
-                    'status'     => 'pending',
-                    'external_id'=> $externalId,
-                    'created_at' => Carbon::now('America/Sao_Paulo')->toDateTimeString(),
-                ],
+                'provider_raw' => $body,
             ],
         ]);
 
