@@ -160,7 +160,7 @@ Route::prefix('webhooks')->name('webhooks.')->group(function () {
     Route::post('/podpay', PodPayWebhookController::class)->name('podpay');
 
     // 🚀 PodPay — Payout (Withdraw)
-    Route::post('/podpay/withdraw', PodPayWithdrawWebhookController::class)->name('podpay.withdraw');
+    //Route::post('/podpay/withdraw', PodPayWithdrawWebhookController::class)->name('podpay.withdraw');
 
     // 🦈 SharkBank — PIX (Payin)
     Route::post('/sharkbank', SharkBankWebhookController::class)
