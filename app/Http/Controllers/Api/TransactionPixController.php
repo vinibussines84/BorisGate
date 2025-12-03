@@ -133,7 +133,7 @@ class TransactionPixController extends Controller
             'id'           => $transactionId,
             'amount'       => $amountCents,
             'emv'          => $qrCodeText,
-            'status'       => 'pending', // Pluggou só envia status no webhook
+            'status'       => 'pending',
             'external_id'  => $externalId,
             'created_at'   => $createdAtBr,
         ];
@@ -145,7 +145,7 @@ class TransactionPixController extends Controller
                 'name'         => $name,
                 'document'     => $document,
                 'phone'        => $phone,
-                'emv'          => $qrCodeText,
+                'qr_code_text' => $qrCodeText,   // 🔥 mantém igual ao antigo
                 'provider_raw' => $cleanRaw,
             ],
         ]);
@@ -155,23 +155,20 @@ class TransactionPixController extends Controller
             SendWebhookPixCreatedJob::dispatch($user->id, $tx->id);
         }
 
-        // 🟦 Retorno final
+        // 🟦 Retorno final — IGUAL AO MODELO ANTIGO
         return response()->json([
             'success'        => true,
             'transaction_id' => $tx->id,
             'external_id'    => $externalId,
-            'status'         => $tx->status,
+            'status'         => $tx->status, // “pendente”
             'amount'         => number_format($amountReais, 2, '.', ''),
             'fee'            => number_format($tx->fee, 2, '.', ''),
             'txid'           => $transactionId,
-            'emv'            => $qrCodeText,
+            'qr_code_text'   => $qrCodeText, // 🔥 compatível com apps antigos
         ]);
     }
 
 
-    /**
-     * Status via external_id
-     */
     public function statusByExternal(Request $request, string $externalId)
     {
         $auth   = $request->header('X-Auth-Key');
@@ -210,8 +207,6 @@ class TransactionPixController extends Controller
         ]);
     }
 
-
-    // Helpers
     private function resolveUser(string $auth, string $secret)
     {
         return User::where('authkey', $auth)
