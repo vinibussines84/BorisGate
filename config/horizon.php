@@ -73,27 +73,23 @@ return [
     */
 
     'trim' => [
-        'recent' => 60,
-        'pending' => 60,
-        'completed' => 60,
+        'recent'        => 60,
+        'pending'       => 60,
+        'completed'     => 60,
         'recent_failed' => 10080, // 7 dias
-        'failed' => 10080,        // 7 dias
-        'monitored' => 10080,
+        'failed'        => 10080, // 7 dias
+        'monitored'     => 10080,
     ],
 
     /*
     |--------------------------------------------------------------------------
-    | Silenced Jobs / Tags
+    | Silenced Jobs
     |--------------------------------------------------------------------------
     */
 
-    'silenced' => [
-        // App\Jobs\ExampleJob::class,
-    ],
+    'silenced' => [],
 
-    'silenced_tags' => [
-        // 'notifications',
-    ],
+    'silenced_tags' => [],
 
     /*
     |--------------------------------------------------------------------------
@@ -103,7 +99,7 @@ return [
 
     'metrics' => [
         'trim_snapshots' => [
-            'job' => 24,
+            'job'   => 24,
             'queue' => 24,
         ],
     ],
@@ -122,7 +118,7 @@ return [
     |--------------------------------------------------------------------------
     */
 
-    'memory_limit' => 128,
+    'memory_limit' => 256,
 
     /*
     |--------------------------------------------------------------------------
@@ -131,41 +127,83 @@ return [
     */
 
     'defaults' => [
-        // Supervisor padrão (default + webhooks)
-        'supervisor-1' => [
+
+        /*
+        |--------------------------------------------------------------------------
+        | SUPERVISOR DEFAULT → FILA NORMAL
+        |--------------------------------------------------------------------------
+        */
+        'supervisor-default' => [
             'connection' => 'redis',
-            'queue' => ['default', 'webhooks'],
-            'balance' => 'auto',
+            'queue'      => ['default'],
+            'balance'    => 'auto',
             'autoScalingStrategy' => 'time',
+
             'maxProcesses' => 10,
             'minProcesses' => 1,
+
             'maxTime' => 0,
             'maxJobs' => 0,
-            'memory' => 128,
-            'tries' => 3,
+            'memory'  => 256,
+            'tries'   => 3,
             'timeout' => 90,
-            'nice' => 0,
+            'nice'    => 0,
+        ],
+
+        /*
+        |--------------------------------------------------------------------------
+        | SUPERVISOR WEBHOOKS → FILA EXCLUSIVA
+        |--------------------------------------------------------------------------
+        */
+        'supervisor-webhooks' => [
+            'connection' => 'redis',
+            'queue'      => ['webhooks'], // 🔥 SOMENTE WEBHOOKS
+            'balance'    => 'auto',
+            'autoScalingStrategy' => 'time',
+
+            'maxProcesses' => 5,
+            'minProcesses' => 1,
+
+            'maxTime' => 0,
+            'maxJobs' => 0,
+            'memory'  => 256,
+            'tries'   => 3,
+            'timeout' => 120,
+            'nice'    => 0,
         ],
     ],
 
     /*
     |--------------------------------------------------------------------------
-    | Environments
+    | Environment Configuration
     |--------------------------------------------------------------------------
     */
 
     'environments' => [
+
         'production' => [
-            'supervisor-1' => [
-                'maxProcesses' => 10,
-                'balanceMaxShift' => 1,
-                'balanceCooldown' => 3,
+
+            'supervisor-default' => [
+                'maxProcesses'     => 15,
+                'balanceMaxShift'  => 1,
+                'balanceCooldown'  => 3,
+            ],
+
+            'supervisor-webhooks' => [
+                'maxProcesses'     => 8,
+                'balanceMaxShift'  => 1,
+                'balanceCooldown'  => 3,
             ],
         ],
 
         'local' => [
-            'supervisor-1' => [
+
+            'supervisor-default' => [
                 'maxProcesses' => 3,
+            ],
+
+            'supervisor-webhooks' => [
+                'maxProcesses' => 2,
             ],
         ],
     ],
