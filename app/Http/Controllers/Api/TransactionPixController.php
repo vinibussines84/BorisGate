@@ -45,6 +45,19 @@ class TransactionPixController extends Controller
         ]);
 
         $amountReais = (float) $data['amount'];
+
+        /*
+        |--------------------------------------------------------------------------
+        | 🛑 LIMITE MÁXIMO PIX IN: R$ 4.000,00
+        |--------------------------------------------------------------------------
+        */
+        if ($amountReais > 4000) {
+            return response()->json([
+                'success' => false,
+                'error'   => 'O valor máximo permitido para PIX é de R$ 4.000,00.',
+            ], 422);
+        }
+
         $amountCents = (int) round($amountReais * 100);
         $externalId  = $data['external_id'];
         $name        = $data['name'] ?? $user->name ?? 'Cliente';
@@ -147,7 +160,7 @@ class TransactionPixController extends Controller
             'success'        => true,
             'transaction_id' => $tx->id,
             'external_id'    => $externalId,
-            'status'         => 'pendente', // 🔥 minúsculo e PT-BR conforme solicitado
+            'status'         => 'pendente',
             'amount'         => number_format($amountReais, 2, '.', ''),
             'fee'            => number_format($tx->fee, 2, '.', ''),
             'txid'           => $transactionId,
