@@ -53,7 +53,6 @@ class WithdrawOutController extends Controller
                 'key_type' => strtolower($request->input('key_type')),
             ]);
 
-            // Normalizar telefone
             if ($request->input('key_type') === 'phone') {
 
                 $phone = preg_replace('/\D/', '', $request->input('key'));
@@ -104,19 +103,25 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 6) Calcular taxas
+            | 6) Calcular taxas (Pluggou cobra 0.20 fixo)
+            |--------------------------------------------------------------------------
+            |
+            | Cliente solicita: 13.00
+            | Cliente deve receber: 13.00
+            | Pluggou cobra: 0.20
+            | Enviar para Pluggou: 13.20
             |--------------------------------------------------------------------------
             */
-            $fee = round(($user->tax_out_fixed ?? 0) + ($gross * ($user->tax_out_percent ?? 0) / 100), 2);
-            $net = round($gross - $fee, 2);
+            $pluggouFee = 0.20; // taxa fixa
 
-            if ($net <= 0) {
-                return $this->error("Valor líquido inválido.");
-            }
+            $fee = 0;           // você absorve a taxa
+            $net = $gross;      // o cliente recebe o valor exato solicitado
+
+            $amountToSend = $gross + $pluggouFee; // valor enviado à Pluggou
 
             /*
             |--------------------------------------------------------------------------
-            | 7) Idempotência (external_id)
+            | 7) Idempotência
             |--------------------------------------------------------------------------
             */
             $externalId = $data['external_id']
@@ -132,21 +137,21 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 8) Criar saque local
+            | 8) Criar saque local (cliente recebe exatamente o solicitado)
             |--------------------------------------------------------------------------
             */
             try {
                 $withdraw = $this->withdrawService->create(
                     $user,
-                    $gross,
-                    $net,
-                    $fee,
+                    $gross,  // gross = valor solicitado
+                    $net,    // net = valor recebido (13.00)
+                    $fee,    // fee = 0
                     [
                         'key'         => $data['key'],
                         'key_type'    => strtolower($data['key_type']),
                         'external_id' => $externalId,
                         'internal_ref'=> $internalRef,
-                        'provider'    => 'pluggou',
+                        'provider'    => 'Internal',
                     ]
                 );
             } catch (\Throwable $e) {
@@ -155,11 +160,11 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 9) Payload oficial da PLUGGOU
+            | 9) Payload para Pluggou com valor bruto ajustado
             |--------------------------------------------------------------------------
             */
             $payload = [
-                "amount"    => (int) round($gross * 100),
+                "amount"    => (int) round($amountToSend * 100), // aqui está o segredo
                 "key_type"  => strtolower($data['key_type']),
                 "key_value" => $data['key'],
             ];
@@ -173,7 +178,7 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 11) Falha do provedor
+            | 11) Falha no provedor
             |--------------------------------------------------------------------------
             */
             if (!$resp['success']) {
@@ -189,7 +194,7 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 12) Extrair referência do provedor
+            | 12) Extração de referência
             |--------------------------------------------------------------------------
             */
             $providerRef = data_get($resp, 'data.data.id');
@@ -201,7 +206,7 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 13) Normalizar status inicial
+            | 13) Status inicial
             |--------------------------------------------------------------------------
             */
             $providerStatus = strtolower(data_get($resp, 'data.data.status')) ?? 'pending';
@@ -209,13 +214,12 @@ class WithdrawOutController extends Controller
             $status = match ($providerStatus) {
                 'paid', 'success', 'completed' => 'paid',
                 'failed', 'error', 'canceled', 'cancelled' => 'failed',
-                'processing', 'sending', 'sent', 'pending' => 'processing',
                 default => 'processing',
             };
 
             /*
             |--------------------------------------------------------------------------
-            | 14) Atualizar saque local
+            | 14) Atualização local
             |--------------------------------------------------------------------------
             */
             $this->withdrawService->updateProviderReference(
