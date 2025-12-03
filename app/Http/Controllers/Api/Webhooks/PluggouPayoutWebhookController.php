@@ -3,100 +3,152 @@
 namespace App\Http\Controllers\Api\Webhooks;
 
 use App\Http\Controllers\Controller;
-use App\Models\Withdraw;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Schema;
+use App\Models\Withdraw;
+use App\Enums\WithdrawStatus;
+use App\Services\WalletService;
+use App\Jobs\SendWebhookWithdrawUpdateJob;
 
 class PluggouPayoutWebhookController extends Controller
 {
-    public function __invoke(Request $request)
+    public function __invoke(Request $request, WalletService $wallet)
     {
-        $payload = $request->all();
+        try {
 
-        Log::info('[Pluggou Payout] Webhook recebido', ['payload' => $payload]);
+            /*
+            |--------------------------------------------------------------------------
+            | 1) Normalização
+            |--------------------------------------------------------------------------
+            */
+            $raw = $request->json()->all()
+                ?: json_decode($request->getContent(), true)
+                ?: [];
 
-        $eventType = $payload['event_type'] ?? null;
-        $data      = $payload['data'] ?? null;
+            Log::info("📩 Webhook Pluggou Withdrawal recebido", ['payload' => $raw]);
 
-        if ($eventType !== 'withdrawal' || !is_array($data)) {
-            return response()->json(['message' => 'ignored - invalid payload'], 422);
-        }
+            $eventType = data_get($raw, 'event_type');
+            $data      = data_get($raw, 'data', []);
 
-        $providerId = $data['id'] ?? null;
-        $status     = strtolower($data['status'] ?? '');
-        $amount     = $data['amount'] ?? null;
-        $liquid     = $data['liquid_amount'] ?? null;
-        $paidAt     = $data['paid_at'] ?? null;
+            if ($eventType !== 'withdrawal') {
+                return response()->json(['ignored' => true]);
+            }
 
-        if (!$providerId) {
-            return response()->json(['message' => 'ignored - missing id'], 422);
-        }
+            $providerId  = data_get($data, 'id');
+            $status      = strtolower(data_get($data, 'status', 'unknown'));
+            $e2e         = data_get($data, 'e2e_id');
+            $paidAt      = data_get($data, 'paid_at');
+            $amount      = data_get($data, 'amount');
+            $liquid      = data_get($data, 'liquid_amount');
 
-        $withdraw = Withdraw::where('provider_reference', $providerId)->first();
+            if (!$providerId) {
+                return response()->json(['error' => 'missing_reference'], 422);
+            }
 
-        if (!$withdraw) {
-            Log::warning('[Pluggou Payout] Withdraw não encontrado', [
-                'provider_reference' => $providerId,
-                'status'             => $status,
+            /*
+            |--------------------------------------------------------------------------
+            | 2) Buscar saque com LOCK
+            |--------------------------------------------------------------------------
+            */
+            $withdraw = Withdraw::where('provider_reference', $providerId)
+                ->lockForUpdate()
+                ->first();
+
+            if (!$withdraw) {
+                Log::warning("⚠️ Withdraw não encontrado no webhook Pluggou", [
+                    'provider_reference' => $providerId
+                ]);
+                return response()->json(['ignored' => true]);
+            }
+
+            /*
+            |--------------------------------------------------------------------------
+            | 3) Idempotência
+            |--------------------------------------------------------------------------
+            */
+            if (in_array($withdraw->status, ['paid', 'failed', 'rejected'])) {
+                return response()->json(['ignored' => true]);
+            }
+
+            /*
+            |--------------------------------------------------------------------------
+            | 4) Mapa de status Pluggou → Interno
+            |--------------------------------------------------------------------------
+            */
+            $map = [
+                'pending'    => WithdrawStatus::PROCESSING,
+                'approved'   => WithdrawStatus::PROCESSING,
+                'processing' => WithdrawStatus::PROCESSING,
+                'sent'       => WithdrawStatus::PROCESSING,
+                'paid'       => WithdrawStatus::PAID,
+                'success'    => WithdrawStatus::PAID,
+                'completed'  => WithdrawStatus::PAID,
+                'failed'     => WithdrawStatus::FAILED,
+                'error'      => WithdrawStatus::FAILED,
+                'rejected'   => WithdrawStatus::FAILED,
+                'canceled'   => WithdrawStatus::FAILED,
+                'cancelled'  => WithdrawStatus::FAILED,
+            ];
+
+            $newStatus = $map[$status] ?? null;
+
+            if (!$newStatus) {
+                Log::info("ℹ️ Webhook ignorado (status não mapeado)", [
+                    'status' => $status,
+                ]);
+                return response()->json(['ignored' => true]);
+            }
+
+            $oldStatus = WithdrawStatus::tryFrom($withdraw->status);
+
+            /*
+            |--------------------------------------------------------------------------
+            | 5) Aplicar mudança financeira
+            |--------------------------------------------------------------------------
+            */
+            $wallet->applyWithdrawStatusChange($withdraw, $oldStatus, $newStatus);
+
+            /*
+            |--------------------------------------------------------------------------
+            | 6) Atualizar withdraw
+            |--------------------------------------------------------------------------
+            */
+            $withdraw->updateQuietly([
+                'status'                  => $newStatus->value,
+                'provider_payload'        => $raw,
+                'e2e_id'                  => $e2e ?? $withdraw->e2e_id,
+                'paid_at'                 => $paidAt ?? $withdraw->paid_at,
+                'amount'                  => $liquid ? ($liquid / 100) : $withdraw->amount,
+                'gross_amount'            => $amount ? ($amount / 100) : $withdraw->gross_amount,
             ]);
-            return response()->json(['message' => 'ok - withdraw not found']);
-        }
 
-        // Evita sobrescrever registros finalizados
-        if (in_array($withdraw->status, ['paid', 'rejected', 'failed'], true)) {
-            Log::info('[Pluggou Payout] Ignorado, saque já finalizado', [
-                'withdraw_id' => $withdraw->id,
-                'status'      => $withdraw->status,
-            ]);
+            /*
+            |--------------------------------------------------------------------------
+            | 7) Enviar webhook OUT de atualização
+            |--------------------------------------------------------------------------
+            */
+            if ($newStatus === WithdrawStatus::PAID &&
+                $withdraw->user?->webhook_enabled &&
+                $withdraw->user?->webhook_out_url
+            ) {
+                SendWebhookWithdrawUpdateJob::dispatch($withdraw->id);
+            }
+
             return response()->json([
-                'message'  => 'ok - already finalized',
-                'withdraw' => ['id' => $withdraw->id, 'status' => $withdraw->status],
+                'success' => true,
+                'status'  => $newStatus->value,
             ]);
+
+        } catch (\Throwable $e) {
+
+            Log::error("🚨 ERRO NO WEBHOOK PLUGGOU CASHOUT", [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+                'payload' => $request->getContent(),
+            ]);
+
+            return response()->json(['error' => 'internal_error'], 500);
         }
-
-        // 🔁 Mapeamento oficial de status Pluggou → internos
-        $withdraw->status = match ($status) {
-            'pending'  => 'pending',
-            'approved' => 'processing',
-            'paid'     => 'paid',
-            'rejected' => 'failed',
-            'failed'   => 'failed',
-            default    => $withdraw->status,
-        };
-
-        // 🔢 Atualiza valores (centavos → reais)
-        if (Schema::hasColumn('withdraws', 'amount') && $liquid !== null) {
-            $withdraw->amount = $liquid / 100;
-        }
-
-        if (Schema::hasColumn('withdraws', 'gross_amount') && $amount !== null) {
-            $withdraw->gross_amount = $amount / 100;
-        }
-
-        // ⏱️ Salva data de pagamento (paid_at)
-        if (Schema::hasColumn('withdraws', 'completed_at') && $paidAt) {
-            $withdraw->completed_at = $paidAt;
-        }
-
-        // 🧾 Armazena payload completo
-        if (Schema::hasColumn('withdraws', 'meta')) {
-            $meta = (array) ($withdraw->meta ?? []);
-            $meta['pluggou_payout_webhook'] = $payload;
-            $withdraw->meta = $meta;
-        }
-
-        $withdraw->save();
-
-        Log::info('[Pluggou Payout] Withdraw atualizado com sucesso', [
-            'withdraw_id'        => $withdraw->id,
-            'provider_reference' => $providerId,
-            'status'             => $withdraw->status,
-        ]);
-
-        return response()->json([
-            'message'  => 'ok',
-            'withdraw' => ['id' => $withdraw->id, 'status' => $withdraw->status],
-        ]);
     }
 }
