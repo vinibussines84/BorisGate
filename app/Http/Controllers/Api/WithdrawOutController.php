@@ -45,14 +45,14 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 2) Normalizações
+            | 2) Normalização da key_type
             |--------------------------------------------------------------------------
             */
             $request->merge([
                 'key_type' => strtolower($request->input('key_type')),
             ]);
 
-            // Normaliza número de telefone
+            // Normaliza telefone
             if ($request->input('key_type') === 'phone') {
                 $phone = preg_replace('/\D/', '', $request->input('key'));
                 if (str_starts_with($phone, '55')) {
@@ -69,7 +69,7 @@ class WithdrawOutController extends Controller
             $data = $request->validate([
                 'amount'       => ['required', 'numeric', 'min:0.01'],
                 'key'          => ['required', 'string'],
-                'key_type'     => ['required', Rule::in(['cpf','cnpj','email','phone','random','evp'])],
+                'key_type'     => ['required', Rule::in(['cpf','cnpj','email','phone','random','evp','copypaste'])],
                 'description'  => ['nullable','string','max:255'],
                 'external_id'  => ['nullable','string','max:64'],
             ]);
@@ -100,9 +100,8 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 6) Taxas
+            | 6) Taxas — PodPay usa netPayout
             |--------------------------------------------------------------------------
-            | PodPay → netPayout = true → envia BRUTO, recebe LÍQUIDO
             */
             $fee = 0;
             $net = $gross;
@@ -125,7 +124,7 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 8) Criar saque LOCAL primeiro
+            | 8) Criar saque local
             |--------------------------------------------------------------------------
             */
             $withdraw = $this->withdrawService->create(
@@ -144,21 +143,21 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 9) PAYLOAD PARA PODPAY (CORRETO)
+            | 9) PAYLOAD CORRETO para PodPay
             |--------------------------------------------------------------------------
             */
             $payload = [
-                "amount"      => (int) round($gross * 100),  // BRUTO
-                "netPayout"   => true,                       // recebe líquido
+                "amount"      => (int) round($gross * 100),         // BRUTO
+                "netPayout"   => true,                              // RECEBE LÍQUIDO
                 "pixKey"      => $data['key'],
-                "pixKeyType"  => strtoupper($data['key_type']),
+                "pixKeyType"  => strtolower($data['key_type']),     // OBRIGATORIAMENTE MINÚSCULO
                 "postbackUrl" => url('/api/webhooks/podpay/withdraw'),
                 "externalRef" => $externalId,
             ];
 
             /*
             |--------------------------------------------------------------------------
-            | 10) Envia job (fila) → não trava o request
+            | 10) Enviar job (fila)
             |--------------------------------------------------------------------------
             */
             dispatch(new ProcessWithdrawJob($withdraw, $payload));
@@ -179,7 +178,7 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 12) Retorno final (SEMPRE padronizado)
+            | 12) Retorno final
             |--------------------------------------------------------------------------
             */
             return response()->json([
