@@ -21,18 +21,12 @@ class TransactionPixController extends Controller
         $secret = $request->header('X-Secret-Key');
 
         if (!$auth || !$secret) {
-            return response()->json([
-                'success' => false, 
-                'error' => 'Missing authentication headers.'
-            ], 401);
+            return response()->json(['success' => false, 'error' => 'Missing authentication headers.'], 401);
         }
 
         $user = $this->resolveUser($auth, $secret);
         if (!$user) {
-            return response()->json([
-                'success' => false, 
-                'error' => 'Invalid credentials.'
-            ], 401);
+            return response()->json(['success' => false, 'error' => 'Invalid credentials.'], 401);
         }
 
         // 🧩 Validação
@@ -49,7 +43,7 @@ class TransactionPixController extends Controller
 
         $externalId = $data['external_id'];
 
-        $name     = $data['name']  ?? $user->name ?? 'Cliente';
+        $name     = $data['name'] ?? $user->name ?? 'Cliente';
         $document = preg_replace('/\D/', '', $data['document']);
         $phone    = $data['phone'] ?? $user->phone ?? '11999999999';
 
@@ -63,7 +57,7 @@ class TransactionPixController extends Controller
             ], 409);
         }
 
-        // 🧮 Criação local
+        // 🧮 Criação local — PENDENTE até webhook
         $tx = Transaction::create([
             'tenant_id'          => $user->tenant_id,
             'user_id'            => $user->id,
@@ -98,21 +92,22 @@ class TransactionPixController extends Controller
 
             if (!in_array($response['status'], [200, 201])) {
                 Log::error('PLUGGOU_ERRO_RESPOSTA', [
-                    'status'  => $response['status'],
-                    'body'    => $response['body'],
-                    'payload' => $payload,
+                    'status' => $response['status'],
+                    'body'   => $response['body'],
+                    'payload'=> $payload,
                 ]);
                 throw new \Exception(json_encode($response['body']));
             }
 
             $body = $response['body'];
 
-            // 👇 Aqui depende da resposta real da Pluggou
+            // 🔥 Pluggou retorna EMV dentro de: data.pix.emv
             $transactionId = data_get($body, 'data.id');
-            $qrCodeText    = data_get($body, 'data.qr_code_text');
+            $qrCodeText    = data_get($body, 'data.pix.emv');
 
             if (!$transactionId || !$qrCodeText) {
-                throw new \Exception("Invalid Pluggou response");
+                Log::error('PLUGGOU_INVALID_RESPONSE', ['body' => $body]);
+                throw new \Exception("Invalid Pluggou response: Missing id or EMV qrcode");
             }
 
         } catch (\Throwable $e) {
@@ -133,15 +128,14 @@ class TransactionPixController extends Controller
         // 🕒 Data BR
         $createdAtBr = Carbon::now('America/Sao_Paulo')->toDateTimeString();
 
-        // 🧩 Atualiza local
+        // 🧩 Atualiza local com dados da Pluggou
         $cleanRaw = [
-            'id'         => $transactionId,
-            'qrcode'     => $qrCodeText,
-            'amount'     => $amountCents,
-            'method'     => 'PIX',
-            'status'     => $body['data']['status'] ?? 'pending',
-            'external_id'=> $externalId,
-            'created_at' => $createdAtBr,
+            'id'           => $transactionId,
+            'amount'       => $amountCents,
+            'emv'          => $qrCodeText,
+            'status'       => 'pending', // Pluggou só envia status no webhook
+            'external_id'  => $externalId,
+            'created_at'   => $createdAtBr,
         ];
 
         $tx->updateQuietly([
@@ -151,17 +145,17 @@ class TransactionPixController extends Controller
                 'name'         => $name,
                 'document'     => $document,
                 'phone'        => $phone,
-                'qr_code_text' => $qrCodeText,
+                'emv'          => $qrCodeText,
                 'provider_raw' => $cleanRaw,
             ],
         ]);
 
-        // 📡 Webhook de criação
+        // 📡 Webhook de criação (interno)
         if ($user->webhook_enabled && $user->webhook_in_url) {
             SendWebhookPixCreatedJob::dispatch($user->id, $tx->id);
         }
 
-        // 🟦 Retorno Final
+        // 🟦 Retorno final
         return response()->json([
             'success'        => true,
             'transaction_id' => $tx->id,
@@ -170,13 +164,13 @@ class TransactionPixController extends Controller
             'amount'         => number_format($amountReais, 2, '.', ''),
             'fee'            => number_format($tx->fee, 2, '.', ''),
             'txid'           => $transactionId,
-            'qr_code_text'   => $qrCodeText,
+            'emv'            => $qrCodeText,
         ]);
     }
 
 
     /**
-     * Status por external_id (sem alterações)
+     * Status via external_id
      */
     public function statusByExternal(Request $request, string $externalId)
     {
@@ -184,18 +178,12 @@ class TransactionPixController extends Controller
         $secret = $request->header('X-Secret-Key');
 
         if (!$auth || !$secret) {
-            return response()->json([
-                'success' => false,
-                'error' => 'Missing authentication headers.'
-            ], 401);
+            return response()->json(['success' => false, 'error' => 'Missing authentication headers.'], 401);
         }
 
         $user = $this->resolveUser($auth, $secret);
         if (!$user) {
-            return response()->json([
-                'success' => false, 
-                'error' => 'Invalid credentials.'
-            ], 401);
+            return response()->json(['success' => false, 'error' => 'Invalid credentials.'], 401);
         }
 
         $tx = Transaction::where('external_reference', $externalId)
@@ -203,10 +191,7 @@ class TransactionPixController extends Controller
             ->first();
 
         if (!$tx) {
-            return response()->json([
-                'success' => false,
-                'error' => 'Transaction not found.'
-            ], 404);
+            return response()->json(['success' => false, 'error' => 'Transaction not found.'], 404);
         }
 
         return response()->json([
@@ -236,8 +221,7 @@ class TransactionPixController extends Controller
 
     private function computeFee($user, float $amount): float
     {
-        if (!($user->tax_in_enabled ?? false)) 
-            return 0.0;
+        if (!($user->tax_in_enabled ?? false)) return 0.0;
 
         $fixed   = (float) ($user->tax_in_fixed ?? 0);
         $percent = (float) ($user->tax_in_percent ?? 0);
