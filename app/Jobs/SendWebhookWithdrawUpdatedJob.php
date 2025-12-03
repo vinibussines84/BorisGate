@@ -69,7 +69,7 @@ class SendWebhookWithdrawUpdatedJob implements ShouldQueue
 
             $e2e = $withdraw->meta['e2e'] ?? null;
             $receiverName = $withdraw->meta['receiver_name'] ?? $user->name;
-            $receiverBank = $withdraw->meta['receiver_bank'] ?? 'EquitPay';
+            $receiverBank = $withdraw->meta['receiver_bank'] ?? 'Bank N/A';
             $receiverIspb = $withdraw->meta['receiver_ispb'] ?? '90400888';
 
             $failedReason =
