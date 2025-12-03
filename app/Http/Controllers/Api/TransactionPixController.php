@@ -132,19 +132,13 @@ class TransactionPixController extends Controller
 
             $body = $response['body'];
 
-            // 🔍 Aceita TODOS os formatos possíveis
-            $transactionId = data_get($body, 'id')
-                ?? data_get($body, 'transaction.id');
-
-            $qrCodeText = data_get($body, 'pix.qrCodeText')
-                ?? data_get($body, 'pix.qrCode')
-                ?? data_get($body, 'pix.emv')
-                ?? data_get($body, 'transaction.pix.qrCodeText')
-                ?? data_get($body, 'transaction.pix.qrCode')
-                ?? data_get($body, 'transaction.pix.emv');
+            // 🔍 CORREÇÃO BASEADA NO RETORNO REAL
+            $transactionId = data_get($body, 'id');   
+            $qrCodeText    = data_get($body, 'qrcode');
 
             if (!$transactionId || !$qrCodeText) {
-                throw new \Exception("Invalid provider response");
+                Log::error("LUMNIS_INVALID_RESPONSE", ['body' => $body]);
+                throw new \Exception("Invalid provider response: missing id or qrcode");
             }
 
         } catch (\Throwable $e) {
