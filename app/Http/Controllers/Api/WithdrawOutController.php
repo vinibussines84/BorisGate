@@ -78,10 +78,11 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 4) Regras de negócio: valor mínimo e chave PIX
+            | 4) Regras de negócio
             |--------------------------------------------------------------------------
             */
-            $gross = (float) $data['amount'];
+            $gross = (float) $data['amount']; // valor solicitado pelo cliente
+
             if ($gross < 10) {
                 return $this->error("Valor mínimo para saque é R$ 10,00.");
             }
@@ -96,23 +97,35 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 5) Taxas e valores líquidos
+            | 5) Aqui entra a TAXA FIXA DA PLUGGOU
             |--------------------------------------------------------------------------
+            |
+            | Pluggou cobra R$ 0,30.
+            | O cliente deve receber o valor inteiro, então nós aumentamos o valor enviado.
+            |
             */
-            $fee = 0;
+            $providerFeeFixed = 0.30;
+
+            // Valor que enviaremos para a Pluggou
+            $amountForProvider = $gross + $providerFeeFixed;
+
+            // Valor líquido recebido pelo cliente permanece o solicitado
             $net = $gross;
+            $fee = 0; // você banca a taxa
 
             /*
             |--------------------------------------------------------------------------
-            | 6) Controle de idempotência (External ID)
+            | 6) Controle de idempotência
             |--------------------------------------------------------------------------
             */
             $externalId = $data['external_id']
                 ?: 'WD_' . now()->timestamp . '_' . rand(1000, 9999);
 
-            if (Withdraw::where('user_id', $user->id)
+            if (
+                Withdraw::where('user_id', $user->id)
                 ->where('external_id', $externalId)
-                ->exists()) {
+                ->exists()
+            ) {
                 return $this->error("External ID duplicado. Este saque já foi processado.");
             }
 
@@ -120,13 +133,13 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 7) Criar saque local e debitar saldo do usuário
+            | 7) Criar saque local + debitar saldo
             |--------------------------------------------------------------------------
             */
             $withdraw = $this->withdrawService->create(
                 $user,
-                $gross,
-                $net,
+                $gross, // valor solicitado
+                $net,   // liquido recebido pelo cliente
                 $fee,
                 [
                     'key'         => $data['key'],
@@ -140,7 +153,7 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 8) Formatar chave PIX para envio à Pluggou
+            | 8) Formatar chave PIX
             |--------------------------------------------------------------------------
             */
             $formattedKey = match ($data['key_type']) {
@@ -150,11 +163,11 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 9) Montar payload para a fila de processamento (Pluggou)
+            | 9) Payload para a Pluggou (com valor ajustado)
             |--------------------------------------------------------------------------
             */
             $payload = [
-                "amount"      => (int) round($gross * 100), // em centavos
+                "amount"      => (int) round($amountForProvider * 100), // ajustado!
                 "key_type"    => strtolower($data['key_type']),
                 "key_value"   => $formattedKey,
                 "description" => $data['description'] ?? 'Saque via API',
@@ -162,14 +175,14 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 10) Enfileirar o processamento (não bloquear a requisição)
+            | 10) Enfileirar job
             |--------------------------------------------------------------------------
             */
             ProcessWithdrawJob::dispatch($withdraw, $payload)->onQueue('withdraws');
 
             /*
             |--------------------------------------------------------------------------
-            | 11) Disparar webhook OUT imediato (withdraw.created)
+            | 11) Webhook imediato
             |--------------------------------------------------------------------------
             */
             if ($user->webhook_enabled && $user->webhook_out_url) {
@@ -183,7 +196,7 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 12) Retornar resposta imediata ao cliente
+            | 12) Retorno ao cliente
             |--------------------------------------------------------------------------
             */
             return response()->json([
@@ -192,7 +205,8 @@ class WithdrawOutController extends Controller
                 'data' => [
                     'id'             => $withdraw->id,
                     'external_id'    => $externalId,
-                    'amount'         => $withdraw->gross_amount,
+                    'requested'      => $gross,
+                    'sent_to_provider' => $amountForProvider,
                     'liquid_amount'  => $withdraw->amount,
                     'pix_key'        => $withdraw->pixkey,
                     'pix_key_type'   => $withdraw->pixkey_type,
@@ -204,12 +218,12 @@ class WithdrawOutController extends Controller
             ]);
 
         } catch (\Throwable $e) {
+
             Log::error('🚨 Erro ao criar saque (Pluggou)', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
             ]);
 
-            // 🧾 Mensagem clara se o erro for saldo insuficiente
             if (str_contains($e->getMessage(), 'Saldo insuficiente')) {
                 return $this->error($e->getMessage());
             }
