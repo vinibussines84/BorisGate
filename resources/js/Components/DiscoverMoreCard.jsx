@@ -5,11 +5,11 @@ import {
   ListChecks,
   CalendarDays,
   Zap,
-  DollarSign,
   Hash,
 } from "lucide-react";
 
 /* =============== Utils =============== */
+
 const toNumber = (v) => {
   if (typeof v === "number") return v;
   if (typeof v === "string") {
@@ -25,7 +25,6 @@ const BRL = (v) => {
   return n.toLocaleString("pt-BR", {
     style: "currency",
     currency: "BRL",
-    minimumFractionDigits: 2,
   });
 };
 
@@ -34,6 +33,34 @@ const todayDate = new Date().toLocaleDateString("pt-BR", {
   month: "long",
   year: "numeric",
 });
+
+/* =============== Animated Number =============== */
+
+function AnimatedNumber({ value, className = "" }) {
+  const [display, setDisplay] = useState(value);
+
+  useEffect(() => {
+    let frame;
+    let start;
+
+    const animate = (timestamp) => {
+      if (!start) start = timestamp;
+      const progress = Math.min((timestamp - start) / 400, 1); // 400ms
+      const current = display + (value - display) * progress;
+
+      setDisplay(current);
+
+      if (progress < 1) {
+        frame = requestAnimationFrame(animate);
+      }
+    };
+
+    frame = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(frame);
+  }, [value]);
+
+  return <span className={className}>{BRL(display)}</span>;
+}
 
 /* =============== KPI Tile =============== */
 function KpiTile({
@@ -50,7 +77,8 @@ function KpiTile({
         "relative isolate rounded-2xl overflow-hidden",
         "border border-neutral-800 bg-neutral-950",
         "ring-1 ring-inset ring-neutral-900 shadow-sm",
-        "p-4 sm:p-5",
+        "p-4 sm:p-5 transition-all duration-300",
+        "hover:scale-[1.02]",
         className,
       ].join(" ")}
     >
@@ -65,6 +93,7 @@ function KpiTile({
           {value}
         </span>
       </div>
+
       {hint && (
         <div className="mt-2 text-[11px] leading-tight text-neutral-400">
           {hint}
@@ -81,9 +110,6 @@ export default function DiscoverMoreCard() {
   const [err, setErr] = useState(null);
 
   const fetchData = useCallback(async () => {
-    setLoading(true);
-    setErr(null);
-
     try {
       const res = await fetch("/api/metrics/day", {
         headers: { Accept: "application/json" },
@@ -94,22 +120,30 @@ export default function DiscoverMoreCard() {
 
       const json = await res.json();
       setData(json?.data ?? {});
+      setErr(null);
     } catch (e) {
-      setErr(e?.message || "Falha ao carregar métricas.");
+      setErr("Falha ao carregar métricas.");
     } finally {
       setLoading(false);
     }
   }, []);
 
+  // Load on mount
   useEffect(() => {
     fetchData();
   }, [fetchData]);
 
-  const incoming = BRL(toNumber(data?.valorLiquidoDia) || 0);
-  const outgoing = BRL(toNumber(data?.saidasLiquidoDia) || 0);
+  // Polling automático a cada 10 segundos
+  useEffect(() => {
+    const interval = setInterval(fetchData, 10_000);
+    return () => clearInterval(interval);
+  }, [fetchData]);
+
+  const incoming = toNumber(data?.valorLiquidoDia || 0);
+  const outgoing = toNumber(data?.saidasLiquidoDia || 0);
   const qtdPagas = data?.qtdPagasDia ?? 0;
   const qtdSaques = data?.qtdSaquesDia ?? 0;
-  const pixVolume = BRL(toNumber(data?.volumePixMes) || 0);
+  const pixVolume = toNumber(data?.volumePixDia || 0);
   const period = data?.periodo ?? todayDate;
 
   return (
@@ -137,7 +171,7 @@ export default function DiscoverMoreCard() {
       {/* LOADER */}
       {loading ? (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          {[1, 2, 3].map((i) => (
+          {[1, 2, 3, 4, 5].map((i) => (
             <div
               key={i}
               className="h-20 rounded-2xl border border-neutral-800 bg-neutral-900 animate-pulse"
@@ -149,7 +183,7 @@ export default function DiscoverMoreCard() {
           <KpiTile
             icon={ArrowUpRight}
             label="Incoming (Net)"
-            value={incoming}
+            value={<AnimatedNumber value={incoming} />}
             hint="Total received via PIX (after fees)"
             iconColor="text-green-500"
           />
@@ -157,16 +191,16 @@ export default function DiscoverMoreCard() {
           <KpiTile
             icon={ArrowDownRight}
             label="Withdrawals (Net)"
-            value={outgoing}
+            value={<AnimatedNumber value={outgoing} />}
             hint="Total withdrawals made today"
             iconColor="text-red-500"
           />
 
           <KpiTile
             icon={Zap}
-            label="Monthly PIX Volume"
-            value={pixVolume}
-            hint="Total PIX processed this month"
+            label="PIX Volume (Day)"
+            value={<AnimatedNumber value={pixVolume} />}
+            hint="Total PIX processed today"
             iconColor="text-sky-400"
           />
 
