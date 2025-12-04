@@ -8,7 +8,8 @@ use App\Http\Controllers\Api\TransactionPixController;
 use App\Http\Controllers\Api\WithdrawOutController;
 use App\Http\Controllers\Api\BalanceController;
 use App\Http\Controllers\Api\WebhookCoffePayController;
-use App\Http\Controllers\Api\Webhooks\WebhookPluggouController; // ← CORRIGIDO
+use App\Http\Controllers\Api\Webhooks\WebhookPluggouController;
+use App\Http\Controllers\Api\Webhooks\WebhookPluggouPixOutController;
 
 // ───────────────────────────────────────────────────────────────────────────────
 // HEALTHCHECK
@@ -58,8 +59,11 @@ Route::prefix('webhooks')->group(function () {
         ->middleware('throttle:120,1')
         ->name('webhooks.coffepay');
 
-    // 🔥 Novo Webhook PLUGGOU — PIX IN (pixin)
+    // 🔥 Novo Webhook PLUGGOU — PIX IN (entrada)
     Route::post('/pixin', WebhookPluggouController::class)
         ->name('webhooks.pluggou.pixin');
 
+    // 🔥 Novo Webhook PLUGGOU — PIX OUT (saída)
+    Route::post('/pixout', [WebhookPluggouPixOutController::class, '__invoke'])
+        ->name('webhooks.pluggou.pixout');
 });

@@ -3,11 +3,11 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Jobs\ProcessWithdrawJob;
 use App\Jobs\SendWebhookWithdrawCreatedJob;
 use App\Models\User;
 use App\Models\Withdraw;
 use App\Services\Pix\KeyValidator;
+use App\Services\Pluggou\PluggouCashoutService;
 use App\Services\Withdraw\WithdrawService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -16,13 +16,13 @@ use Illuminate\Validation\Rule;
 class WithdrawOutController extends Controller
 {
     public function __construct(
-        private readonly WithdrawService $withdrawService
+        private readonly WithdrawService $withdrawService,
+        private readonly PluggouCashoutService $pluggouService,
     ) {}
 
     public function store(Request $request)
     {
         try {
-
             /*
             |--------------------------------------------------------------------------
             | 1) Autenticação
@@ -45,7 +45,7 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 2) Normalização da key_type
+            | 2) Normalização da key_type e formatação
             |--------------------------------------------------------------------------
             */
             $keyType = strtolower($request->input('key_type'));
@@ -72,7 +72,7 @@ class WithdrawOutController extends Controller
             $data = $request->validate([
                 'amount'       => ['required', 'numeric', 'min:0.01'],
                 'key'          => ['required', 'string'],
-                'key_type'     => ['required', Rule::in(['cpf','cnpj','email','phone','random','evp','copypaste'])],
+                'key_type'     => ['required', Rule::in(['cpf','cnpj','email','phone','random'])],
                 'description'  => ['nullable','string','max:255'],
                 'external_id'  => ['nullable','string','max:64'],
             ]);
@@ -83,7 +83,6 @@ class WithdrawOutController extends Controller
             |--------------------------------------------------------------------------
             */
             $gross = (float) $data['amount'];
-
             if ($gross < 10) {
                 return $this->error("Valor mínimo para saque é R$ 10,00.");
             }
@@ -103,7 +102,7 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 6) Taxas — PodPay usa netPayout
+            | 6) Taxas — (mantemos compatível)
             |--------------------------------------------------------------------------
             */
             $fee = 0;
@@ -140,31 +139,42 @@ class WithdrawOutController extends Controller
                     'key_type'    => $data['key_type'],
                     'external_id' => $externalId,
                     'internal_ref'=> $internalRef,
-                    'provider'    => 'podpay',
+                    'provider'    => 'pluggou',
+                    'status'      => 'processing',
                 ]
             );
 
             /*
             |--------------------------------------------------------------------------
-            | 9) Payload PodPay
+            | 9) Payload Pluggou
             |--------------------------------------------------------------------------
             */
             $payload = [
-                "amount"      => (int) round($gross * 100),
-                "netPayout"   => true,
-                "pixKey"      => $data['key'],
-                "pixKeyType"  => strtolower($data['key_type']),
-                "postbackUrl" => url('/api/webhooks/podpay/withdraw'),
-                "externalRef" => $externalId,
+                "amount"     => (int) round($gross * 100), // centavos
+                "key_type"   => strtolower($data['key_type']),
+                "key_value"  => preg_replace('/\D+/', '', $data['key']),
             ];
 
             /*
             |--------------------------------------------------------------------------
-            | 10) Enviar job PARA A FILA CORRETA (withdraws)
+            | 10) Enviar requisição diretamente à Pluggou
             |--------------------------------------------------------------------------
             */
-            ProcessWithdrawJob::dispatch($withdraw, $payload)
-                ->onQueue('withdraws');
+            $response = $this->pluggouService->createCashout($payload);
+
+            if (isset($response['success']) && $response['success'] === true) {
+                $withdraw->update([
+                    'status' => 'processing',
+                    'provider_reference' => $response['data']['id'] ?? null,
+                    'meta' => array_merge($withdraw->meta ?? [], [
+                        'pluggou_payload' => $payload,
+                        'pluggou_response' => $response,
+                    ]),
+                ]);
+            } else {
+                $withdraw->update(['status' => 'failed']);
+                Log::error('❌ Saque Pluggou falhou', ['response' => $response]);
+            }
 
             /*
             |--------------------------------------------------------------------------
@@ -195,15 +205,14 @@ class WithdrawOutController extends Controller
                     'liquid_amount' => $withdraw->amount,
                     'pix_key'       => $withdraw->pixkey,
                     'pix_key_type'  => $withdraw->pixkey_type,
-                    'status'        => 'processing',
-                    'reference'     => null,
-                    'provider'      => 'Internal',
+                    'status'        => $withdraw->status,
+                    'reference'     => $withdraw->provider_reference,
+                    'provider'      => 'Pluggou',
                 ]
             ]);
 
         } catch (\Throwable $e) {
-
-            Log::error('🚨 Erro ao criar saque', [
+            Log::error('🚨 Erro ao criar saque (Pluggou)', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
             ]);
@@ -217,6 +226,6 @@ class WithdrawOutController extends Controller
         return response()->json([
             'success' => false,
             'error'   => $message,
-        ]);
+        ], 400);
     }
 }
