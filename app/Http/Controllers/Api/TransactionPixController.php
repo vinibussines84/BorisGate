@@ -73,7 +73,7 @@ class TransactionPixController extends Controller
             'tenant_id'          => $user->tenant_id,
             'user_id'            => $user->id,
             'direction'          => Transaction::DIR_IN,
-            'status'             => TransactionStatus::PENDENTE,
+            'status'             => TransactionStatus::PENDING,
             'currency'           => 'BRL',
             'method'             => 'pix',
             'provider'           => 'Pluggou',
@@ -108,7 +108,7 @@ class TransactionPixController extends Controller
 
         } catch (\Throwable $e) {
 
-            $tx->updateQuietly(['status' => TransactionStatus::FALHA]);
+            $tx->updateQuietly(['status' => TransactionStatus::FAILED]);
 
             Log::error("PLUGGOU_CREATE_PIX_ERROR", [
                 'error' => $e->getMessage()

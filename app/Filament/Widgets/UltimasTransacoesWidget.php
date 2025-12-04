@@ -21,7 +21,7 @@ class UltimasTransacoesWidget extends BaseWidget
             ->query(
                 Transaction::query()
                     ->with('user')
-                    ->where('status', TransactionStatus::PAGA)
+                    ->where('status', TransactionStatus::PAID) // ✅ Enum corrigida
                     ->latest('paid_at')
                     ->limit(8)
             )
@@ -86,11 +86,26 @@ class UltimasTransacoesWidget extends BaseWidget
                     ->copyable()
                     ->copyMessage('E2E copiado'),
 
+                // ✅ Corrigido: agora mostra o label e ícone de acordo com o status real
                 Tables\Columns\TextColumn::make('status')
                     ->label('Status')
-                    ->formatStateUsing(fn () => 'Paga')
-                    ->icon('heroicon-o-check-circle')
-                    ->color('success')
+                    ->formatStateUsing(fn ($state) => TransactionStatus::fromLoose($state)->label())
+                    ->icon(fn ($state) => match (TransactionStatus::fromLoose($state)) {
+                        TransactionStatus::PAID       => 'heroicon-o-check-circle',
+                        TransactionStatus::FAILED,
+                        TransactionStatus::ERROR      => 'heroicon-o-x-circle',
+                        TransactionStatus::PROCESSING => 'heroicon-o-arrow-path',
+                        TransactionStatus::PENDING    => 'heroicon-o-clock',
+                        default                       => 'heroicon-o-question-mark-circle',
+                    })
+                    ->color(fn ($state) => match (TransactionStatus::fromLoose($state)) {
+                        TransactionStatus::PAID       => 'success',
+                        TransactionStatus::FAILED,
+                        TransactionStatus::ERROR      => 'danger',
+                        TransactionStatus::PROCESSING => 'info',
+                        TransactionStatus::PENDING    => 'secondary',
+                        default                       => 'gray',
+                    })
                     ->alignCenter(),
 
                 Tables\Columns\TextColumn::make('paid_at')

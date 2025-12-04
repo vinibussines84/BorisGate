@@ -35,7 +35,7 @@ class TransacoesStatsWidget extends BaseWidget
         $baseHojePagasIn = Transaction::query()
             ->when($tenantId, fn($q) => $q->where('tenant_id', $tenantId))
             ->where('direction', Transaction::DIR_IN)
-            ->where('status', TransactionStatus::PAGA)
+            ->where('status', TransactionStatus::PAID)
             ->whereBetween('paid_at', [$inicioHojeUtc, $amanhaUtc]);
 
         $cashInTotal = (float)(clone $baseHojePagasIn)->sum('amount');
@@ -62,7 +62,7 @@ class TransacoesStatsWidget extends BaseWidget
         $valorTransacoesPagasDiaIn = (float)Transaction::query()
             ->when($tenantId, fn($q) => $q->where('tenant_id', $tenantId))
             ->where('direction', Transaction::DIR_IN)
-            ->where('status', TransactionStatus::PAGA)
+            ->where('status', TransactionStatus::PAID)
             ->whereBetween('paid_at', [$inicioHojeUtc, $amanhaUtc])
             ->sum('amount');
 
@@ -77,7 +77,7 @@ class TransacoesStatsWidget extends BaseWidget
         $pagasHojeInCount = Transaction::query()
             ->when($tenantId, fn($q) => $q->where('tenant_id', $tenantId))
             ->where('direction', Transaction::DIR_IN)
-            ->where('status', TransactionStatus::PAGA)
+            ->where('status', TransactionStatus::PAID)
             ->whereBetween('paid_at', [$inicioHojeUtc, $amanhaUtc])
             ->count();
 
@@ -111,7 +111,7 @@ class TransacoesStatsWidget extends BaseWidget
         /* TAXAS */
         $taxasTransacoesDiaIn = (float)Transaction::query()
             ->when($tenantId, fn($q) => $q->where('tenant_id', $tenantId))
-            ->where('status', TransactionStatus::PAGA)
+            ->where('status', TransactionStatus::PAID)
             ->whereBetween('paid_at', [$inicioHojeUtc, $amanhaUtc])
             ->sum('fee');
 
@@ -126,41 +126,27 @@ class TransacoesStatsWidget extends BaseWidget
         /* SEMANA / MÊS */
         $totalSemanaPagas = (float)Transaction::query()
             ->when($tenantId, fn($q) => $q->where('tenant_id', $tenantId))
-            ->where('status', TransactionStatus::PAGA)
+            ->where('status', TransactionStatus::PAID)
             ->whereBetween('paid_at', [$inicioSemanaUtc, $amanhaUtc])
             ->sum('amount');
 
         $totalMes = (float)Transaction::query()
             ->when($tenantId, fn($q) => $q->where('tenant_id', $tenantId))
             ->whereBetween('created_at', [$inicioMesUtc, $amanhaUtc])
-            ->whereIn('status', [TransactionStatus::PAGA, TransactionStatus::PENDENTE])
+            ->whereIn('status', [TransactionStatus::PAID, TransactionStatus::PENDING])
             ->sum('amount');
 
         $comissaoBrutaMes = (float)Transaction::query()
             ->when($tenantId, fn($q) => $q->where('tenant_id', $tenantId))
-            ->where('status', TransactionStatus::PAGA)
+            ->where('status', TransactionStatus::PAID)
             ->whereBetween('paid_at', [$inicioMesUtc, $amanhaUtc])
             ->sum('fee');
-
-        /* MEDs */
-        $medsHojeCount = Transaction::query()
-            ->when($tenantId, fn($q) => $q->where('tenant_id', $tenantId))
-            ->where('status', TransactionStatus::MED)
-            ->whereBetween('created_at', [$inicioHojeUtc, $amanhaUtc])
-            ->count();
-
-        $medsHojeValor = (float)Transaction::query()
-            ->when($tenantId, fn($q) => $q->where('tenant_id', $tenantId))
-            ->where('status', TransactionStatus::MED)
-            ->whereBetween('created_at', [$inicioHojeUtc, $amanhaUtc])
-            ->sum('amount');
 
         /* FORMATADOR */
         $brl = fn(float $v) => 'R$ ' . number_format($v, 2, ',', '.');
 
         return [
 
-            /* 🔥 AGORA EXIBINDO O VALOR LÍQUIDO VISUAL */
             Stat::make('TRANSAÇÕES DE HOJE', '')
                 ->icon('heroicon-o-currency-dollar')
                 ->chart([
@@ -193,11 +179,6 @@ class TransacoesStatsWidget extends BaseWidget
             Stat::make('Taxas do Dia', $brl($taxasDiaTotal))
                 ->description("IN: {$brl($taxasTransacoesDiaIn)} | OUT: {$brl($taxasTransacoesDiaOut)}")
                 ->color('warning'),
-
-            Stat::make('MEDS HOJE', $brl($medsHojeValor))
-                ->description("{$medsHojeCount} transações MED")
-                ->icon('heroicon-o-shield-exclamation')
-                ->color('gray'),
 
             Stat::make('Total Semana (Pagas)', $brl($totalSemanaPagas))
                 ->description('Pagas na semana')

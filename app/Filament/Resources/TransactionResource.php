@@ -35,11 +35,11 @@ class TransactionResource extends Resource
                     Forms\Components\Select::make('status')
                         ->label('Status')
                         ->options([
-                            TransactionStatus::PENDENTE->value => 'Pendente',
-                            TransactionStatus::PAGA->value     => 'Paga',
-                            TransactionStatus::MED->value      => 'Med',
-                            TransactionStatus::FALHA->value    => 'Falha',
-                            TransactionStatus::ERRO->value     => 'Erro',
+                            TransactionStatus::PENDING->value    => 'Pendente',
+                            TransactionStatus::PAID->value       => 'Paga',
+                            TransactionStatus::PROCESSING->value => 'Em Processamento',
+                            TransactionStatus::FAILED->value     => 'Falha',
+                            TransactionStatus::ERROR->value      => 'Erro Interno',
                         ])
                         ->required()
                         ->native(false)
@@ -58,7 +58,6 @@ class TransactionResource extends Resource
                     $query->where('tenant_id', $user->tenant_id);
                 }
             })
-
             ->columns([
 
                 Tables\Columns\TextColumn::make('id')
@@ -91,12 +90,12 @@ class TransactionResource extends Resource
                             : (string) $record->status;
 
                         return match ($value) {
-                            TransactionStatus::PENDENTE->value => 'heroicon-o-clock',
-                            TransactionStatus::PAGA->value     => 'heroicon-o-check-circle',
-                            TransactionStatus::MED->value      => 'heroicon-o-adjustments-horizontal',
-                            TransactionStatus::FALHA->value    => 'heroicon-o-x-circle',
-                            TransactionStatus::ERRO->value     => 'heroicon-o-exclamation-triangle',
-                            default                            => 'heroicon-o-question-mark-circle',
+                            TransactionStatus::PENDING->value    => 'heroicon-o-clock',
+                            TransactionStatus::PAID->value       => 'heroicon-o-check-circle',
+                            TransactionStatus::PROCESSING->value => 'heroicon-o-arrow-path',
+                            TransactionStatus::FAILED->value     => 'heroicon-o-x-circle',
+                            TransactionStatus::ERROR->value      => 'heroicon-o-exclamation-triangle',
+                            default                              => 'heroicon-o-question-mark-circle',
                         };
                     })
                     ->color(function ($record) {
@@ -105,12 +104,12 @@ class TransactionResource extends Resource
                             : (string) $record->status;
 
                         return match ($value) {
-                            TransactionStatus::PENDENTE->value => 'warning',
-                            TransactionStatus::PAGA->value     => 'success',
-                            TransactionStatus::MED->value      => 'info',
-                            TransactionStatus::FALHA->value    => 'danger',
-                            TransactionStatus::ERRO->value     => 'gray',
-                            default                            => 'gray',
+                            TransactionStatus::PENDING->value    => 'warning',
+                            TransactionStatus::PAID->value       => 'success',
+                            TransactionStatus::PROCESSING->value => 'info',
+                            TransactionStatus::FAILED->value     => 'danger',
+                            TransactionStatus::ERROR->value      => 'gray',
+                            default                              => 'gray',
                         };
                     })
                     ->tooltip(fn ($record) => $record->status_label ?? '—')
@@ -193,215 +192,23 @@ class TransactionResource extends Resource
                     ->sortable()
                     ->toggleable(),
             ])
-
             ->filters([
                 Tables\Filters\SelectFilter::make('status')
                     ->label('Status')
                     ->options([
-                        TransactionStatus::PENDENTE->value => 'Pendente',
-                        TransactionStatus::PAGA->value     => 'Paga',
-                        TransactionStatus::MED->value      => 'Med',
-                        TransactionStatus::FALHA->value    => 'Falha',
-                        TransactionStatus::ERRO->value     => 'Erro',
+                        TransactionStatus::PENDING->value    => 'Pendente',
+                        TransactionStatus::PAID->value       => 'Paga',
+                        TransactionStatus::PROCESSING->value => 'Em Processamento',
+                        TransactionStatus::FAILED->value     => 'Falha',
+                        TransactionStatus::ERROR->value      => 'Erro Interno',
                     ]),
 
                 Tables\Filters\SelectFilter::make('direction')
                     ->label('Tipo')
                     ->options(['in' => 'Entrada', 'out' => 'Saída']),
-
-                Tables\Filters\SelectFilter::make('method')
-                    ->label('Meio')
-                    ->options(fn () =>
-                        Transaction::query()
-                            ->whereNotNull('method')
-                            ->distinct()
-                            ->pluck('method', 'method')
-                            ->toArray()
-                    ),
-
-                Tables\Filters\SelectFilter::make('provider')
-                    ->label('Provedor')
-                    ->options(fn () =>
-                        Transaction::query()
-                            ->whereNotNull('provider')
-                            ->distinct()
-                            ->pluck('provider', 'provider')
-                            ->toArray()
-                    ),
-
-                Tables\Filters\TernaryFilter::make('has_txid')
-                    ->label('Tem TXID')
-                    ->trueLabel('Somente com TXID')
-                    ->falseLabel('Sem TXID')
-                    ->queries(
-                        true: fn ($q) => $q->whereNotNull('txid'),
-                        false: fn ($q) => $q->whereNull('txid'),
-                        blank: fn ($q) => $q
-                    ),
-
-                Tables\Filters\TernaryFilter::make('has_e2e')
-                    ->label('Tem E2E')
-                    ->trueLabel('Somente com E2E')
-                    ->falseLabel('Sem E2E')
-                    ->queries(
-                        true: fn ($q) => $q->whereNotNull('e2e_id'),
-                        false: fn ($q) => $q->whereNull('e2e_id'),
-                        blank: fn ($q) => $q
-                    ),
-
-                Tables\Filters\Filter::make('date_range')
-                    ->label('Período')
-                    ->form([
-                        Forms\Components\DatePicker::make('from')->label('De'),
-                        Forms\Components\DatePicker::make('until')->label('Até'),
-                    ])
-                    ->query(function (Builder $query, array $data) {
-                        return $query
-                            ->when($data['from'] ?? null,
-                                fn ($q, $d) =>
-                                    $q->whereDate('created_at', '>=', $d)
-                            )
-                            ->when($data['until'] ?? null,
-                                fn ($q, $d) =>
-                                    $q->whereDate('created_at', '<=', $d)
-                            );
-                    }),
             ])
-
             ->actions([
-                Tables\Actions\ViewAction::make()
-                    ->label('Ver')
-                    ->icon('heroicon-o-eye')
-                    ->modalHeading('Detalhes da transação')
-                    ->modalWidth('3xl')
-                    ->form([
-
-                        Forms\Components\Section::make('Resumo')
-                            ->columns(3)
-                            ->schema([
-                                Forms\Components\Placeholder::make('status_label')
-                                    ->label('Status')
-                                    ->content(fn ($r) => $r?->status_label ?? '—'),
-
-                                Forms\Components\Placeholder::make('direction_label')
-                                    ->label('Tipo')
-                                    ->content(fn ($r) =>
-                                        $r?->direction === 'in' ? 'Entrada' : 'Saída'
-                                    ),
-
-                                Forms\Components\Placeholder::make('currency')
-                                    ->label('Moeda')
-                                    ->content(fn ($r) => $r?->currency ?? '—'),
-
-                                Forms\Components\Placeholder::make('amount_fmt')
-                                    ->label('Valor')
-                                    ->content(fn ($r) =>
-                                        Number::currency((float) $r->amount, 'BRL', locale: 'pt_BR')
-                                    ),
-
-                                Forms\Components\Placeholder::make('fee_fmt')
-                                    ->label('Taxa')
-                                    ->content(fn ($r) =>
-                                        Number::currency((float) $r->fee, 'BRL', locale: 'pt_BR')
-                                    ),
-
-                                Forms\Components\Placeholder::make('net_amount_fmt')
-                                    ->label('Líquido')
-                                    ->content(fn ($r) => Number::currency(
-                                        (float) $r->amount - (float) $r->fee,
-                                        'BRL',
-                                        locale: 'pt_BR'
-                                    )),
-                            ]),
-
-                        Forms\Components\Section::make('Identificadores')
-                            ->columns(3)
-                            ->schema([
-                                Forms\Components\Placeholder::make('external_reference')
-                                    ->label('Ref. externa')
-                                    ->content(fn ($r) => $r->external_reference ?? '—'),
-
-                                Forms\Components\Placeholder::make('provider_transaction_id')
-                                    ->label('ID do provedor')
-                                    ->content(fn ($r) => $r->provider_transaction_id ?? '—'),
-
-                                Forms\Components\Placeholder::make('txid')
-                                    ->label('TXID')
-                                    ->content(fn ($r) => $r->txid ?? '—'),
-
-                                Forms\Components\Placeholder::make('e2e_id')
-                                    ->label('E2E')
-                                    ->content(fn ($r) => $r->e2e_id ?? '—'),
-
-                                Forms\Components\Placeholder::make('method')
-                                    ->label('Meio')
-                                    ->content(fn ($r) =>
-                                        strtoupper($r->method ?? '—')
-                                    ),
-
-                                Forms\Components\Placeholder::make('provider')
-                                    ->label('Provedor')
-                                    ->content(fn ($r) => $r->provider ?? '—'),
-                            ]),
-
-                        Forms\Components\Section::make('Datas')
-                            ->columns(3)
-                            ->schema([
-                                Forms\Components\Placeholder::make('authorized_at')
-                                    ->label('Autorizado em')
-                                    ->content(fn ($r) =>
-                                        optional($r->authorized_at)->format('d/m/Y H:i') ?? '—'
-                                    ),
-
-                                Forms\Components\Placeholder::make('paid_at')
-                                    ->label('Pago em')
-                                    ->content(fn ($r) =>
-                                        optional($r->paid_at)->format('d/m/Y H:i') ?? '—'
-                                    ),
-
-                                Forms\Components\Placeholder::make('refunded_at')
-                                    ->label('Estornado em')
-                                    ->content(fn ($r) =>
-                                        optional($r->refunded_at)->format('d/m/Y H:i') ?? '—'
-                                    ),
-
-                                Forms\Components\Placeholder::make('canceled_at')
-                                    ->label('Cancelado em')
-                                    ->content(fn ($r) =>
-                                        optional($r->canceled_at)->format('d/m/Y H:i') ?? '—'
-                                    ),
-                            ]),
-
-                        Forms\Components\Section::make('Descrição / Payload')
-                            ->schema([
-                                Forms\Components\Placeholder::make('description')
-                                    ->label('Descrição')
-                                    ->content(fn ($r) => $r->description ?? '—'),
-
-                                Forms\Components\Textarea::make('provider_payload_json')
-                                    ->label('Payload do provedor (JSON)')
-                                    ->rows(14)
-                                    ->disabled()
-                                    ->dehydrated(false)
-                                    ->afterStateHydrated(function (
-                                        Forms\Components\Textarea $component,
-                                        $state,
-                                        $record
-                                    ) {
-                                        $json = $record?->provider_payload
-                                            ? json_encode(
-                                                $record->provider_payload,
-                                                JSON_PRETTY_PRINT |
-                                                JSON_UNESCAPED_UNICODE |
-                                                JSON_UNESCAPED_SLASHES
-                                            )
-                                            : '';
-                                        $component->state($json);
-                                    })
-                                    ->extraAttributes(['class' => 'font-mono text-xs']),
-                            ]),
-                    ]),
-
+                Tables\Actions\ViewAction::make(),
                 Tables\Actions\Action::make('alterarStatus')
                     ->label('Alterar status')
                     ->icon('heroicon-o-pencil-square')
@@ -412,16 +219,16 @@ class TransactionResource extends Resource
                         Forms\Components\Select::make('status')
                             ->label('Novo status')
                             ->options([
-                                TransactionStatus::PENDENTE->value => 'Pendente',
-                                TransactionStatus::PAGA->value     => 'Paga',
-                                TransactionStatus::MED->value      => 'Med',
-                                TransactionStatus::FALHA->value    => 'Falha',
-                                TransactionStatus::ERRO->value     => 'Erro',
+                                TransactionStatus::PENDING->value    => 'Pendente',
+                                TransactionStatus::PAID->value       => 'Paga',
+                                TransactionStatus::PROCESSING->value => 'Em Processamento',
+                                TransactionStatus::FAILED->value     => 'Falha',
+                                TransactionStatus::ERROR->value      => 'Erro Interno',
                             ])
                             ->required()
                             ->native(false)
                             ->default(fn ($record) =>
-                                $record?->status?->value ?? TransactionStatus::PENDENTE->value
+                                $record?->status?->value ?? TransactionStatus::PENDING->value
                             )
                             ->helperText('O ajuste de saldos acontecerá automaticamente ao salvar.'),
                     ])
@@ -430,8 +237,6 @@ class TransactionResource extends Resource
                         $record->save();
                     }),
             ])
-
-            ->bulkActions([])
             ->defaultSort('id', 'desc')
             ->deferLoading();
     }

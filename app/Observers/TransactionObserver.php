@@ -28,33 +28,33 @@ class TransactionObserver
         $now = CarbonImmutable::now();
 
         // PIX pago → seta paid_at se ainda não existe
-        if ($new === TransactionStatus::PAGA) {
+        if ($new === TransactionStatus::PAID) {
             $t->paid_at = $t->paid_at ?? $now;
         }
 
         // Se estava pago e voltou para outro status, remove paid_at
-        if ($old === TransactionStatus::PAGA && $new !== TransactionStatus::PAGA) {
+        if ($old === TransactionStatus::PAID && $new !== TransactionStatus::PAID) {
             $t->paid_at = null;
         }
 
         // Quando volta para pendente
-        if ($new === TransactionStatus::PENDENTE && empty($t->authorized_at)) {
+        if ($new === TransactionStatus::PENDING && empty($t->authorized_at)) {
             $t->authorized_at = $now;
         }
 
         // Falhas → marca canceled_at
-        if (in_array($new, [TransactionStatus::FALHA, TransactionStatus::ERRO], true)) {
+        if (in_array($new, [TransactionStatus::FAILED, TransactionStatus::ERROR], true)) {
             $t->canceled_at ??= $now;
 
             // Se estava paga e agora virou falha, remove paid_at
-            if ($old === TransactionStatus::PAGA) {
+            if ($old === TransactionStatus::PAID) {
                 $t->paid_at = null;
             }
         }
 
         // Se saiu de erro/falha → limpa canceled_at
-        if (in_array($old, [TransactionStatus::FALHA, TransactionStatus::ERRO], true)
-            && !in_array($new, [TransactionStatus::FALHA, TransactionStatus::ERRO], true)) {
+        if (in_array($old, [TransactionStatus::FAILED, TransactionStatus::ERROR], true)
+            && !in_array($new, [TransactionStatus::FAILED, TransactionStatus::ERROR], true)) {
             $t->canceled_at = null;
         }
     }
@@ -64,8 +64,8 @@ class TransactionObserver
      */
     public function saving(Transaction $t): void
     {
-        $old = $this->asEnum($t->getOriginal('status')) ?? TransactionStatus::PENDENTE;
-        $new = $this->asEnum($t->status) ?? TransactionStatus::PENDENTE;
+        $old = $this->asEnum($t->getOriginal('status')) ?? TransactionStatus::PENDING;
+        $new = $this->asEnum($t->status) ?? TransactionStatus::PENDING;
 
         // Se não houve mudança no status → ignora
         if ($old->value === $new->value) {
@@ -81,10 +81,10 @@ class TransactionObserver
      */
     public function created(Transaction $t): void
     {
-        $new = $this->asEnum($t->status) ?? TransactionStatus::PENDENTE;
+        $new = $this->asEnum($t->status) ?? TransactionStatus::PENDING;
 
         // Criou uma transação paga? (quase impossível, mas permitido)
-        if ($new === TransactionStatus::PAGA) {
+        if ($new === TransactionStatus::PAID) {
             Notification::create([
                 'user_id' => $t->user_id,
                 'title'   => 'Venda paga',
@@ -110,8 +110,8 @@ class TransactionObserver
             return;
         }
 
-        $old = $this->asEnum($t->getOriginal('status')) ?? TransactionStatus::PENDENTE;
-        $new = $this->asEnum($t->status) ?? TransactionStatus::PENDENTE;
+        $old = $this->asEnum($t->getOriginal('status')) ?? TransactionStatus::PENDING;
+        $new = $this->asEnum($t->status) ?? TransactionStatus::PENDING;
 
         Log::info('TX status changed', [
             'tx_id' => $t->id,
@@ -120,7 +120,7 @@ class TransactionObserver
         ]);
 
         // Notificação interna
-        if ($new === TransactionStatus::PAGA && $old !== TransactionStatus::PAGA) {
+        if ($new === TransactionStatus::PAID && $old !== TransactionStatus::PAID) {
             Notification::create([
                 'user_id' => $t->user_id,
                 'title'   => 'Venda paga',
