@@ -7,11 +7,13 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use App\Models\Transaction;
 use App\Support\StatusMap;
+use App\Enums\TransactionStatus;
 use App\Jobs\SendWebhookPixUpdateJob;
+use App\Services\WalletService;
 
 class WebhookPluggouController extends Controller
 {
-    public function __invoke(Request $request)
+    public function __invoke(Request $request, WalletService $wallet)
     {
         try {
 
@@ -24,82 +26,92 @@ class WebhookPluggouController extends Controller
 
             Log::info("📩 Webhook Pluggou recebido", ['payload' => $raw]);
 
-            $eventData  = data_get($raw, 'data', []);
-            $providerId = data_get($eventData, 'id');          // ID da Pluggou
-            $statusRaw  = strtolower(data_get($eventData, 'status', 'unknown'));
-            $e2e        = data_get($eventData, 'e2e_id');
-            $paidAt     = data_get($eventData, 'paid_at');
+            $data       = data_get($raw, 'data', []);
+            $providerId = data_get($data, 'id');
+            $statusRaw  = strtolower(data_get($data, 'status', 'unknown'));
+            $e2e        = data_get($data, 'e2e_id');
+            $paidAt     = data_get($data, 'paid_at');
 
             if (!$providerId) {
-                Log::warning("⚠️ provider_transaction_id ausente");
+                Log::warning("⚠️ Webhook Pluggou sem provider_transaction_id");
                 return response()->json(['error' => 'missing_provider_transaction_id'], 422);
             }
 
             /* ---------------------------------------------------------
-             * 2️⃣ Buscar TX por provider_transaction_id
+             * 2️⃣ Buscar transação
              * ---------------------------------------------------------*/
-            $tx = Transaction::query()
-                ->where('provider_transaction_id', $providerId)
+            $tx = Transaction::where('provider_transaction_id', $providerId)
                 ->lockForUpdate()
                 ->first();
 
             if (!$tx) {
-                Log::warning("⚠️ TX não encontrada para webhook Pluggou", [
-                    'provider_transaction_id' => $providerId,
+                Log::warning("⚠️ TX não encontrada para Webhook Pluggou", [
+                    'provider_transaction_id' => $providerId
                 ]);
                 return response()->json(['error' => 'transaction_not_found'], 404);
             }
 
             /* ---------------------------------------------------------
-             * 3️⃣ Idempotência — TX finalizada não deve ser alterada
+             * 3️⃣ Idempotência
              * ---------------------------------------------------------*/
-            if (in_array($tx->status, ['PAID', 'FAILED'])) {
-                Log::info("ℹ️ Webhook ignorado — TX já finalizada", [
-                    'tx_id'  => $tx->id,
-                    'status' => $tx->status,
-                ]);
+            if (in_array($tx->status, ['PAID', 'FAILED'], true)) {
                 return response()->json(['ignored' => true]);
             }
 
             /* ---------------------------------------------------------
-             * 4️⃣ Mapear status do provedor → StatusMap do sistema
+             * 4️⃣ Normalizar status usando StatusMap
              * ---------------------------------------------------------*/
-            $newStatus = StatusMap::normalize($statusRaw);
+            $normalized = StatusMap::normalize($statusRaw); // string exemplo: 'PAID'
+            $newEnum    = TransactionStatus::tryFrom($normalized);
+
+            if (!$newEnum) {
+                Log::info("ℹ️ Status não mapeado Pluggou", [
+                    'status_raw' => $statusRaw
+                ]);
+                return response()->json(['ignored' => true]);
+            }
+
+            $oldEnum = TransactionStatus::tryFrom($tx->status);
 
             /* ---------------------------------------------------------
-             * 5️⃣ Atualizar a transação
+             * 5️⃣ Aplicar lógica financeira (saldo, bloqueios etc.)
+             * ---------------------------------------------------------*/
+            $wallet->applyStatusChange($tx, $oldEnum, $newEnum);
+
+            /* ---------------------------------------------------------
+             * 6️⃣ Atualizar TX silenciosamente
              * ---------------------------------------------------------*/
             $tx->updateQuietly([
-                'status'                  => $newStatus,
-                'provider_payload'        => $eventData,
-                'e2e_id'                  => $e2e ?: $tx->e2e_id,
-                'paid_at'                 => $paidAt ?: $tx->paid_at,
+                'status'           => $newEnum->value,
+                'provider_payload' => $data,
+                'e2e_id'           => $e2e ?: $tx->e2e_id,
+                'paid_at'          => $paidAt ?: $tx->paid_at,
             ]);
 
-            Log::info("✅ TX atualizada via webhook Pluggou", [
-                'tx_id'       => $tx->id,
-                'new_status'  => $newStatus,
-                'e2e'         => $tx->e2e_id,
-                'paid_at'     => $tx->paid_at,
+            Log::info("✅ TX atualizada via Webhook Pluggou", [
+                'tx_id'      => $tx->id,
+                'old_status' => $oldEnum?->value,
+                'new_status' => $newEnum->value,
             ]);
 
             /* ---------------------------------------------------------
-             * 6️⃣ Disparar webhook interno APENAS quando pago
+             * 7️⃣ Disparar webhook ao cliente somente quando pago
              * ---------------------------------------------------------*/
             if (
-                $newStatus === 'PAID' &&
+                $newEnum === TransactionStatus::PAGA &&
                 $tx->user?->webhook_enabled &&
                 $tx->user?->webhook_in_url
             ) {
                 SendWebhookPixUpdateJob::dispatch($tx->id);
-                Log::info("🚀 Webhook interno disparado ao cliente", [
+
+                Log::info("🚀 Webhook interno enviado ao cliente", [
                     'tx_id' => $tx->id
                 ]);
             }
 
             return response()->json([
                 'success' => true,
-                'status'  => $newStatus,
+                'status'  => $newEnum->value,
             ]);
 
         } catch (\Throwable $e) {
