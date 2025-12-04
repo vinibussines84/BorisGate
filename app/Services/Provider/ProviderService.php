@@ -2,23 +2,54 @@
 
 namespace App\Services\Provider;
 
+use Illuminate\Support\Facades\Log;
+use Exception;
+
 class ProviderService
 {
     protected $provider;
 
     public function __construct()
     {
-        // Aqui você define qual provider está ativo
-        // Amanhã você pode trocar para outro sem mudar sua lógica
-        $this->provider = new ProviderCoffePay();
+        // Inicializa automaticamente o Provider atual
+        $this->provider = $this->resolveProvider();
     }
 
     /**
-     * Criar transação PIX (cash-in)
+     * Resolve qual provider está ativo.
+     * Permite trocar futuramente sem alterar nenhum controller.
+     */
+    protected function resolveProvider()
+    {
+        try {
+            return new ProviderCoffePay(); // único provider atual
+        } catch (\Throwable $e) {
+            Log::error("PROVIDER_INIT_FAILED", [
+                'error' => $e->getMessage(),
+            ]);
+
+            throw new Exception("Falha ao inicializar o provedor de pagamentos.");
+        }
+    }
+
+    /**
+     * Criar PIX (Pay-In)
      */
     public function createPix(float $amount, array $payer)
     {
-        return $this->provider->createPix($amount, $payer);
+        try {
+            return $this->provider->createPix($amount, $payer);
+
+        } catch (\Throwable $e) {
+
+            Log::error("PROVIDER_CREATE_PIX_FAILED", [
+                'error'   => $e->getMessage(),
+                'amount'  => $amount,
+                'payer'   => $payer,
+            ]);
+
+            throw new Exception("Erro ao criar transação PIX no provedor.");
+        }
     }
 
     /**
@@ -26,22 +57,56 @@ class ProviderService
      */
     public function getTransactionStatus(string $transactionId)
     {
-        return $this->provider->getTransactionStatus($transactionId);
+        try {
+            return $this->provider->getTransactionStatus($transactionId);
+
+        } catch (\Throwable $e) {
+
+            Log::error("PROVIDER_GET_STATUS_FAILED", [
+                'error'          => $e->getMessage(),
+                'transaction_id' => $transactionId,
+            ]);
+
+            throw new Exception("Erro ao consultar status da transação.");
+        }
     }
 
     /**
-     * Criar pedido de saque (cash-out)
+     * Criar saque (Cash-Out)
      */
     public function withdraw(float $amount, array $recipient)
     {
-        return $this->provider->withdraw($amount, $recipient);
+        try {
+            return $this->provider->withdraw($amount, $recipient);
+
+        } catch (\Throwable $e) {
+
+            Log::error("PROVIDER_WITHDRAW_FAILED", [
+                'error'     => $e->getMessage(),
+                'amount'    => $amount,
+                'recipient' => $recipient,
+            ]);
+
+            throw new Exception("Erro ao processar saque no provedor.");
+        }
     }
 
     /**
-     * Validação do webhook (opcional)
+     * Processar webhook do provedor
      */
     public function processWebhook(array $payload)
     {
-        return $this->provider->processWebhook($payload);
+        try {
+            return $this->provider->processWebhook($payload);
+
+        } catch (\Throwable $e) {
+
+            Log::error("PROVIDER_WEBHOOK_FAILED", [
+                'error'   => $e->getMessage(),
+                'payload' => $payload,
+            ]);
+
+            throw new Exception("Erro ao processar webhook do provedor.");
+        }
     }
 }

@@ -4,6 +4,8 @@ namespace App\Services\Provider;
 
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
+use Exception;
 
 class ProviderCoffePay
 {
@@ -13,23 +15,43 @@ class ProviderCoffePay
 
     public function __construct()
     {
-        $this->baseUrl      = config('services.coffepay.url');
+        $this->baseUrl      = rtrim(config('services.coffepay.url'), '/');
         $this->clientId     = config('services.coffepay.client_id');
         $this->clientSecret = config('services.coffepay.client_secret');
     }
 
     /**
-     * TOKEN - obtém token da API com cache automático
+     * TOKEN - obtém token da CoffePay
      */
     protected function token()
     {
-        return Cache::remember('coffepay_token', 3500, function () {
-            $response = Http::asJson()->post("{$this->baseUrl}/auth/login", [
-                "clientId"     => $this->clientId,
-                "clientSecret" => $this->clientSecret
-            ]);
+        return Cache::remember('coffepay_token', 3000, function () {
 
-            return $response->json("data.token");
+            $response = Http::asJson()->post(
+                "{$this->baseUrl}/login",
+                [
+                    "clientId"     => $this->clientId,
+                    "clientSecret" => $this->clientSecret
+                ]
+            );
+
+            $json = $response->json();
+
+            Log::info("COFFE_PAY_LOGIN_RESPONSE", $json);
+
+            // Tenta extrair o token
+            $token = data_get($json, 'data.token');
+
+            if (!$token) {
+
+                Log::error("COFFE_PAY_LOGIN_FAILED", [
+                    'response' => $json
+                ]);
+
+                throw new Exception("CoffePay não retornou token válido.");
+            }
+
+            return $token;
         });
     }
 
@@ -50,28 +72,35 @@ class ProviderCoffePay
                 ]
             ]);
 
-        $data = $response->json('data');
+        $json = $response->json();
+        Log::info("COFFE_PAY_CREATE_PIX_RESPONSE", $json);
+
+        $data = data_get($json, 'data');
+
+        if (!$data) {
+            Log::error("COFFE_PAY_CREATE_PIX_FAILED", ['response' => $json]);
+            throw new Exception("CoffePay retornou resposta inválida ao criar PIX.");
+        }
 
         return [
-            "provider" => "coffepay",
-            "transaction_id" => $data['transaction'],
-            "amount"         => $data['amount'],
-            "payer_name"     => $data['payer_name'],
-            "payer_document" => $data['payer_document'],
-            "qrcode"         => $data['qrcode'],
-            "qrcode_image"   => $data['qrcode_image'],
-            "external_id"    => $data['external_id'] ?? null,
-            "status"         => "pending", // seu sistema usa PENDENTE ao criar
+            "provider"         => "coffepay",
+            "transaction_id"   => $data['transaction'] ?? null,
+            "amount"           => $data['amount'] ?? null,
+            "payer_name"       => $data['payer_name'] ?? null,
+            "payer_document"   => $data['payer_document'] ?? null,
+            "qrcode"           => $data['qrcode'] ?? null,
+            "qrcode_image"     => $data['qrcode_image'] ?? null,
+            "external_id"      => $data['external_id'] ?? null,
+            "status"           => "pending",
         ];
     }
 
     /**
      * Consulta status da transação
-     * (simulado — ajuste quando o endpoint existir)
+     * (ajuste futuro quando existir endpoint oficial)
      */
     public function getTransactionStatus(string $transactionId)
     {
-        // se houver endpoint real: substitua aqui
         return [
             "transaction_id" => $transactionId,
             "status" => "pending"
@@ -80,30 +109,27 @@ class ProviderCoffePay
 
     /**
      * Cash-out (saque)
-     * (aguardando documentação — estrutura pronta)
      */
     public function withdraw(float $amount, array $recipient)
     {
-        // Ajustar quando houver endpoint oficial
         return [
-            "status" => "processing",
+            "status"      => "processing",
             "withdraw_id" => "temp-id",
         ];
     }
 
     /**
-     * Processamento do webhook
-     * Mapeia o status COFFE PAY → seus status internos
+     * Processamento Webhook
      */
     public function processWebhook(array $payload)
     {
         $statusProvider = strtolower($payload['status'] ?? '');
 
         $statusMapped = match ($statusProvider) {
-            "success"     => "pago",
-            "processing"  => "pendente",
-            "failed"      => "falha",
-            default       => "pendente",
+            "success"    => "pago",
+            "processing" => "pendente",
+            "failed"     => "falha",
+            default      => "pendente",
         };
 
         return [
