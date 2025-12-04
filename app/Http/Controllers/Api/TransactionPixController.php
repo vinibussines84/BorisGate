@@ -46,10 +46,10 @@ class TransactionPixController extends Controller
 
         $amountReais = (float) $data['amount'];
 
-        if ($amountReais > 10000) {
+        if ($amountReais > 1000) {
             return response()->json([
                 'success' => false,
-                'error'   => 'O valor máximo permitido para PIX é de R$ 10.000,00.',
+                'error'   => 'O valor máximo permitido para PIX é de R$ 1.000,00.',
             ], 422);
         }
 
@@ -86,7 +86,7 @@ class TransactionPixController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        |  🚀 PLUGGOU - CRIA PIX (CORRIGIDO)
+        |  🚀 PLUGGOU - CRIA PIX
         |--------------------------------------------------------------------------
         */
         try {
@@ -98,10 +98,9 @@ class TransactionPixController extends Controller
 
             Log::info("PLUGGOU_CREATE_PIX_RESPONSE", $response);
 
-            // 🔥 PLUGGOU RETORNA DENTRO DE "data"
+            // 🔥 PLUGGOU RETORNA EM "data"
             $transactionId = data_get($response, "data.id");
             $qrCodeText    = data_get($response, "data.pix.emv");
-            $qrCodeBase64  = data_get($response, "data.pix.qr_code_base64");
 
             if (!$transactionId || !$qrCodeText) {
                 throw new \Exception("Invalid Pluggou response");
@@ -126,11 +125,10 @@ class TransactionPixController extends Controller
             'txid'                    => $transactionId,
             'provider_transaction_id' => $transactionId,
             'provider_payload'        => [
-                'name'            => $name,
-                'document'        => $document,
-                'phone'           => $phone,
-                'qr_code_text'    => $qrCodeText,
-                'qr_code_base64'  => $qrCodeBase64,
+                'name'         => $name,
+                'document'     => $document,
+                'phone'        => $phone,
+                'qr_code_text' => $qrCodeText,
             ],
         ]);
 
@@ -140,7 +138,7 @@ class TransactionPixController extends Controller
                 ->onQueue('webhooks');
         }
 
-        // ✅ Resposta final (compatível com padrão atual)
+        // ✅ Resposta final
         return response()->json([
             'success'        => true,
             'transaction_id' => $tx->id,
@@ -150,7 +148,6 @@ class TransactionPixController extends Controller
             'fee'            => number_format($tx->fee, 2, '.', ''),
             'txid'           => $transactionId,
             'qr_code_text'   => $qrCodeText,
-            'qr_code_base64' => $qrCodeBase64,
         ]);
     }
 
@@ -196,11 +193,10 @@ class TransactionPixController extends Controller
                 'created_at'      => optional($tx->created_at)->toISOString(),
                 'updated_at'      => optional($tx->updated_at)->toISOString(),
                 'provider_payload' => [
-                    'name'            => $tx->provider_payload['name'] ?? null,
-                    'phone'           => $tx->provider_payload['phone'] ?? null,
-                    'document'        => $tx->provider_payload['document'] ?? null,
-                    'qr_code_text'    => $tx->provider_payload['qr_code_text'] ?? null,
-                    'qr_code_base64'  => $tx->provider_payload['qr_code_base64'] ?? null,
+                    'name'         => $tx->provider_payload['name'] ?? null,
+                    'phone'        => $tx->provider_payload['phone'] ?? null,
+                    'document'     => $tx->provider_payload['document'] ?? null,
+                    'qr_code_text' => $tx->provider_payload['qr_code_text'] ?? null,
                 ],
             ]);
         }
