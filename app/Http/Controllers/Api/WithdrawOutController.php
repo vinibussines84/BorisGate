@@ -31,7 +31,7 @@ class WithdrawOutController extends Controller
             $secretKey = $request->header('X-Secret-Key');
 
             if (!$authKey || !$secretKey) {
-                return $this->error("Headers ausentes.");
+                return $this->error("Headers ausentes. É necessário enviar X-Auth-Key e X-Secret-Key.");
             }
 
             $user = User::where('authkey', $authKey)
@@ -44,11 +44,11 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 2) Normalização da key_type e formatação
+            | 2) Normalização e padronização da chave PIX
             |--------------------------------------------------------------------------
             */
             $keyType = strtolower($request->input('key_type'));
-            $key     = $request->input('key');
+            $key     = trim($request->input('key'));
 
             if ($keyType === 'phone') {
                 $phone = preg_replace('/\D/', '', $key);
@@ -65,7 +65,7 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 3) Validação
+            | 3) Validação de entrada
             |--------------------------------------------------------------------------
             */
             $data = $request->validate([
@@ -78,7 +78,7 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 4) Valor mínimo
+            | 4) Regras de negócio: valor mínimo e chave PIX
             |--------------------------------------------------------------------------
             */
             $gross = (float) $data['amount'];
@@ -86,22 +86,17 @@ class WithdrawOutController extends Controller
                 return $this->error("Valor mínimo para saque é R$ 10,00.");
             }
 
-            /*
-            |--------------------------------------------------------------------------
-            | 5) Validar chave PIX
-            |--------------------------------------------------------------------------
-            */
             if (!KeyValidator::validate($data['key'], strtoupper($data['key_type']))) {
                 return $this->error("Chave PIX inválida.");
             }
 
             if (!$user->tax_out_enabled) {
-                return $this->error("Cashout desabilitado.");
+                return $this->error("Cashout desabilitado para este usuário.");
             }
 
             /*
             |--------------------------------------------------------------------------
-            | 6) Taxas — (mantemos compatível)
+            | 5) Taxas e valores líquidos
             |--------------------------------------------------------------------------
             */
             $fee = 0;
@@ -109,23 +104,23 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 7) Idempotência
+            | 6) Controle de idempotência (External ID)
             |--------------------------------------------------------------------------
             */
             $externalId = $data['external_id']
-                ?: 'WD_' . now()->timestamp . '_' . rand(1000,9999);
+                ?: 'WD_' . now()->timestamp . '_' . rand(1000, 9999);
 
             if (Withdraw::where('user_id', $user->id)
                 ->where('external_id', $externalId)
                 ->exists()) {
-                return $this->error("External ID duplicado.");
+                return $this->error("External ID duplicado. Este saque já foi processado.");
             }
 
-            $internalRef = 'withdraw_' . now()->timestamp . '_' . rand(1000,9999);
+            $internalRef = 'withdraw_' . now()->timestamp . '_' . rand(1000, 9999);
 
             /*
             |--------------------------------------------------------------------------
-            | 8) Criar saque local (debita saldo imediatamente)
+            | 7) Criar saque local e debitar saldo do usuário
             |--------------------------------------------------------------------------
             */
             $withdraw = $this->withdrawService->create(
@@ -145,7 +140,7 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 9) Formatar chave PIX corretamente
+            | 8) Formatar chave PIX para envio à Pluggou
             |--------------------------------------------------------------------------
             */
             $formattedKey = match ($data['key_type']) {
@@ -155,25 +150,26 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 10) Payload Pluggou
+            | 9) Montar payload para a fila de processamento (Pluggou)
             |--------------------------------------------------------------------------
             */
             $payload = [
-                "amount"     => (int) round($gross * 100), // em centavos
-                "key_type"   => strtolower($data['key_type']),
-                "key_value"  => $formattedKey,
+                "amount"      => (int) round($gross * 100), // em centavos
+                "key_type"    => strtolower($data['key_type']),
+                "key_value"   => $formattedKey,
+                "description" => $data['description'] ?? 'Saque via API',
             ];
 
             /*
             |--------------------------------------------------------------------------
-            | 11) Enfileirar o processamento (não travar request)
+            | 10) Enfileirar o processamento (não bloquear a requisição)
             |--------------------------------------------------------------------------
             */
             ProcessWithdrawJob::dispatch($withdraw, $payload)->onQueue('withdraws');
 
             /*
             |--------------------------------------------------------------------------
-            | 12) Webhook OUT imediato
+            | 11) Disparar webhook OUT imediato (withdraw.created)
             |--------------------------------------------------------------------------
             */
             if ($user->webhook_enabled && $user->webhook_out_url) {
@@ -187,22 +183,23 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 13) Resposta final instantânea
+            | 12) Retornar resposta imediata ao cliente
             |--------------------------------------------------------------------------
             */
             return response()->json([
                 'success' => true,
                 'message' => 'Saque enfileirado para processamento.',
                 'data' => [
-                    'id'            => $withdraw->id,
-                    'external_id'   => $externalId,
-                    'amount'        => $withdraw->gross_amount,
-                    'liquid_amount' => $withdraw->amount,
-                    'pix_key'       => $withdraw->pixkey,
-                    'pix_key_type'  => $withdraw->pixkey_type,
-                    'status'        => 'processing',
-                    'reference'     => null,
-                    'provider'      => 'Pluggou',
+                    'id'             => $withdraw->id,
+                    'external_id'    => $externalId,
+                    'amount'         => $withdraw->gross_amount,
+                    'liquid_amount'  => $withdraw->amount,
+                    'pix_key'        => $withdraw->pixkey,
+                    'pix_key_type'   => $withdraw->pixkey_type,
+                    'status'         => 'processing',
+                    'reference'      => null,
+                    'provider'       => 'Pluggou',
+                    'created_at'     => $withdraw->created_at->toIso8601String(),
                 ]
             ]);
 
@@ -212,12 +209,12 @@ class WithdrawOutController extends Controller
                 'trace' => $e->getTraceAsString(),
             ]);
 
-            // se o erro for saldo insuficiente, retorna o texto real
+            // 🧾 Mensagem clara se o erro for saldo insuficiente
             if (str_contains($e->getMessage(), 'Saldo insuficiente')) {
                 return $this->error($e->getMessage());
             }
 
-            return $this->error("Erro interno ao processar saque.");
+            return $this->error("Erro interno ao processar o saque. Tente novamente mais tarde.");
         }
     }
 

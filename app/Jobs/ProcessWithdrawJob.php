@@ -3,7 +3,6 @@
 namespace App\Jobs;
 
 use App\Models\Withdraw;
-use App\Services\PodPay\PodPayCashoutService;
 use App\Services\Pluggou\PluggouCashoutService;
 use App\Services\Withdraw\WithdrawService;
 use Illuminate\Bus\Queueable;
@@ -17,16 +16,11 @@ class ProcessWithdrawJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    /**
-     * IMPORTANTE:
-     * Nunca serialize o modelo inteiro.
-     * Sempre armazene o ID do withdraw.
-     */
     public int $withdrawId;
     public array $payload;
 
     /**
-     * Tenta até 5x, timeout de 30s
+     * Tentará até 5 vezes antes de falhar.
      */
     public $tries   = 5;
     public $timeout = 30;
@@ -36,18 +30,17 @@ class ProcessWithdrawJob implements ShouldQueue
         $this->withdrawId = $withdraw->id;
         $this->payload    = $payload;
 
-        // Garantir que SEMPRE vai para a fila withdraws
+        // Envia para fila específica
         $this->onQueue('withdraws');
     }
 
     public function handle(
-        PodPayCashoutService $podpay,
         PluggouCashoutService $pluggou,
         WithdrawService $withdrawService
     ) {
         /*
         |--------------------------------------------------------------------------
-        | 0) Buscar o withdraw
+        | 1) Buscar o saque
         |--------------------------------------------------------------------------
         */
         $withdraw = Withdraw::find($this->withdrawId);
@@ -59,16 +52,14 @@ class ProcessWithdrawJob implements ShouldQueue
             return;
         }
 
-        $provider = strtolower($withdraw->provider);
-
-        Log::info("[ProcessWithdrawJob] Iniciando job ({$provider})", [
+        Log::info('[ProcessWithdrawJob] Iniciando job (Pluggou)', [
             'withdraw_id' => $withdraw->id,
             'payload'     => $this->payload,
         ]);
 
         /*
         |--------------------------------------------------------------------------
-        | 1) Prevenção de reprocessamento
+        | 2) Evitar reprocessamento
         |--------------------------------------------------------------------------
         */
         if (in_array($withdraw->status, ['paid', 'failed'], true)) {
@@ -81,26 +72,29 @@ class ProcessWithdrawJob implements ShouldQueue
 
         /*
         |--------------------------------------------------------------------------
-        | 2) Selecionar provedor
+        | 3) Enviar saque para Pluggou
         |--------------------------------------------------------------------------
         */
-        $resp = match ($provider) {
-            'pluggou' => $pluggou->createCashout($this->payload),
-            'podpay'  => $podpay->createWithdrawal($this->payload),
-            default   => [
-                'success' => false,
-                'message' => "Provider '{$provider}' não suportado.",
-            ],
-        };
+        try {
+            $resp = $pluggou->createCashout($this->payload);
+        } catch (\Throwable $e) {
+            Log::error('[ProcessWithdrawJob] Erro ao chamar Pluggou API', [
+                'withdraw_id' => $withdraw->id,
+                'error'       => $e->getMessage(),
+            ]);
 
-        if (!isset($resp['success']) || $resp['success'] !== true) {
+            $withdrawService->refundLocal($withdraw, $e->getMessage());
+            return;
+        }
 
-            $reason = $resp['response']['message']
-                ?? $resp['message']
-                ?? $resp['exception']
-                ?? 'Erro ao processar cashout';
-
-            Log::error("[ProcessWithdrawJob] Erro retornado pelo provider ({$provider})", [
+        /*
+        |--------------------------------------------------------------------------
+        | 4) Validar resposta
+        |--------------------------------------------------------------------------
+        */
+        if (!isset($resp['success']) || $resp['success'] === false) {
+            $reason = $resp['message'] ?? 'Erro desconhecido na Pluggou';
+            Log::error('[ProcessWithdrawJob] Falha no cashout', [
                 'withdraw_id' => $withdraw->id,
                 'reason'      => $reason,
                 'response'    => $resp,
@@ -112,13 +106,12 @@ class ProcessWithdrawJob implements ShouldQueue
 
         /*
         |--------------------------------------------------------------------------
-        | 3) Capturar provider_reference (ID da transação)
+        | 5) Capturar ID da transação
         |--------------------------------------------------------------------------
         */
-        $providerId = data_get($resp, 'data.id');
-
+        $providerId = data_get($resp, 'data.id') ?? data_get($resp, 'id');
         if (!$providerId) {
-            Log::error("[ProcessWithdrawJob] provider_id ausente no retorno {$provider}", [
+            Log::error('[ProcessWithdrawJob] ID da transação ausente no retorno Pluggou', [
                 'withdraw_id' => $withdraw->id,
                 'response'    => $resp,
             ]);
@@ -129,28 +122,19 @@ class ProcessWithdrawJob implements ShouldQueue
 
         /*
         |--------------------------------------------------------------------------
-        | 4) Mapear status → interno
+        | 6) Mapear status Pluggou → interno
         |--------------------------------------------------------------------------
         */
         $providerStatus = strtoupper(data_get($resp, 'data.status', 'PROCESSING'));
-
         $status = match ($providerStatus) {
-            // Pluggou
-            'PAID', 'COMPLETED', 'APPROVED' => 'paid',
-            'FAILED', 'REJECTED', 'REFUSED', 'CANCELLED', 'CANCELED' => 'failed',
-            // PodPay
-            'COMPLETED'        => 'paid',
-            'CANCELLED',
-            'REFUSED'          => 'failed',
-            'PROCESSING',
-            'PENDING_QUEUE',
-            'PENDING_ANALYSIS' => 'processing',
-            default            => 'processing',
+            'PAID', 'COMPLETED' => 'paid',
+            'FAILED', 'CANCELLED', 'ERROR' => 'failed',
+            default => 'processing',
         };
 
         /*
         |--------------------------------------------------------------------------
-        | 5) Atualizar saque local
+        | 7) Atualizar saque local
         |--------------------------------------------------------------------------
         */
         $withdrawService->updateProviderReference(
@@ -162,19 +146,13 @@ class ProcessWithdrawJob implements ShouldQueue
 
         /*
         |--------------------------------------------------------------------------
-        | 6) Finalizar caso esteja pago
+        | 8) Marcar como pago se concluído
         |--------------------------------------------------------------------------
         */
         if ($status === 'paid') {
             $withdrawService->markAsPaid($withdraw, $resp);
 
-            Log::info("[ProcessWithdrawJob] Saque concluído com sucesso ({$provider})!", [
-                'withdraw_id'   => $withdraw->id,
-                'provider_id'   => $providerId,
-                'provider_resp' => $resp,
-            ]);
-        } else {
-            Log::info("[ProcessWithdrawJob] Saque aguardando processamento ({$provider}).", [
+            Log::info('[ProcessWithdrawJob] Saque concluído com sucesso!', [
                 'withdraw_id'   => $withdraw->id,
                 'provider_id'   => $providerId,
                 'provider_resp' => $resp,
