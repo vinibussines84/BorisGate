@@ -72,7 +72,7 @@ class WithdrawOutController extends Controller
             $data = $request->validate([
                 'amount'       => ['required', 'numeric', 'min:0.01'],
                 'key'          => ['required', 'string'],
-                'key_type'     => ['required', Rule::in(['cpf','cnpj','email','phone','random'])],
+                'key_type'     => ['required', Rule::in(['cpf','cnpj','email','phone','random','evp'])],
                 'description'  => ['nullable','string','max:255'],
                 'external_id'  => ['nullable','string','max:64'],
             ]);
@@ -146,28 +146,42 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 9) Payload Pluggou
+            | 9) Formatar chave PIX corretamente
             |--------------------------------------------------------------------------
             */
-            $payload = [
-                "amount"     => (int) round($gross * 100), // centavos
-                "key_type"   => strtolower($data['key_type']),
-                "key_value"  => preg_replace('/\D+/', '', $data['key']),
-            ];
+            $formattedKey = match ($data['key_type']) {
+                'cpf', 'cnpj', 'phone' => preg_replace('/\D/', '', $data['key']),
+                default                => trim($data['key']),
+            };
 
             /*
             |--------------------------------------------------------------------------
-            | 10) Enviar requisição diretamente à Pluggou
+            | 10) Payload Pluggou
+            |--------------------------------------------------------------------------
+            */
+            $payload = [
+                "amount"     => (int) round($gross * 100), // em centavos
+                "key_type"   => strtolower($data['key_type']),
+                "key_value"  => $formattedKey,
+            ];
+
+            Log::info('[PLUGGOU CASHOUT] Payload enviado', $payload);
+
+            /*
+            |--------------------------------------------------------------------------
+            | 11) Enviar requisição diretamente à Pluggou
             |--------------------------------------------------------------------------
             */
             $response = $this->pluggouService->createCashout($payload);
 
+            Log::info('[PLUGGOU CASHOUT] Resposta recebida', $response);
+
             if (isset($response['success']) && $response['success'] === true) {
                 $withdraw->update([
-                    'status' => 'processing',
+                    'status' => $response['data']['status'] ?? 'processing',
                     'provider_reference' => $response['data']['id'] ?? null,
                     'meta' => array_merge($withdraw->meta ?? [], [
-                        'pluggou_payload' => $payload,
+                        'pluggou_payload'  => $payload,
                         'pluggou_response' => $response,
                     ]),
                 ]);
@@ -178,7 +192,7 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 11) Webhook OUT imediato
+            | 12) Webhook OUT imediato
             |--------------------------------------------------------------------------
             */
             if ($user->webhook_enabled && $user->webhook_out_url) {
@@ -192,7 +206,7 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 12) Resposta final
+            | 13) Resposta final
             |--------------------------------------------------------------------------
             */
             return response()->json([
