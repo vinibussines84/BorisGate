@@ -32,7 +32,7 @@ class SendWebhookPixUpdateJob implements ShouldQueue
     public function handle(): void
     {
         try {
-            // SEMPRE pega a versão mais atual da transação
+            // Sempre pega a versão atual da transação
             $tx = Transaction::with('user')->find($this->txId);
 
             if (!$tx || !$tx->user) {
@@ -46,71 +46,45 @@ class SendWebhookPixUpdateJob implements ShouldQueue
 
             // Se o usuário não tem webhook ativo → ignora
             if (!$u->webhook_enabled || !$u->webhook_in_url) {
-                Log::info('ℹ️ Webhook Pix Update ignorado — usuário sem webhook.', [
+                Log::info('ℹ️ Webhook Pix Update ignorado — usuário sem webhook configurado.', [
                     'transaction_id' => $tx->id,
                 ]);
                 return;
             }
 
-            // Se não for pago → NÃO envia webhook
-            if ($tx->status !== 'paga') {
-                Log::info('ℹ️ Webhook Pix Update ignorado — status não é pago.', [
+            // Webhook só é enviado quando transação está PAID
+            if ($tx->status !== 'PAID') {
+                Log::info('ℹ️ Webhook Pix Update ignorado — status não é PAID.', [
                     'transaction_id' => $tx->id,
-                    'status' => $tx->status,
+                    'status'         => $tx->status,
                 ]);
                 return;
             }
 
             /**
              * ---------------------------------------------------------
-             * LIMPAR provider_payload
-             * ---------------------------------------------------------
-             */
-            $provider = $tx->provider_payload ?? [];
-
-            unset(
-                $provider['postbackUrl'],
-                $provider['redirectUrl'],
-                $provider['installments'],
-                $provider['interestRate'],
-                $provider['refusedReason'],
-                $provider['refundedAmount'],
-                $provider['authorizationCode']
-            );
-
-            /**
-             * ---------------------------------------------------------
-             * MONTAGEM DO PAYLOAD FINAL (formato 100% LIMPO E PADRÃO)
+             * MONTAGEM DO PAYLOAD FINAL (100% LIMPO)
              * ---------------------------------------------------------
              */
             $payload = [
-                "type"             => "Pix Update",
-                "event"            => "updated",
-                "transaction_id"   => $tx->id,
-                "external_id"      => $tx->external_reference,
-                "user"             => $u->name,
-
-                "amount"           => number_format($tx->amount, 2, '.', ''),
-                "fee"              => number_format($tx->fee, 2, '.', ''),
-                "currency"         => $tx->currency,
-
-                "status"           => "paga",
-                "txid"             => $tx->txid,
-                "e2e"              => $tx->e2e_id,
-
-                "direction"        => $tx->direction,
-                "method"           => $tx->method,
-
-                "created_at"       => optional($tx->created_at)->toISOString(),
-                "updated_at"       => optional($tx->updated_at)->toISOString(),
-                "paid_at"          => optional($tx->paid_at)->toISOString(),
-                "canceled_at"      => optional($tx->canceled_at)->toISOString(),
-
-                // provider_payload LIMPO
-                "provider_payload" => $provider,
+                "type"           => "Pix Update",
+                "event"          => "updated",
+                "transaction_id" => $tx->id,
+                "external_id"    => $tx->external_reference,
+                "user"           => $u->name,
+                "amount"         => number_format($tx->amount, 2, '.', ''),
+                "fee"            => number_format($tx->fee, 2, '.', ''),
+                "currency"       => $tx->currency,
+                "status"         => "PAID",
+                "txid"           => $tx->txid,
+                "e2e"            => $tx->e2e_id,
+                "direction"      => $tx->direction,
+                "method"         => $tx->method,
+                "created_at"     => optional($tx->created_at)->toISOString(),
+                "updated_at"     => optional($tx->updated_at)->toISOString(),
+                "paid_at"        => optional($tx->paid_at)->toISOString(),
+                "canceled_at"    => optional($tx->canceled_at)->toISOString(),
             ];
-
-            // Envio do webhook
             $response = Http::timeout(10)->post($u->webhook_in_url, $payload);
 
             Log::info('✅ Webhook Pix Update enviado com sucesso', [
@@ -124,6 +98,7 @@ class SendWebhookPixUpdateJob implements ShouldQueue
                 'transaction_id' => $this->txId,
                 'error'          => $e->getMessage(),
             ]);
+
             throw $e;
         }
     }

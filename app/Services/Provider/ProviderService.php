@@ -11,30 +11,22 @@ class ProviderService
 
     public function __construct()
     {
-        // Inicializa automaticamente o Provider atual
         $this->provider = $this->resolveProvider();
     }
 
-    /**
-     * Resolve qual provider está ativo.
-     * Permite trocar futuramente sem alterar nenhum controller.
-     */
     protected function resolveProvider()
     {
         try {
-            return new ProviderCoffePay(); // único provider atual
+            return new ProviderCoffePay();
+
         } catch (\Throwable $e) {
             Log::error("PROVIDER_INIT_FAILED", [
                 'error' => $e->getMessage(),
             ]);
-
             throw new Exception("Falha ao inicializar o provedor de pagamentos.");
         }
     }
 
-    /**
-     * Criar PIX (Pay-In)
-     */
     public function createPix(float $amount, array $payer)
     {
         try {
@@ -43,18 +35,15 @@ class ProviderService
         } catch (\Throwable $e) {
 
             Log::error("PROVIDER_CREATE_PIX_FAILED", [
-                'error'   => $e->getMessage(),
-                'amount'  => $amount,
-                'payer'   => $payer,
+                'error'  => $e->getMessage(),
+                'amount' => $amount,
+                'payer'  => $payer,
             ]);
 
             throw new Exception("Erro ao criar transação PIX no provedor.");
         }
     }
 
-    /**
-     * Consultar status de transação
-     */
     public function getTransactionStatus(string $transactionId)
     {
         try {
@@ -63,7 +52,7 @@ class ProviderService
         } catch (\Throwable $e) {
 
             Log::error("PROVIDER_GET_STATUS_FAILED", [
-                'error'          => $e->getMessage(),
+                'error' => $e->getMessage(),
                 'transaction_id' => $transactionId,
             ]);
 
@@ -71,9 +60,6 @@ class ProviderService
         }
     }
 
-    /**
-     * Criar saque (Cash-Out)
-     */
     public function withdraw(float $amount, array $recipient)
     {
         try {
@@ -91,9 +77,6 @@ class ProviderService
         }
     }
 
-    /**
-     * Processar webhook do provedor
-     */
     public function processWebhook(array $payload)
     {
         try {

@@ -19,66 +19,79 @@ class StatusMap
             return 'ERROR';
         }
 
+        // Normaliza entrada
         $status = strtolower(trim($status));
 
         return match ($status) {
 
-            // ---------------------------
+            // ---------------------------------------------------------
             // PENDING
-            // ---------------------------
+            // ---------------------------------------------------------
             'pending',
             'pendente',
             'waiting',
+            'waiting_payment',
             'created',
             'initiated',
             'iniciado',
             'new',
             'open' => 'PENDING',
 
-            // ---------------------------
+            // ---------------------------------------------------------
             // PROCESSING
-            // ---------------------------
+            // ---------------------------------------------------------
             'processing',
             'processando',
             'in_analysis',
-            'analise' => 'PROCESSING',
+            'analise',
+            'analyzing',
+            'processing_payment' => 'PROCESSING',
 
-            // ---------------------------
+            // ---------------------------------------------------------
             // PAID
-            // ---------------------------
+            // ---------------------------------------------------------
             'paid',
+            'paga',         // <— ADICIONADO
             'approved',
             'completed',
             'success',
+            'succeeded',
             'confirmed',
             'aprovado',
             'confirmado' => 'PAID',
 
-            // ---------------------------
+            // ---------------------------------------------------------
             // FAILED
-            // ---------------------------
+            // ---------------------------------------------------------
             'failed',
             'rejected',
-            'canceled',
-            'cancelled',
             'refused',
             'declined',
             'denied',
+            'error_payment',
             'falhou',
             'rejeitado',
-            'cancelado' => 'FAILED',
+            'cancelado',
+            'canceled',
+            'cancelled',
+            'expired',
+            'timeout',
+            'chargeback',
+            'returned' => 'FAILED',
 
-            // ---------------------------
+            // ---------------------------------------------------------
             // ERROR
-            // ---------------------------
+            // ---------------------------------------------------------
             'error',
             'erro',
             'internal_error',
-            'provider_error' => 'ERROR',
+            'provider_error',
+            'unknown',
+            'invalid' => 'ERROR',
 
-            // ---------------------------
+            // ---------------------------------------------------------
             // DEFAULT
-            // ---------------------------
+            // ---------------------------------------------------------
             default => 'PENDING',
         };
     }
