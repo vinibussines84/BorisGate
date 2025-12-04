@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\TransactionStatus;
+use App\Support\StatusMap;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
@@ -26,23 +27,13 @@ class Transaction extends Model
         'method',
         'provider',
         'provider_transaction_id',
-
-        // 🔑 Referências externas
         'external_id',
         'external_reference',
-
-        // 📌 PIX
         'txid',
         'e2e_id',
-
-        // 🧾 Dados do pagador
         'payer_name',
         'payer_document',
-
-        // 🔍 JSON provider
         'provider_payload',
-
-        // 🔎 Meta
         'description',
         'authorized_at',
         'paid_at',
@@ -56,16 +47,16 @@ class Transaction extends Model
     ];
 
     protected $casts = [
-        'amount'           => 'decimal:2',
-        'fee'              => 'decimal:2',
-        'net_amount'       => 'decimal:2',
-        'provider_payload' => 'array',
-        'authorized_at'    => 'datetime',
-        'paid_at'          => 'datetime',
-        'refunded_at'      => 'datetime',
-        'canceled_at'      => 'datetime',
-        'applied_available_amount' => 'decimal:2',
-        'applied_blocked_amount'   => 'decimal:2',
+        'amount'                     => 'decimal:2',
+        'fee'                        => 'decimal:2',
+        'net_amount'                 => 'decimal:2',
+        'provider_payload'           => 'array',
+        'authorized_at'              => 'datetime',
+        'paid_at'                    => 'datetime',
+        'refunded_at'                => 'datetime',
+        'canceled_at'                => 'datetime',
+        'applied_available_amount'   => 'decimal:2',
+        'applied_blocked_amount'     => 'decimal:2',
     ];
 
     protected $appends = [
@@ -94,8 +85,6 @@ class Transaction extends Model
     protected function statusEnum(): ?TransactionStatus
     {
         $raw = $this->attributes['status'] ?? null;
-
-        // 👇 Aqui NÃO usamos fromLoose() porque causa problemas.
         return $raw ? TransactionStatus::tryFrom($raw) : null;
     }
 
@@ -103,22 +92,22 @@ class Transaction extends Model
 
     public function scopePaga($q)
     {
-        return $q->where('status', TransactionStatus::PAGA->value);
+        return $q->where('status', 'PAID');
     }
 
     public function scopePendente($q)
     {
-        return $q->where('status', TransactionStatus::PENDENTE->value);
+        return $q->where('status', 'PENDING');
     }
 
     public function scopeFalha($q)
     {
-        return $q->where('status', TransactionStatus::FALHA->value);
+        return $q->where('status', 'FAILED');
     }
 
     public function scopeErro($q)
     {
-        return $q->where('status', TransactionStatus::ERRO->value);
+        return $q->where('status', 'ERROR');
     }
 
     public function scopeMed($q)
@@ -145,15 +134,15 @@ class Transaction extends Model
 
     protected function statusLabel(): Attribute
     {
-        return Attribute::get(fn () =>
-            $this->statusEnum()?->label() ?? '—'
+        return Attribute::get(
+            fn () => $this->statusEnum()?->label() ?? '—'
         );
     }
 
     protected function statusColor(): Attribute
     {
-        return Attribute::get(fn () =>
-            $this->statusEnum()?->color() ?? 'secondary'
+        return Attribute::get(
+            fn () => $this->statusEnum()?->color() ?? 'secondary'
         );
     }
 
@@ -180,9 +169,7 @@ class Transaction extends Model
         return Attribute::get(function () {
             $created = data_get($this->provider_payload, 'created_at');
             $expire  = $this->pix_expire;
-
             if (!$created || !$expire) return null;
-
             return Carbon::parse($created)->addSeconds($expire);
         });
     }
@@ -198,22 +185,22 @@ class Transaction extends Model
 
     public function setStatusAttribute($value): void
     {
-        // Enum direto
         if ($value instanceof TransactionStatus) {
             $this->attributes['status'] = $value->value;
             return;
         }
 
-        // Normalização segura
-        $this->attributes['status'] = TransactionStatus::fromLoose((string) $value)->value;
+        // Normaliza usando StatusMap
+        $normalized = StatusMap::normalize((string) $value);
+
+        // Sempre salva em uppercase
+        $this->attributes['status'] = strtoupper($normalized);
     }
 
     public function setDirectionAttribute($value): void
     {
         $value = strtolower($value);
-
-        $this->attributes['direction'] =
-            in_array($value, [self::DIR_IN, self::DIR_OUT])
+        $this->attributes['direction'] = in_array($value, [self::DIR_IN, self::DIR_OUT])
             ? $value
             : self::DIR_IN;
     }
@@ -240,22 +227,22 @@ class Transaction extends Model
 
     public function isPaga(): bool
     {
-        return $this->status === TransactionStatus::PAGA->value;
+        return $this->status === 'PAID';
     }
 
     public function isPendente(): bool
     {
-        return $this->status === TransactionStatus::PENDENTE->value;
+        return $this->status === 'PENDING';
     }
 
     public function isFalha(): bool
     {
-        return $this->status === TransactionStatus::FALHA->value;
+        return $this->status === 'FAILED';
     }
 
     public function isErro(): bool
     {
-        return $this->status === TransactionStatus::ERRO->value;
+        return $this->status === 'ERROR';
     }
 
     public function isMed(): bool
@@ -277,7 +264,7 @@ class Transaction extends Model
 
     public function markPaid(?\DateTimeInterface $when = null): void
     {
-        $this->status  = TransactionStatus::PAGA;
+        $this->status  = 'PAID';
         $this->paid_at = $when ?? now();
         $this->save();
     }
@@ -287,8 +274,6 @@ class Transaction extends Model
     protected static function booted(): void
     {
         static::creating(function (self $m) {
-
-            // Só aplica defaults se não foi setado
             if (!$m->direction) {
                 $m->direction = self::DIR_IN;
             }
