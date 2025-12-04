@@ -15,7 +15,7 @@ class MedController extends Controller
 
         $transactions = Transaction::query()
             ->where('user_id', $user->id)
-            ->where('status', TransactionStatus::MED->value)
+            ->where('status', TransactionStatus::PROCESSING->value)
             ->latest('created_at')
             ->paginate(20, [
                 'id',
@@ -24,13 +24,13 @@ class MedController extends Controller
                 'status',
                 'method',
                 'e2e_id',
-                'description', // ✅ motivo
+                'description',
                 'created_at',
                 'paid_at',
             ]);
 
         $countMed = Transaction::where('user_id', $user->id)
-            ->where('status', TransactionStatus::MED->value)
+            ->where('status', TransactionStatus::PROCESSING->value)
             ->count();
 
         return Inertia::render('Med/Index', [
