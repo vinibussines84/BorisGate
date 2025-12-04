@@ -85,6 +85,8 @@ class SendWebhookPixUpdateJob implements ShouldQueue
                 "paid_at"        => optional($tx->paid_at)->toISOString(),
                 "canceled_at"    => optional($tx->canceled_at)->toISOString(),
             ];
+
+            // Enviar webhook
             $response = Http::timeout(10)->post($u->webhook_in_url, $payload);
 
             Log::info('✅ Webhook Pix Update enviado com sucesso', [
