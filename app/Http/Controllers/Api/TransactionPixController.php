@@ -17,7 +17,7 @@ class TransactionPixController extends Controller
 {
     /*
     |--------------------------------------------------------------------------
-    | PIX CASH-IN (COFFE PAY via ProviderService)
+    | PIX CASH-IN (Pluggou via ProviderService)
     |--------------------------------------------------------------------------
     */
     public function store(Request $request, ProviderService $provider)
@@ -68,7 +68,7 @@ class TransactionPixController extends Controller
             ], 409);
         }
 
-        // 🧮 Criar registro local rápido
+        // 🧮 Criar registro local antes da requisição
         $tx = Transaction::create([
             'tenant_id'          => $user->tenant_id,
             'user_id'            => $user->id,
@@ -76,7 +76,7 @@ class TransactionPixController extends Controller
             'status'             => TransactionStatus::PENDENTE,
             'currency'           => 'BRL',
             'method'             => 'pix',
-            'provider'           => 'CoffePay',
+            'provider'           => 'Pluggou',
             'amount'             => $amountReais,
             'fee'                => $this->computeFee($user, $amountReais),
             'external_reference' => $externalId,
@@ -86,30 +86,33 @@ class TransactionPixController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        |  COFFE PAY REQUEST OTIMIZADO
+        |  PLUGGOU - CRIA PIX
         |--------------------------------------------------------------------------
         */
         try {
             $response = $provider->createPix($amountReais, [
                 "name"     => $name,
                 "document" => $document,
-                "email"    => $user->email,
+                "phone"    => $phone,
             ]);
 
-            Log::info("COFFE_PAY_RESPONSE", $response);
+            Log::info("PLUGGOU_CREATE_PIX_RESPONSE", $response);
 
-            $transactionId = $response["transaction_id"] ?? null;
-            $qrCodeText    = $response["qrcode"] ?? null;
+            $transactionId = $response["id"] ?? null;
+            $qrCodeText    = data_get($response, "pix.qr_code");
+            $qrCodeBase64  = data_get($response, "pix.qr_code_base64");
 
             if (!$transactionId || !$qrCodeText) {
-                throw new \Exception("Invalid CoffePay response");
+                throw new \Exception("Invalid Pluggou response");
             }
 
         } catch (\Throwable $e) {
 
             $tx->updateQuietly(['status' => TransactionStatus::FALHA]);
 
-            Log::error("COFFE_PAY_ERROR", ['error' => $e->getMessage()]);
+            Log::error("PLUGGOU_CREATE_PIX_ERROR", [
+                'error' => $e->getMessage()
+            ]);
 
             return response()->json([
                 'success' => false,
@@ -117,24 +120,26 @@ class TransactionPixController extends Controller
             ], 500);
         }
 
-        // 📌 Atualiza local
+        // 📌 Atualiza registro local
         $tx->updateQuietly([
             'txid'                    => $transactionId,
             'provider_transaction_id' => $transactionId,
             'provider_payload'        => [
-                'name'         => $name,
-                'document'     => $document,
-                'phone'        => $phone,
-                'qr_code_text' => $qrCodeText,
+                'name'            => $name,
+                'document'        => $document,
+                'phone'           => $phone,
+                'qr_code_text'    => $qrCodeText,
+                'qr_code_base64'  => $qrCodeBase64,
             ],
         ]);
 
-        // 🔔 Webhook assíncrono (sem lentidão)
+        // 🔔 Webhook assíncrono
         if ($user->webhook_enabled && $user->webhook_in_url) {
-            SendWebhookPixCreatedJob::dispatch($user->id, $tx->id)->onQueue('webhooks');
+            SendWebhookPixCreatedJob::dispatch($user->id, $tx->id)
+                ->onQueue('webhooks');
         }
 
-        // ✅ Resposta 100% igual ao seu formato oficial
+        // ✅ Resposta final (compatível com padrão atual)
         return response()->json([
             'success'        => true,
             'transaction_id' => $tx->id,
@@ -144,6 +149,7 @@ class TransactionPixController extends Controller
             'fee'            => number_format($tx->fee, 2, '.', ''),
             'txid'           => $transactionId,
             'qr_code_text'   => $qrCodeText,
+            'qr_code_base64' => $qrCodeBase64,
         ]);
     }
 
@@ -166,7 +172,7 @@ class TransactionPixController extends Controller
             return response()->json(['success' => false, 'error' => 'Invalid credentials.'], 401);
         }
 
-        // 🔍 PIX
+        // 🔍 PIX TRANSACTION
         $tx = Transaction::where('external_reference', $externalId)
             ->where('user_id', $user->id)
             ->first();
@@ -189,10 +195,11 @@ class TransactionPixController extends Controller
                 'created_at'      => optional($tx->created_at)->toISOString(),
                 'updated_at'      => optional($tx->updated_at)->toISOString(),
                 'provider_payload' => [
-                    'name'         => $tx->provider_payload['name'] ?? null,
-                    'phone'        => $tx->provider_payload['phone'] ?? null,
-                    'document'     => $tx->provider_payload['document'] ?? null,
-                    'qr_code_text' => $tx->provider_payload['qr_code_text'] ?? null,
+                    'name'            => $tx->provider_payload['name'] ?? null,
+                    'phone'           => $tx->provider_payload['phone'] ?? null,
+                    'document'        => $tx->provider_payload['document'] ?? null,
+                    'qr_code_text'    => $tx->provider_payload['qr_code_text'] ?? null,
+                    'qr_code_base64'  => $tx->provider_payload['qr_code_base64'] ?? null,
                 ],
             ]);
         }

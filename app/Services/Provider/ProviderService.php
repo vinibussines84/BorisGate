@@ -17,7 +17,9 @@ class ProviderService
     protected function resolveProvider()
     {
         try {
-            return new ProviderCoffePay();
+
+            // 🔥 Agora usa a Pluggou
+            return new ProviderPluggou();
 
         } catch (\Throwable $e) {
             Log::error("PROVIDER_INIT_FAILED", [

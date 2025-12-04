@@ -35,7 +35,7 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | COFFE PAY (ÚNICO PROVEDOR DE PAGAMENTO)
+    | COFFE PAY (antigo provedor)
     |--------------------------------------------------------------------------
     */
 
@@ -44,6 +44,19 @@ return [
         'client_id'     => env('COFFE_PAY_CLIENT_ID'),
         'client_secret' => env('COFFE_PAY_CLIENT_SECRET'),
         'timeout'       => env('COFFE_PAY_TIMEOUT', 15),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | PLUGGOU (Novo Provedor de Pagamentos)
+    |--------------------------------------------------------------------------
+    */
+
+    'pluggou' => [
+        'public_key' => env('PLUGGOU_PUBLIC_KEY'),
+        'secret_key' => env('PLUGGOU_SECRET_KEY'),
+        'api_url'    => env('PLUGGOU_API_URL', 'https://api.pluggoutech.com/api'),
+        'timeout'    => env('PLUGGOU_TIMEOUT', 15),
     ],
 
 ];
