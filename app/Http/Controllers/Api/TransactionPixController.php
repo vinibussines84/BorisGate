@@ -206,19 +206,34 @@ class TransactionPixController extends Controller
             ->first();
 
         if ($tx) {
+
             return response()->json([
-                'success' => true,
-                'type'    => 'pix',
-                'data' => [
-                    'id'              => $tx->id,
-                    'external_id'     => $tx->external_reference,
-                    'status'          => StatusMap::normalize($tx->status),
-                    'amount'          => (float) $tx->amount,
-                    'fee'             => (float) $tx->fee,
-                    'txid'            => $tx->txid,
-                    'provider_payload'=> $tx->provider_payload,
-                    'created_at'      => $tx->created_at,
-                    'updated_at'      => $tx->updated_at,
+                'type'            => 'Pix Create',
+                'event'           => 'created',
+
+                'transaction_id'  => $tx->id,
+                'external_id'     => $tx->external_reference,
+                'user'            => $user->name,
+
+                'amount'          => (float) $tx->amount,
+                'fee'             => (float) $tx->fee,
+                'currency'        => $tx->currency,
+
+                'status'          => StatusMap::normalize($tx->status),
+
+                'txid'            => $tx->txid,
+                'e2e'             => $tx->e2e_id,
+                'direction'       => $tx->direction,
+                'method'          => $tx->method,
+
+                'created_at'      => optional($tx->created_at)->toISOString(),
+                'updated_at'      => optional($tx->updated_at)->toISOString(),
+
+                'provider_payload' => [
+                    'name'         => $tx->provider_payload['name'] ?? null,
+                    'phone'        => $tx->provider_payload['phone'] ?? null,
+                    'document'     => $tx->provider_payload['document'] ?? null,
+                    'qr_code_text' => $tx->provider_payload['qr_code_text'] ?? null,
                 ],
             ]);
         }
