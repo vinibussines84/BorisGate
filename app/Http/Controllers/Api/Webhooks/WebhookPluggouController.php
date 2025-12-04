@@ -10,6 +10,8 @@ use App\Support\StatusMap;
 use App\Enums\TransactionStatus;
 use App\Jobs\SendWebhookPixUpdateJob;
 use App\Services\WalletService;
+use Illuminate\Support\Str;
+use Carbon\Carbon;
 
 class WebhookPluggouController extends Controller
 {
@@ -19,7 +21,7 @@ class WebhookPluggouController extends Controller
             $raw  = $request->json()->all() ?: json_decode($request->getContent(), true) ?: [];
             $data = data_get($raw, 'data', []);
 
-            Log::info("📩 Webhook Pluggou", ['payload' => $raw]);
+            Log::info("📩 Webhook Pluggou recebido", ['payload' => $raw]);
 
             $providerId = data_get($data, 'id');
             if (!$providerId) {
@@ -34,25 +36,38 @@ class WebhookPluggouController extends Controller
                 return response()->json(['error' => 'transaction_not_found'], 404);
             }
 
+            // ⚙️ Se já foi finalizada, ignora
             if (in_array($tx->status, ['PAID', 'FAILED'], true)) {
                 return response()->json(['ignored' => true]);
             }
 
+            // 🔄 Normaliza status
             $normalized = StatusMap::normalize(data_get($data, 'status'));
             $newEnum    = TransactionStatus::fromLoose($normalized);
             $oldEnum    = TransactionStatus::tryFrom($tx->status);
 
-            /** aplica saldo */
+            // 💡 E2E nunca pode ser nulo — gera se não vier do Pluggou
+            $incomingE2E = data_get($data, 'e2e_id');
+            if (empty($incomingE2E)) {
+                $incomingE2E = $this->generateFallbackE2E($tx);
+                Log::warning('⚠️ Gerado E2E interno (faltante no webhook Pluggou)', [
+                    'transaction_id' => $tx->id,
+                    'generated_e2e'  => $incomingE2E,
+                ]);
+            }
+
+            // ⚖️ Aplica alteração de saldo
             $wallet->applyStatusChange($tx, $oldEnum, $newEnum);
 
-            /** atualiza TX */
+            // 💾 Atualiza transação local
             $tx->updateQuietly([
                 'status'           => $newEnum->value,
                 'provider_payload' => $data,
-                'e2e_id'           => data_get($data, 'e2e_id') ?: $tx->e2e_id,
+                'e2e_id'           => $incomingE2E,
                 'paid_at'          => data_get($data, 'paid_at') ?: $tx->paid_at,
             ]);
 
+            // 🔔 Dispara webhook do sistema do cliente
             if (
                 $newEnum === TransactionStatus::PAID &&
                 $tx->user?->webhook_enabled &&
@@ -64,6 +79,7 @@ class WebhookPluggouController extends Controller
             return response()->json([
                 'success' => true,
                 'status'  => $newEnum->value,
+                'e2e_id'  => $tx->e2e_id,
             ]);
 
         } catch (\Throwable $e) {
@@ -75,5 +91,18 @@ class WebhookPluggouController extends Controller
 
             return response()->json(['error' => 'internal_server_error'], 500);
         }
+    }
+
+    /**
+     * 🔐 Gera E2E interno quando o provedor não envia
+     */
+    private function generateFallbackE2E(Transaction $tx): string
+    {
+        $timestamp = Carbon::now('UTC')->format('YmdHis');
+        $random    = strtoupper(Str::random(6));
+        $userPart  = str_pad((string) ($tx->user_id ?? 0), 3, '0', STR_PAD_LEFT);
+        $txPart    = str_pad((string) $tx->id, 4, '0', STR_PAD_LEFT);
+
+        return "E2E{$timestamp}{$userPart}{$txPart}{$random}";
     }
 }

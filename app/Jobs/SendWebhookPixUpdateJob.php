@@ -10,6 +10,8 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
+use Carbon\Carbon;
 
 class SendWebhookPixUpdateJob implements ShouldQueue
 {
@@ -61,6 +63,17 @@ class SendWebhookPixUpdateJob implements ShouldQueue
                 return;
             }
 
+            // 💡 Garante que E2E nunca esteja vazio
+            if (empty($tx->e2e_id)) {
+                $tx->e2e_id = $this->generateFallbackE2E($tx);
+                $tx->saveQuietly();
+
+                Log::warning('⚠️ Gerado E2E interno (faltante no envio do webhook Pix Update)', [
+                    'transaction_id' => $tx->id,
+                    'generated_e2e'  => $tx->e2e_id,
+                ]);
+            }
+
             /**
              * ---------------------------------------------------------
              * MONTAGEM DO PAYLOAD FINAL (100% LIMPO)
@@ -103,5 +116,18 @@ class SendWebhookPixUpdateJob implements ShouldQueue
 
             throw $e;
         }
+    }
+
+    /**
+     * 🔐 Gera E2E interno quando não há valor definido
+     */
+    private function generateFallbackE2E(Transaction $tx): string
+    {
+        $timestamp = Carbon::now('UTC')->format('YmdHis');
+        $random    = strtoupper(Str::random(6));
+        $userPart  = str_pad((string) ($tx->user_id ?? 0), 3, '0', STR_PAD_LEFT);
+        $txPart    = str_pad((string) $tx->id, 4, '0', STR_PAD_LEFT);
+
+        return "E2E{$timestamp}{$userPart}{$txPart}{$random}";
     }
 }
