@@ -11,6 +11,7 @@ use App\Models\User;
 use App\Enums\TransactionStatus;
 use App\Services\PodPay\PodPayService;
 use App\Jobs\SendWebhookPixCreatedJob;
+use App\Support\StatusMap;
 
 class TransactionPixController extends Controller
 {
@@ -86,7 +87,7 @@ class TransactionPixController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        |  PAYLOAD CORRETO — PODPAY
+        |  PAYLOAD PODPAY
         |--------------------------------------------------------------------------
         */
         $payload = [
@@ -116,13 +117,11 @@ class TransactionPixController extends Controller
                 ],
             ],
 
-            // 🔥 POSTBACK DO SEU SERVIDOR
             "postbackUrl" => url('/api/webhooks/podpay'),
-
             "externalRef" => $externalId,
         ];
 
-        // 🚀 Envia para PodPay
+        // 🚀 PodPay Request
         try {
             $response = $podpay->createPixTransaction($payload);
 
@@ -134,7 +133,6 @@ class TransactionPixController extends Controller
 
             $body = $response['body'];
 
-            // 🔍 RETORNO PODPAY (ajustado com qrcode)
             $transactionId = data_get($body, 'id');
             $qrCodeText    = data_get($body, 'pix.qrcode');
 
@@ -175,7 +173,7 @@ class TransactionPixController extends Controller
             'success'        => true,
             'transaction_id' => $tx->id,
             'external_id'    => $externalId,
-            'status'         => 'pendente',
+            'status'         => StatusMap::normalize('pending'),
             'amount'         => number_format($amountReais, 2, '.', ''),
             'fee'            => number_format($tx->fee, 2, '.', ''),
             'txid'           => $transactionId,
@@ -185,7 +183,7 @@ class TransactionPixController extends Controller
 
     /*
     |--------------------------------------------------------------------------
-    | STATUS POR EXTERNAL_ID (mantido igual)
+    | STATUS POR EXTERNAL_ID
     |--------------------------------------------------------------------------
     */
     public function statusByExternal(Request $request, string $externalId)
@@ -214,7 +212,7 @@ class TransactionPixController extends Controller
                 'data' => [
                     'id'              => $tx->id,
                     'external_id'     => $tx->external_reference,
-                    'status'          => $this->normalizeStatusPtBr($tx->status),
+                    'status'          => StatusMap::normalize($tx->status),
                     'amount'          => (float) $tx->amount,
                     'fee'             => (float) $tx->fee,
                     'txid'            => $tx->txid,
@@ -225,7 +223,7 @@ class TransactionPixController extends Controller
             ]);
         }
 
-        // 🔍 WITHDRAW (igual)
+        // 🔍 WITHDRAW
         $withdraw = Withdraw::where('external_id', $externalId)
             ->where('user_id', $user->id)
             ->first();
@@ -241,7 +239,7 @@ class TransactionPixController extends Controller
                 'event'   => 'withdraw.updated',
                 'data' => [
                     'id'         => data_get($meta, 'internal_reference', $withdraw->id),
-                    'status'     => $this->normalizeStatus($withdraw->status),
+                    'status'     => StatusMap::normalize($withdraw->status),
                     'E2E'        => data_get($meta, 'e2e'),
                     'requested'  => (float) $withdraw->gross_amount,
                     'paid'       => (float) $withdraw->amount,
@@ -266,24 +264,6 @@ class TransactionPixController extends Controller
     | Utils
     |--------------------------------------------------------------------------
     */
-    private function normalizeStatusPtBr(string $status): string
-    {
-        return match (strtolower($status)) {
-            'paid', 'approved', 'completed' => 'aprovado',
-            'failed', 'error', 'rejected', 'canceled' => 'falhou',
-            default => 'pendente',
-        };
-    }
-
-    private function normalizeStatus(string $status): string
-    {
-        return match (strtolower($status)) {
-            'paid', 'approved', 'completed' => 'APPROVED',
-            'failed', 'error', 'rejected', 'canceled' => 'FAILED',
-            default => 'PENDING',
-        };
-    }
-
     private function resolveUser(string $auth, string $secret)
     {
         return User::where('authkey', $auth)

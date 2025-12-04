@@ -11,6 +11,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use App\Support\StatusMap;
 
 class SendWebhookPixCreatedJob implements ShouldQueue
 {
@@ -29,7 +30,6 @@ class SendWebhookPixCreatedJob implements ShouldQueue
 
     public function handle()
     {
-        // Recarregar sempre os models do banco (blindado e seguro)
         $user = User::find($this->userId);
         $tx   = Transaction::find($this->txId);
 
@@ -41,7 +41,6 @@ class SendWebhookPixCreatedJob implements ShouldQueue
             return;
         }
 
-        // Verificação de webhook configurado
         if (!$user->webhook_enabled || !$user->webhook_in_url) {
             Log::info("ℹ️ Webhook IN desabilitado — ignorando envio (Pix Create)", [
                 'user_id' => $user->id,
@@ -50,27 +49,40 @@ class SendWebhookPixCreatedJob implements ShouldQueue
         }
 
         try {
-
+            /*
+            |--------------------------------------------------------------------------
+            | PAYLOAD LIMPO E PADRONIZADO
+            |--------------------------------------------------------------------------
+            */
             $payload = [
                 'type'            => 'Pix Create',
                 'event'           => 'created',
+
                 'transaction_id'  => $tx->id,
                 'external_id'     => $tx->external_reference,
                 'user'            => $user->name,
+
                 'amount'          => (float) $tx->amount,
                 'fee'             => (float) $tx->fee,
                 'currency'        => $tx->currency,
-                'status'          => $tx->status,
+
+                'status'          => StatusMap::normalize($tx->status),
+
                 'txid'            => $tx->txid,
                 'e2e'             => $tx->e2e_id,
                 'direction'       => $tx->direction,
                 'method'          => $tx->method,
 
-                // Datas ISO8601 – padrão global
                 'created_at'      => optional($tx->created_at)->toISOString(),
                 'updated_at'      => optional($tx->updated_at)->toISOString(),
 
-                'provider_payload'=> $tx->provider_payload,
+                // Somente o essencial do provider
+                'provider_payload' => [
+                    'name'         => $tx->provider_payload['name'] ?? null,
+                    'phone'        => $tx->provider_payload['phone'] ?? null,
+                    'document'     => $tx->provider_payload['document'] ?? null,
+                    'qr_code_text' => $tx->provider_payload['qr_code_text'] ?? null,
+                ],
             ];
 
             $response = Http::timeout(10)->post($user->webhook_in_url, $payload);
@@ -83,13 +95,13 @@ class SendWebhookPixCreatedJob implements ShouldQueue
 
         } catch (\Throwable $e) {
 
-            Log::warning("⚠️ Webhook Pix Create falhou", [
+            Log::warning("⚠️ Falha ao enviar Webhook Pix Create (retry automático)", [
                 'user_id' => $user->id,
                 'tx_id'   => $tx->id,
                 'error'   => $e->getMessage(),
             ]);
 
-            throw $e; // permite retry automático do Laravel Queue
+            throw $e; // habilita retry automático
         }
     }
 }
