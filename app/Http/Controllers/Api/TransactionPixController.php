@@ -86,7 +86,7 @@ class TransactionPixController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        |  PLUGGOU - CRIA PIX
+        |  🚀 PLUGGOU - CRIA PIX (CORRIGIDO)
         |--------------------------------------------------------------------------
         */
         try {
@@ -98,9 +98,10 @@ class TransactionPixController extends Controller
 
             Log::info("PLUGGOU_CREATE_PIX_RESPONSE", $response);
 
-            $transactionId = $response["id"] ?? null;
-            $qrCodeText    = data_get($response, "pix.qr_code");
-            $qrCodeBase64  = data_get($response, "pix.qr_code_base64");
+            // 🔥 PLUGGOU RETORNA DENTRO DE "data"
+            $transactionId = data_get($response, "data.id");
+            $qrCodeText    = data_get($response, "data.pix.emv");
+            $qrCodeBase64  = data_get($response, "data.pix.qr_code_base64");
 
             if (!$transactionId || !$qrCodeText) {
                 throw new \Exception("Invalid Pluggou response");
