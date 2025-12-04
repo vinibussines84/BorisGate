@@ -40,7 +40,7 @@ return [
     */
 
     'coffepay' => [
-        'url'           => env('COFFE_PAY_URL', 'https://api.coffeepay.com'),
+        'url'           => env('COFFE_PAY_URL', 'https://api.coffepay.com/api'),
         'client_id'     => env('COFFE_PAY_CLIENT_ID'),
         'client_secret' => env('COFFE_PAY_CLIENT_SECRET'),
         'timeout'       => env('COFFE_PAY_TIMEOUT', 15),
