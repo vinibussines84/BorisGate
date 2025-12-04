@@ -3,11 +3,11 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\ProcessWithdrawJob;
 use App\Jobs\SendWebhookWithdrawCreatedJob;
 use App\Models\User;
 use App\Models\Withdraw;
 use App\Services\Pix\KeyValidator;
-use App\Services\Pluggou\PluggouCashoutService;
 use App\Services\Withdraw\WithdrawService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -17,7 +17,6 @@ class WithdrawOutController extends Controller
 {
     public function __construct(
         private readonly WithdrawService $withdrawService,
-        private readonly PluggouCashoutService $pluggouService,
     ) {}
 
     public function store(Request $request)
@@ -165,30 +164,12 @@ class WithdrawOutController extends Controller
                 "key_value"  => $formattedKey,
             ];
 
-            Log::info('[PLUGGOU CASHOUT] Payload enviado', $payload);
-
             /*
             |--------------------------------------------------------------------------
-            | 11) Enviar requisição diretamente à Pluggou
+            | 11) Enfileirar o processamento (não travar request)
             |--------------------------------------------------------------------------
             */
-            $response = $this->pluggouService->createCashout($payload);
-
-            Log::info('[PLUGGOU CASHOUT] Resposta recebida', $response);
-
-            if (isset($response['success']) && $response['success'] === true) {
-                $withdraw->update([
-                    'status' => $response['data']['status'] ?? 'processing',
-                    'provider_reference' => $response['data']['id'] ?? null,
-                    'meta' => array_merge($withdraw->meta ?? [], [
-                        'pluggou_payload'  => $payload,
-                        'pluggou_response' => $response,
-                    ]),
-                ]);
-            } else {
-                $withdraw->update(['status' => 'failed']);
-                Log::error('❌ Saque Pluggou falhou', ['response' => $response]);
-            }
+            ProcessWithdrawJob::dispatch($withdraw, $payload)->onQueue('withdraws');
 
             /*
             |--------------------------------------------------------------------------
@@ -206,12 +187,12 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 13) Resposta final
+            | 13) Resposta final instantânea
             |--------------------------------------------------------------------------
             */
             return response()->json([
                 'success' => true,
-                'message' => 'Saque enviado para processamento.',
+                'message' => 'Saque enfileirado para processamento.',
                 'data' => [
                     'id'            => $withdraw->id,
                     'external_id'   => $externalId,
@@ -219,8 +200,8 @@ class WithdrawOutController extends Controller
                     'liquid_amount' => $withdraw->amount,
                     'pix_key'       => $withdraw->pixkey,
                     'pix_key_type'  => $withdraw->pixkey_type,
-                    'status'        => $withdraw->status,
-                    'reference'     => $withdraw->provider_reference,
+                    'status'        => 'processing',
+                    'reference'     => null,
                     'provider'      => 'Pluggou',
                 ]
             ]);

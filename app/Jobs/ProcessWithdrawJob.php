@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Models\Withdraw;
 use App\Services\PodPay\PodPayCashoutService;
+use App\Services\Pluggou\PluggouCashoutService;
 use App\Services\Withdraw\WithdrawService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -41,6 +42,7 @@ class ProcessWithdrawJob implements ShouldQueue
 
     public function handle(
         PodPayCashoutService $podpay,
+        PluggouCashoutService $pluggou,
         WithdrawService $withdrawService
     ) {
         /*
@@ -57,7 +59,9 @@ class ProcessWithdrawJob implements ShouldQueue
             return;
         }
 
-        Log::info('[ProcessWithdrawJob] Iniciando job (PodPay)', [
+        $provider = strtolower($withdraw->provider);
+
+        Log::info("[ProcessWithdrawJob] Iniciando job ({$provider})", [
             'withdraw_id' => $withdraw->id,
             'payload'     => $this->payload,
         ]);
@@ -77,18 +81,26 @@ class ProcessWithdrawJob implements ShouldQueue
 
         /*
         |--------------------------------------------------------------------------
-        | 2) Enviar saque para PodPay
+        | 2) Selecionar provedor
         |--------------------------------------------------------------------------
         */
-        $resp = $podpay->createWithdrawal($this->payload);
+        $resp = match ($provider) {
+            'pluggou' => $pluggou->createCashout($this->payload),
+            'podpay'  => $podpay->createWithdrawal($this->payload),
+            default   => [
+                'success' => false,
+                'message' => "Provider '{$provider}' não suportado.",
+            ],
+        };
 
-        if (!$resp['success']) {
+        if (!isset($resp['success']) || $resp['success'] !== true) {
 
             $reason = $resp['response']['message']
+                ?? $resp['message']
                 ?? $resp['exception']
-                ?? 'Erro PodPay Cashout';
+                ?? 'Erro ao processar cashout';
 
-            Log::error('[ProcessWithdrawJob] Erro retornado pela PodPay', [
+            Log::error("[ProcessWithdrawJob] Erro retornado pelo provider ({$provider})", [
                 'withdraw_id' => $withdraw->id,
                 'reason'      => $reason,
                 'response'    => $resp,
@@ -100,13 +112,13 @@ class ProcessWithdrawJob implements ShouldQueue
 
         /*
         |--------------------------------------------------------------------------
-        | 3) Capturar provider_reference (ID da PodPay)
+        | 3) Capturar provider_reference (ID da transação)
         |--------------------------------------------------------------------------
         */
         $providerId = data_get($resp, 'data.id');
 
         if (!$providerId) {
-            Log::error('[ProcessWithdrawJob] provider_id ausente no retorno PodPay', [
+            Log::error("[ProcessWithdrawJob] provider_id ausente no retorno {$provider}", [
                 'withdraw_id' => $withdraw->id,
                 'response'    => $resp,
             ]);
@@ -117,12 +129,16 @@ class ProcessWithdrawJob implements ShouldQueue
 
         /*
         |--------------------------------------------------------------------------
-        | 4) Mapear status PodPay → status interno
+        | 4) Mapear status → interno
         |--------------------------------------------------------------------------
         */
         $providerStatus = strtoupper(data_get($resp, 'data.status', 'PROCESSING'));
 
         $status = match ($providerStatus) {
+            // Pluggou
+            'PAID', 'COMPLETED', 'APPROVED' => 'paid',
+            'FAILED', 'REJECTED', 'REFUSED', 'CANCELLED', 'CANCELED' => 'failed',
+            // PodPay
             'COMPLETED'        => 'paid',
             'CANCELLED',
             'REFUSED'          => 'failed',
@@ -152,7 +168,13 @@ class ProcessWithdrawJob implements ShouldQueue
         if ($status === 'paid') {
             $withdrawService->markAsPaid($withdraw, $resp);
 
-            Log::info('[ProcessWithdrawJob] Saque concluído com sucesso!', [
+            Log::info("[ProcessWithdrawJob] Saque concluído com sucesso ({$provider})!", [
+                'withdraw_id'   => $withdraw->id,
+                'provider_id'   => $providerId,
+                'provider_resp' => $resp,
+            ]);
+        } else {
+            Log::info("[ProcessWithdrawJob] Saque aguardando processamento ({$provider}).", [
                 'withdraw_id'   => $withdraw->id,
                 'provider_id'   => $providerId,
                 'provider_resp' => $resp,
