@@ -115,8 +115,8 @@ class WithdrawOutController extends Controller
             $externalId = $data['external_id']
                 ?: 'WD_' . now()->timestamp . '_' . rand(1000,9999);
 
-            if (Withdraw::where('user_id',$user->id)
-                ->where('external_id',$externalId)
+            if (Withdraw::where('user_id', $user->id)
+                ->where('external_id', $externalId)
                 ->exists()) {
                 return $this->error("External ID duplicado.");
             }
@@ -125,7 +125,7 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 8) Criar saque local
+            | 8) Criar saque local (debita saldo imediatamente)
             |--------------------------------------------------------------------------
             */
             $withdraw = $this->withdrawService->create(
@@ -211,6 +211,11 @@ class WithdrawOutController extends Controller
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
             ]);
+
+            // se o erro for saldo insuficiente, retorna o texto real
+            if (str_contains($e->getMessage(), 'Saldo insuficiente')) {
+                return $this->error($e->getMessage());
+            }
 
             return $this->error("Erro interno ao processar saque.");
         }
