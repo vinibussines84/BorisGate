@@ -41,23 +41,28 @@ class WebhookPluggouController extends Controller
                 return response()->json(['ignored' => true]);
             }
 
-            // 🔄 Normaliza status
+            // 🔄 Normaliza status recebido
             $normalized = StatusMap::normalize(data_get($data, 'status'));
             $newEnum    = TransactionStatus::fromLoose($normalized);
             $oldEnum    = TransactionStatus::tryFrom($tx->status);
 
-            // 💡 E2E nunca pode ser nulo — gera se não vier do Pluggou
+            // ⚖️ Aplica alteração de saldo
+            $wallet->applyStatusChange($tx, $oldEnum, $newEnum);
+
+            // E2E vindo do provedor
             $incomingE2E = data_get($data, 'e2e_id');
-            if (empty($incomingE2E)) {
+
+            // ✅ Só gerar E2E interno se o novo status for "PAID"
+            if ($newEnum === TransactionStatus::PAID && empty($incomingE2E)) {
                 $incomingE2E = $this->generateFallbackE2E($tx);
-                Log::warning('⚠️ Gerado E2E interno (faltante no webhook Pluggou)', [
+                Log::warning('⚠️ Gerado E2E interno (faltante no webhook Pluggou — somente porque foi PAID)', [
                     'transaction_id' => $tx->id,
                     'generated_e2e'  => $incomingE2E,
                 ]);
+            } else {
+                // para pendentes ou outros, mantém o anterior
+                $incomingE2E = $incomingE2E ?: $tx->e2e_id;
             }
-
-            // ⚖️ Aplica alteração de saldo
-            $wallet->applyStatusChange($tx, $oldEnum, $newEnum);
 
             // 💾 Atualiza transação local
             $tx->updateQuietly([
@@ -67,7 +72,7 @@ class WebhookPluggouController extends Controller
                 'paid_at'          => data_get($data, 'paid_at') ?: $tx->paid_at,
             ]);
 
-            // 🔔 Dispara webhook do sistema do cliente
+            // 🔔 Envia webhook interno só se realmente estiver PAGA
             if (
                 $newEnum === TransactionStatus::PAID &&
                 $tx->user?->webhook_enabled &&
@@ -83,7 +88,6 @@ class WebhookPluggouController extends Controller
             ]);
 
         } catch (\Throwable $e) {
-
             Log::error("🚨 ERRO WEBHOOK PLUGGOU", [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
@@ -95,6 +99,7 @@ class WebhookPluggouController extends Controller
 
     /**
      * 🔐 Gera E2E interno quando o provedor não envia
+     * — SOMENTE se o status for PAID
      */
     private function generateFallbackE2E(Transaction $tx): string
     {
