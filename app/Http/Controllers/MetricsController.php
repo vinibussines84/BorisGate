@@ -275,7 +275,9 @@ class MetricsController extends Controller
                 'credit'      => false,
             ]);
 
-        $merged = $pix->merge($saques)
+        // ✅ Corrigido — força ambas as variáveis a serem Collections
+        $merged = collect($pix)
+            ->merge(collect($saques))
             ->sortByDesc(fn ($i) => $i['paidAt'] ?? $i['createdAt'])
             ->values()
             ->take($limit)

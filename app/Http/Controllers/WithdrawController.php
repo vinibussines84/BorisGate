@@ -4,12 +4,10 @@ namespace App\Http\Controllers;
 
 use App\Models\User;
 use App\Models\Withdraw;
-use App\Services\ReflowPay\ReflowPayCashoutService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
@@ -18,12 +16,8 @@ use App\Enums\TransactionStatus;
 
 class WithdrawController extends Controller
 {
-    public function __construct(
-        private readonly ReflowPayCashoutService $reflow
-    ) {}
-
     /*======================================================================
-     *  ✅ API LIST — aprimorado com paginação, filtros e busca
+     *  ✅ API LIST — compatível com MySQL e SQLite
      *======================================================================*/
     public function apiIndex(Request $request)
     {
@@ -45,6 +39,16 @@ class WithdrawController extends Controller
             'FAILED'    => ['failed', 'falha', 'error', 'denied', 'canceled', 'cancelled', 'rejected'],
         ];
 
+        // 🔧 Detecta driver (MySQL ou SQLite) e ajusta funções JSON
+        $driver = DB::getDriverName();
+        if ($driver === 'sqlite') {
+            $e2eSql = "json_extract(meta, '$.e2e')";
+            $endtoendSql = "json_extract(meta, '$.endtoend')";
+        } else {
+            $e2eSql = "JSON_UNQUOTE(JSON_EXTRACT(meta, '$.e2e'))";
+            $endtoendSql = "JSON_UNQUOTE(JSON_EXTRACT(meta, '$.endtoend'))";
+        }
+
         $q = Withdraw::query()
             ->selectRaw("
                 id,
@@ -55,10 +59,7 @@ class WithdrawController extends Controller
                 status,
                 description,
                 pixkey as txid,
-                COALESCE(
-                    JSON_UNQUOTE(JSON_EXTRACT(meta, '$.e2e')),
-                    JSON_UNQUOTE(JSON_EXTRACT(meta, '$.endtoend'))
-                ) as e2e_id,
+                COALESCE($e2eSql, $endtoendSql) as e2e_id,
                 created_at,
                 processed_at as paid_at
             ")
@@ -70,12 +71,19 @@ class WithdrawController extends Controller
 
         if ($search !== '') {
             $like = "%{$search}%";
-            $q->where(function ($w) use ($like) {
+            $q->where(function ($w) use ($like, $driver) {
                 $w->where('id', 'LIKE', $like)
                     ->orWhere('pixkey', 'LIKE', $like)
-                    ->orWhere('description', 'LIKE', $like)
-                    ->orWhereRaw("JSON_EXTRACT(meta, '$.e2e') LIKE ?", [$like])
-                    ->orWhereRaw("JSON_EXTRACT(meta, '$.endtoend') LIKE ?", [$like]);
+                    ->orWhere('description', 'LIKE', $like);
+
+                // 🔍 Filtros compatíveis com ambos os bancos
+                if ($driver === 'sqlite') {
+                    $w->orWhereRaw("json_extract(meta, '$.e2e') LIKE ?", [$like])
+                      ->orWhereRaw("json_extract(meta, '$.endtoend') LIKE ?", [$like]);
+                } else {
+                    $w->orWhereRaw("JSON_EXTRACT(meta, '$.e2e') LIKE ?", [$like])
+                      ->orWhereRaw("JSON_EXTRACT(meta, '$.endtoend') LIKE ?", [$like]);
+                }
             });
         }
 
@@ -131,7 +139,7 @@ class WithdrawController extends Controller
     }
 
     /*======================================================================
-     *  ✅ PANEL LIST (Inertia)
+     *  ✅ LISTAGEM VIA INERTIA (Painel)
      *======================================================================*/
     public function index(Request $request)
     {
@@ -231,16 +239,14 @@ class WithdrawController extends Controller
                     'pixkey'          => $data['pixkey'],
                     'pixkey_type'     => $data['pixkey_type'],
                     'idempotency_key' => $data['idempotency_key'],
-                    'provider'        => 'reflowpay',
+                    'provider'        => 'internal',
                     'status'          => 'pending',
                     'meta'            => ['source' => $source, 'ip' => $ip],
                 ]);
             });
 
-            $this->sendToReflow($user, $withdraw);
-
             RateLimiter::hit($withdrawLimitKey, 300);
-            return $this->respond($source, 'Saque enviado para processamento.', $withdraw, 201);
+            return $this->respond($source, 'Saque registrado com sucesso.', $withdraw, 201);
 
         } catch (ValidationException $e) {
             return $this->respond($source, $e->errors(), null, 422);
@@ -252,61 +258,6 @@ class WithdrawController extends Controller
             ]);
             return $this->respond($source, 'Erro ao registrar saque.', null, 500);
         }
-    }
-
-    /*======================================================================
-     *  ENVIO REFLOWPAY
-     *======================================================================*/
-    private function sendToReflow(User $user, Withdraw $withdraw): void
-    {
-        if (in_array($withdraw->status, ['paid', 'failed', 'canceled', 'rejected'], true)) return;
-
-        $withdraw->update(['status' => 'processing']);
-
-        $payload = [
-            'value'      => intval($withdraw->gross_amount * 100),
-            'pixKeyType' => $this->pixKeyTypeToEnum($withdraw->pixkey_type),
-            'pixKey'     => $withdraw->pixkey,
-            'cpfCnpj'    => preg_replace('/\D+/', '', $user->cpf ?? $user->document ?? ''),
-            'person' => [
-                'name'  => $user->name,
-                'email' => $user->email,
-                'phone' => preg_replace('/\D+/', '', $user->phone ?? ''),
-            ],
-            'orderId' => $withdraw->idempotency_key,
-        ];
-
-        Log::info('[ReflowPay Cashout] Payload enviado', [
-            'withdraw_id' => $withdraw->id,
-            'payload'     => $payload,
-        ]);
-
-        $resp = $this->reflow->createCashout($payload);
-        Log::info('[ReflowPay Cashout] Response', $resp);
-
-        if (!isset($resp['transactionId'])) {
-            $this->revertFailedWithdraw($withdraw);
-            throw new \RuntimeException('Erro ao comunicar com ReflowPay: ' . json_encode($resp));
-        }
-
-        $withdraw->update([
-            'provider_reference' => $resp['transactionId'] ?? null,
-            'provider_message'   => 'Enviado à ReflowPay',
-            'status'             => 'processing',
-            'meta'               => array_merge($withdraw->meta ?? [], ['reflow_response' => $resp]),
-        ]);
-    }
-
-    private function pixKeyTypeToEnum(string $type): int
-    {
-        return match ($type) {
-            'cpf'       => 0,
-            'cnpj'      => 1,
-            'email'     => 2,
-            'phone'     => 3,
-            'randomkey' => 4,
-            default     => 4,
-        };
     }
 
     /*======================================================================
@@ -349,16 +300,6 @@ class WithdrawController extends Controller
         }
     }
 
-    private function revertFailedWithdraw(Withdraw $withdraw): void
-    {
-        DB::transaction(function () use ($withdraw) {
-            $u = User::lockForUpdate()->findOrFail($withdraw->user_id);
-            $u->amount_available += ($withdraw->gross_amount ?? ($withdraw->amount + $withdraw->fee_amount));
-            $u->save();
-            $withdraw->update(['status' => 'failed']);
-        });
-    }
-
     private function respond(string $source, $message, ?Withdraw $withdraw = null, int $status = 200)
     {
         if ($source === 'api') {
@@ -366,7 +307,7 @@ class WithdrawController extends Controller
                 'success'  => $status < 400,
                 'message'  => is_string($message) ? $message : null,
                 'errors'   => is_array($message) ? $message : null,
-                'withdraw' => $withdraw ? $this->mapWithdraw($withdraw) : null,
+                'withdraw' => $withdraw,
             ], $status);
         }
 
