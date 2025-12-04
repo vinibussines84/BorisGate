@@ -57,6 +57,9 @@ class Transaction extends Model
         'canceled_at'                => 'datetime',
         'applied_available_amount'   => 'decimal:2',
         'applied_blocked_amount'     => 'decimal:2',
+
+        // ✅ A LINHA QUE RESOLVE O ERRO!
+        'status'                     => 'string',
     ];
 
     protected $appends = [
@@ -190,10 +193,8 @@ class Transaction extends Model
             return;
         }
 
-        // Normaliza usando StatusMap
         $normalized = StatusMap::normalize((string) $value);
 
-        // Sempre salva em uppercase
         $this->attributes['status'] = strtoupper($normalized);
     }
 
