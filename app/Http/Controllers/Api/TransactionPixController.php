@@ -9,7 +9,7 @@ use App\Models\Transaction;
 use App\Models\Withdraw;
 use App\Models\User;
 use App\Enums\TransactionStatus;
-use App\Services\PodPay\PodPayService;
+use App\Services\Provider\ProviderService;
 use App\Jobs\SendWebhookPixCreatedJob;
 use App\Support\StatusMap;
 
@@ -17,10 +17,10 @@ class TransactionPixController extends Controller
 {
     /*
     |--------------------------------------------------------------------------
-    | PIX CASH-IN (PODPAY)
+    | PIX CASH-IN (COFFE PAY via ProviderService)
     |--------------------------------------------------------------------------
     */
-    public function store(Request $request, PodPayService $podpay)
+    public function store(Request $request, ProviderService $provider)
     {
         // 🔐 Auth
         $auth   = $request->header('X-Auth-Key');
@@ -53,7 +53,6 @@ class TransactionPixController extends Controller
             ], 422);
         }
 
-        $amountCents = (int) round($amountReais * 100);
         $externalId  = $data['external_id'];
         $name        = $data['name'] ?? $user->name ?? 'Cliente';
         $document    = preg_replace('/\D/', '', $data['document']);
@@ -69,7 +68,7 @@ class TransactionPixController extends Controller
             ], 409);
         }
 
-        // 🧮 Criar local
+        // 🧮 Criar registro local rápido
         $tx = Transaction::create([
             'tenant_id'          => $user->tenant_id,
             'user_id'            => $user->id,
@@ -77,7 +76,7 @@ class TransactionPixController extends Controller
             'status'             => TransactionStatus::PENDENTE,
             'currency'           => 'BRL',
             'method'             => 'pix',
-            'provider'           => 'PodPay',
+            'provider'           => 'CoffePay',
             'amount'             => $amountReais,
             'fee'                => $this->computeFee($user, $amountReais),
             'external_reference' => $externalId,
@@ -87,72 +86,38 @@ class TransactionPixController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        |  PAYLOAD PODPAY
+        |  COFFE PAY REQUEST OTIMIZADO
         |--------------------------------------------------------------------------
         */
-        $payload = [
-            "amount"        => $amountCents,
-            "currency"      => "BRL",
-            "paymentMethod" => "pix",
-
-            "pix" => [
-                "expiresInDays" => 1,
-            ],
-
-            "items" => [
-                [
-                    "title"     => "PIX",
-                    "unitPrice" => $amountCents,
-                    "quantity"  => 1,
-                    "tangible"  => false,
-                ],
-            ],
-
-            "customer" => [
-                "name"  => $name,
-                "email" => $user->email,
-                "document" => [
-                    "type"   => "cpf",
-                    "number" => $document,
-                ],
-            ],
-
-            "postbackUrl" => url('/api/webhooks/podpay'),
-            "externalRef" => $externalId,
-        ];
-
-        // 🚀 PodPay Request
         try {
-            $response = $podpay->createPixTransaction($payload);
+            $response = $provider->createPix($amountReais, [
+                "name"     => $name,
+                "document" => $document,
+                "email"    => $user->email,
+            ]);
 
-            Log::info("PODPAY_PIX_RESPONSE", $response);
+            Log::info("COFFE_PAY_RESPONSE", $response);
 
-            if (!$response['success']) {
-                throw new \Exception("PodPay error");
-            }
-
-            $body = $response['body'];
-
-            $transactionId = data_get($body, 'id');
-            $qrCodeText    = data_get($body, 'pix.qrcode');
+            $transactionId = $response["transaction_id"] ?? null;
+            $qrCodeText    = $response["qrcode"] ?? null;
 
             if (!$transactionId || !$qrCodeText) {
-                Log::error("PODPAY_INVALID_RESPONSE", ['body' => $body]);
-                throw new \Exception("Invalid PodPay response (missing id or pix.qrcode)");
+                throw new \Exception("Invalid CoffePay response");
             }
 
         } catch (\Throwable $e) {
 
             $tx->updateQuietly(['status' => TransactionStatus::FALHA]);
 
+            Log::error("COFFE_PAY_ERROR", ['error' => $e->getMessage()]);
+
             return response()->json([
                 'success' => false,
                 'error'   => 'Failed to create PIX transaction.',
-                'debug'   => $e->getMessage(),
             ], 500);
         }
 
-        // Atualiza local
+        // 📌 Atualiza local
         $tx->updateQuietly([
             'txid'                    => $transactionId,
             'provider_transaction_id' => $transactionId,
@@ -161,14 +126,15 @@ class TransactionPixController extends Controller
                 'document'     => $document,
                 'phone'        => $phone,
                 'qr_code_text' => $qrCodeText,
-                'provider_raw' => $body,
             ],
         ]);
 
+        // 🔔 Webhook assíncrono (sem lentidão)
         if ($user->webhook_enabled && $user->webhook_in_url) {
-            SendWebhookPixCreatedJob::dispatch($user->id, $tx->id);
+            SendWebhookPixCreatedJob::dispatch($user->id, $tx->id)->onQueue('webhooks');
         }
 
+        // ✅ Resposta 100% igual ao seu formato oficial
         return response()->json([
             'success'        => true,
             'transaction_id' => $tx->id,
@@ -206,29 +172,22 @@ class TransactionPixController extends Controller
             ->first();
 
         if ($tx) {
-
             return response()->json([
                 'type'            => 'Pix Create',
                 'event'           => 'created',
-
                 'transaction_id'  => $tx->id,
                 'external_id'     => $tx->external_reference,
                 'user'            => $user->name,
-
                 'amount'          => (float) $tx->amount,
                 'fee'             => (float) $tx->fee,
                 'currency'        => $tx->currency,
-
                 'status'          => StatusMap::normalize($tx->status),
-
                 'txid'            => $tx->txid,
                 'e2e'             => $tx->e2e_id,
                 'direction'       => $tx->direction,
                 'method'          => $tx->method,
-
                 'created_at'      => optional($tx->created_at)->toISOString(),
                 'updated_at'      => optional($tx->updated_at)->toISOString(),
-
                 'provider_payload' => [
                     'name'         => $tx->provider_payload['name'] ?? null,
                     'phone'        => $tx->provider_payload['phone'] ?? null,
@@ -244,7 +203,6 @@ class TransactionPixController extends Controller
             ->first();
 
         if ($withdraw) {
-
             $meta    = $withdraw->meta ?? [];
             $receipt = data_get($meta, 'receipt', []);
 
