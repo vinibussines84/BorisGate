@@ -36,7 +36,7 @@ class MetricsController extends Controller
             ->where('user_id', $u->id)
             ->where('direction', Transaction::DIR_IN)
             ->where('method', 'pix')
-            ->where('status', TransactionStatus::PAGA)
+            ->where('status', TransactionStatus::PAID)
             ->whereBetween('paid_at', [$startUtc, $endUtc])
             ->count();
 
@@ -45,7 +45,7 @@ class MetricsController extends Controller
             ->where('user_id', $u->id)
             ->where('direction', Transaction::DIR_IN)
             ->where('method', 'pix')
-            ->where('status', TransactionStatus::PAGA)
+            ->where('status', TransactionStatus::PAID)
             ->whereBetween('paid_at', [$startUtc, $endUtc])
             ->sum('amount');
 
@@ -88,7 +88,7 @@ class MetricsController extends Controller
             ->where('user_id', $u->id)
             ->where('direction', Transaction::DIR_IN)
             ->where('method', 'pix')
-            ->where('status', TransactionStatus::PAGA)
+            ->where('status', TransactionStatus::PAID)
             ->whereBetween('paid_at', [$mesInicio, $mesFim])
             ->sum('amount');
 
@@ -135,7 +135,7 @@ class MetricsController extends Controller
             ->where('user_id', $u->id)
             ->where('direction', Transaction::DIR_IN)
             ->where('method', 'pix')
-            ->where('status', TransactionStatus::PAGA)
+            ->where('status', TransactionStatus::PAID)
             ->whereBetween('created_at', [$startUtc, $endUtc])
             ->sum('amount');
 
@@ -176,32 +176,19 @@ class MetricsController extends Controller
             ->where('user_id', $u->id)
             ->where('direction', Transaction::DIR_IN)
             ->where('method', 'pix')
-            ->where('status', TransactionStatus::PENDENTE)
-            ->whereBetween('created_at', [$startUtc, $endUtc])
-            ->count();
-
-        // Chargebacks (se existir)
-        $statusChargeback = defined(TransactionStatus::class . '::CHARGEBACK')
-            ? TransactionStatus::CHARGEBACK
-            : 'chargeback';
-
-        $chargebacksMes = (int) Transaction::query()
-            ->where('user_id', $u->id)
-            ->where('method', 'pix')
-            ->where('status', $statusChargeback)
+            ->where('status', TransactionStatus::PENDING)
             ->whereBetween('created_at', [$startUtc, $endUtc])
             ->count();
 
         return response()->json([
             'success' => true,
             'data' => [
-                'entradaMes'      => $entradasLiquido,
-                'entradaBruto'    => $entradasBruto,
-                'saidaMes'        => $saidasMes,
-                'pendentes'       => $pendentes,
-                'volumePix'       => $volumePix,
-                'chargebacksMes'  => $chargebacksMes,
-                'periodo'         => $periodo,
+                'entradaMes'     => $entradasLiquido,
+                'entradaBruto'   => $entradasBruto,
+                'saidaMes'       => $saidasMes,
+                'pendentes'      => $pendentes,
+                'volumePix'      => $volumePix,
+                'periodo'        => $periodo,
             ],
         ]);
     }
@@ -247,7 +234,7 @@ class MetricsController extends Controller
             ->where('user_id', $u->id)
             ->where('direction', Transaction::DIR_IN)
             ->where('method', 'pix')
-            ->where('status', TransactionStatus::PAGA)
+            ->where('status', TransactionStatus::PAID)
             ->orderByDesc('paid_at')
             ->orderByDesc('created_at')
             ->limit($limit)
