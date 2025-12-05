@@ -18,7 +18,7 @@ class PluggouCashoutService
         $this->secretKey = (string) config('services.pluggou.secret_key', '');
 
         if (empty($this->publicKey) || empty($this->secretKey)) {
-            Log::error('[PLUGGOU CASHOUT] ❌ Chaves ausentes. Configure PLUGGOU_PUBLIC_KEY e PLUGGOU_SECRET_KEY no .env.');
+            Log::error('[PLUGGOU CASHOUT] ❌ Chaves ausentes.');
             throw new \RuntimeException('Chaves de API da Pluggou ausentes no .env');
         }
     }
@@ -26,22 +26,35 @@ class PluggouCashoutService
     /**
      * Cria um saque (cashout PIX) via API da Pluggou.
      *
-     * @param  array{amount:int,key_type:string,key_value:string,description?:string}  $payload
-     * @return array
+     * Retorno SEMPRE padronizado:
+     *
+     * [
+     *   'success' => bool,
+     *   'message' => string,
+     *   'provider_id' => string|null,
+     *   'provider_status' => string|null,
+     *   'data' => array|null
+     * ]
      */
     public function createCashout(array $payload): array
     {
         try {
-            Log::info('[PLUGGOU CASHOUT] 🚀 Iniciando requisição', ['payload' => $payload]);
+            Log::info('[PLUGGOU CASHOUT] 🚀 Enviando requisição', ['payload' => $payload]);
 
             // 🔎 Validação básica
             if (!isset($payload['amount'], $payload['key_type'], $payload['key_value'])) {
-                throw new \InvalidArgumentException('Payload inválido: amount, key_type e key_value são obrigatórios.');
+                return [
+                    'success' => false,
+                    'message' => 'Payload inválido: amount, key_type e key_value são obrigatórios.',
+                    'provider_id' => null,
+                    'provider_status' => null,
+                    'data' => null,
+                ];
             }
 
             /*
             |--------------------------------------------------------------------------
-            | 1) Monta requisição HTTP para a Pluggou
+            | 1) Chamada HTTP
             |--------------------------------------------------------------------------
             */
             $response = Http::timeout(30)
@@ -52,52 +65,70 @@ class PluggouCashoutService
                     'Content-Type' => 'application/json',
                 ])
                 ->post("{$this->baseUrl}/withdrawals", [
-                    'amount'      => $payload['amount'], // valor em centavos
+                    'amount'      => $payload['amount'], 
                     'key_type'    => strtolower($payload['key_type']),
                     'key_value'   => $payload['key_value'],
                     'description' => $payload['description'] ?? 'Saque automático via API',
                 ]);
 
-            $data = $response->json() ?? [];
+            $json = $response->json() ?? [];
 
-            Log::info('[PLUGGOU CASHOUT] 📩 Resposta recebida', [
+            Log::info('[PLUGGOU CASHOUT] 📩 Resposta', [
                 'http_status' => $response->status(),
-                'response'    => $data,
+                'response'    => $json,
             ]);
 
             /*
             |--------------------------------------------------------------------------
-            | 2) Validação do retorno HTTP
+            | 2) HTTP FAILURE
             |--------------------------------------------------------------------------
             */
             if (!$response->successful()) {
                 return [
-                    'success'  => false,
-                    'message'  => $data['message'] ?? 'Erro de comunicação com a API Pluggou',
-                    'response' => $data,
+                    'success' => false,
+                    'message' => $json['message'] ?? 'Erro HTTP ao comunicar com a Pluggou',
+                    'provider_id' => null,
+                    'provider_status' => null,
+                    'data' => $json,
                 ];
             }
 
             /*
             |--------------------------------------------------------------------------
-            | 3) Normalização do retorno
+            | 3) Extrair provider_id e status corretamente
+            |--------------------------------------------------------------------------
+            */
+            $providerId = data_get($json, 'data.id') 
+                       ?? data_get($json, 'id');
+
+            $providerStatus = strtoupper(data_get($json, 'data.status', 
+                                data_get($json, 'status', 'PROCESSING')));
+
+            /*
+            |--------------------------------------------------------------------------
+            | 4) Normalização do retorno
             |--------------------------------------------------------------------------
             */
             return [
-                'success' => (bool) ($data['success'] ?? true),
-                'message' => $data['message'] ?? 'Saque processado com sucesso',
-                'data'    => $data['data'] ?? $data,
+                'success'         => (bool) ($json['success'] ?? true),
+                'message'         => $json['message'] ?? 'Requisição aceita pela Pluggou',
+                'provider_id'     => $providerId,
+                'provider_status' => $providerStatus,
+                'data'            => $json['data'] ?? $json,
             ];
+
         } catch (\Throwable $e) {
-            Log::error('[PLUGGOU CASHOUT] 💥 Exceção capturada', [
+
+            Log::error('[PLUGGOU CASHOUT] 💥 EXCEPTION', [
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
             ]);
 
             return [
-                'success'   => false,
-                'message'   => 'Erro interno ao comunicar com a API da Pluggou.',
-                'exception' => $e->getMessage(),
+                'success'         => false,
+                'message'         => 'Erro interno ao comunicar com a API da Pluggou.',
+                'provider_id'     => null,
+                'provider_status' => null,
+                'data'            => null,
             ];
         }
     }
