@@ -194,7 +194,80 @@ export default function AuthenticatedLayout({ header, children, boxed = false })
         </div>
       </header>
 
-      {/* SIDEBAR DESKTOP - ESTILIZADO */}
+      {/* SIDEBAR MOBILE */}
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm lg:hidden"
+          onClick={() => setMobileOpen(false)}
+        />
+      )}
+
+      <aside
+        className={`fixed inset-y-0 left-0 z-50 w-[260px] bg-neutral-950 border-r border-neutral-800/60
+        transform transition-transform duration-300 lg:hidden
+        ${mobileOpen ? "translate-x-0" : "-translate-x-full"}`}
+      >
+        <nav className="p-6 space-y-2">
+          {primaryLinks.map((item) => (
+            <div key={item.key}>
+              {!item.isDropdown && (
+                <Link
+                  href={item.href}
+                  onClick={() => setMobileOpen(false)}
+                  className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition
+                  ${
+                    item.active
+                      ? "bg-[#ff005d]/10 text-[#ff005d]"
+                      : "text-neutral-400 hover:bg-neutral-900/80 hover:text-white"
+                  }`}
+                >
+                  <item.icon size={18} />
+                  {item.label}
+                </Link>
+              )}
+
+              {item.isDropdown && (
+                <>
+                  <button
+                    onClick={() =>
+                      setIntegrationOpen((prev) => (prev === item.key ? false : item.key))
+                    }
+                    className="flex items-center justify-between w-full px-4 py-3 rounded-xl text-sm text-neutral-400 hover:text-white hover:bg-neutral-900/70"
+                  >
+                    <span className="flex items-center gap-2">
+                      <item.icon size={18} />
+                      {item.label}
+                    </span>
+                    {integrationOpen === item.key ? <ChevronUp /> : <ChevronDown />}
+                  </button>
+
+                  {integrationOpen === item.key && (
+                    <div className="ml-6 space-y-1 mt-1">
+                      {item.children.map((c) => (
+                        <Link
+                          key={c.key}
+                          href={c.href}
+                          onClick={() => setMobileOpen(false)}
+                          className={`block px-4 py-2 rounded-lg text-sm transition
+                          ${
+                            currentPath.startsWith(c.href)
+                              ? "text-[#ff005d] bg-[#ff005d]/10"
+                              : "text-neutral-400 hover:bg-neutral-900/60 hover:text-neutral-300"
+                          }`}
+                        >
+                          {c.label}
+                        </Link>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          ))}
+        </nav>
+      </aside>
+
+      {/* SIDEBAR DESKTOP */}
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-[282px] 
       lg:flex lg:flex-col lg:border-r lg:border-neutral-800/60 lg:bg-neutral-950">
         <div className="flex items-center gap-3 px-6 py-5 border-b border-neutral-800/70">
@@ -203,40 +276,41 @@ export default function AuthenticatedLayout({ header, children, boxed = false })
           </Link>
         </div>
 
-        <nav className="min-h-0 flex-1 overflow-y-auto px-4 py-6 hide-scrollbar"> {/* AUMENTADO: px-4 py-6 */}
+        <nav className="min-h-0 flex-1 overflow-y-auto px-4 py-6 hide-scrollbar">
           <ul className="space-y-1">
             {primaryLinks.map((item) => (
               <li key={item.key}>
+                {/* --- DROPDOWN DESKTOP --- */}
                 {item.isDropdown ? (
                   <>
                     <button
-                      onClick={() => setIntegrationOpen((v) => !v)}
-                      className={`flex items-center justify-between w-full px-4 py-3 rounded-xl text-sm font-medium transition ${ /* AUMENTADO: px-4 py-3, rounded-xl */
+                      onClick={() =>
+                        setIntegrationOpen((prev) => (prev === item.key ? false : item.key))
+                      }
+                      className={`flex items-center justify-between w-full px-4 py-3 rounded-xl text-sm font-medium transition 
+                      ${
                         item.active
                           ? "text-[#ff005d]"
-                          : "text-neutral-400 hover:text-white hover:bg-neutral-900/80" // ADICIONADO: Hover state
+                          : "text-neutral-400 hover:text-white hover:bg-neutral-900/80"
                       }`}
                     >
                       <span className="flex items-center gap-2">
                         <item.icon size={17} />
                         {item.label}
                       </span>
-                      {integrationOpen ? (
-                        <ChevronUp size={16} />
-                      ) : (
-                        <ChevronDown size={16} />
-                      )}
+                      {integrationOpen === item.key ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
                     </button>
 
-                    {integrationOpen && (
-                      <ul className="pl-6 mt-1 space-y-1"> {/* AJUSTADO: pl-6 */}
+                    {integrationOpen === item.key && (
+                      <ul className="pl-6 mt-1 space-y-1">
                         {item.children.map((c) => (
                           <li key={c.key}>
                             <Link
                               href={c.href}
-                              className={`block px-4 py-2 text-sm rounded-lg transition ${ /* AJUSTADO: px-4 py-2, rounded-lg */
+                              className={`block px-4 py-2 text-sm rounded-lg transition 
+                              ${
                                 currentPath.startsWith(normalizePath(c.href))
-                                  ? "text-[#ff005d] bg-[#ff005d]/10 font-medium" // ADICIONADO: font-medium no sublink ativo
+                                  ? "text-[#ff005d] bg-[#ff005d]/10 font-medium"
                                   : "text-neutral-400 hover:bg-neutral-900/60 hover:text-neutral-300"
                               }`}
                             >
@@ -250,10 +324,10 @@ export default function AuthenticatedLayout({ header, children, boxed = false })
                 ) : (
                   <Link
                     href={item.href}
-                    className={`flex items-center gap-3.5 rounded-xl px-4 py-3 
-                    text-[14.5px] transition font-medium ${ /* AUMENTADO: px-4 py-3, rounded-xl, font-medium */
+                    className={`flex items-center gap-3.5 rounded-xl px-4 py-3 text-[14.5px] transition font-medium 
+                    ${
                       item.active
-                        ? "bg-[#ff005d]/10 text-[#ff005d] shadow-inner shadow-black/30 ring-1 ring-[#ff005d]/30" // NOVO: shadow-inner + ring mais sutil
+                        ? "bg-[#ff005d]/10 text-[#ff005d] shadow-inner shadow-black/30 ring-1 ring-[#ff005d]/30"
                         : "text-neutral-400 hover:bg-neutral-900/80 hover:text-white"
                     }`}
                   >
