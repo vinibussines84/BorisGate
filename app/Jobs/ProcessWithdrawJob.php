@@ -19,9 +19,6 @@ class ProcessWithdrawJob implements ShouldQueue
     public int $withdrawId;
     public array $payload;
 
-    /**
-     * Tentará até 5 vezes antes de falhar.
-     */
     public $tries   = 5;
     public $timeout = 60;
 
@@ -39,7 +36,7 @@ class ProcessWithdrawJob implements ShouldQueue
     ) {
         /*
         |--------------------------------------------------------------------------
-        | 1) Buscar o saque no banco
+        | 1) Buscar o saque
         |--------------------------------------------------------------------------
         */
         $withdraw = Withdraw::find($this->withdrawId);
@@ -58,11 +55,11 @@ class ProcessWithdrawJob implements ShouldQueue
 
         /*
         |--------------------------------------------------------------------------
-        | 2) Evitar reprocessamento de saque finalizado
+        | 2) Evitar reprocessar saque já finalizado
         |--------------------------------------------------------------------------
         */
         if (in_array($withdraw->status, ['paid', 'failed'], true)) {
-            Log::warning('[ProcessWithdrawJob] ⚠️ Ignorando: saque já finalizado', [
+            Log::warning('[ProcessWithdrawJob] ⚠️ Ignorado — saque já finalizado', [
                 'withdraw_id' => $withdraw->id,
                 'status'      => $withdraw->status,
             ]);
@@ -71,114 +68,108 @@ class ProcessWithdrawJob implements ShouldQueue
 
         /*
         |--------------------------------------------------------------------------
-        | 3) Enviar requisição à Pluggou
+        | 3) Chamar API da Pluggou
         |--------------------------------------------------------------------------
         */
         try {
             $resp = $pluggou->createCashout($this->payload);
         } catch (\Throwable $e) {
-            Log::error('[ProcessWithdrawJob] 💥 Erro ao chamar API Pluggou', [
+            Log::error('[ProcessWithdrawJob] 💥 Erro ao chamar Pluggou', [
                 'withdraw_id' => $withdraw->id,
                 'exception'   => $e->getMessage(),
             ]);
 
-            $withdrawService->refundLocal($withdraw, 'Erro ao comunicar com a Pluggou: ' . $e->getMessage());
+            // 🔥 Falha antes do envio → estorna
+            $withdrawService->refundLocal(
+                $withdraw,
+                'Erro ao comunicar com a Pluggou: ' . $e->getMessage()
+            );
             return;
         }
 
         /*
         |--------------------------------------------------------------------------
-        | 4) Validar resposta da Pluggou
+        | 4) Validar resposta
         |--------------------------------------------------------------------------
         */
         if (!isset($resp['success']) || $resp['success'] === false) {
-            $reason = $resp['message'] ?? 'Erro desconhecido retornado pela Pluggou';
 
-            Log::error('[ProcessWithdrawJob] ❌ Falha no cashout Pluggou', [
+            $reason = $resp['message'] ?? 'Erro desconhecido da Pluggou';
+
+            Log::error('[ProcessWithdrawJob] ❌ Falha Pluggou', [
                 'withdraw_id' => $withdraw->id,
-                'reason'      => $reason,
                 'response'    => $resp,
             ]);
 
+            // 🔥 Falha no provider → estorna
             $withdrawService->refundLocal($withdraw, $reason);
             return;
         }
 
         /*
         |--------------------------------------------------------------------------
-        | 5) Capturar o ID da transação retornado pela Pluggou
+        | 5) Capturar ID do provider
         |--------------------------------------------------------------------------
         */
         $providerId = data_get($resp, 'data.id') ?? data_get($resp, 'id');
 
         if (!$providerId) {
-            Log::error('[ProcessWithdrawJob] ⚠️ ID da transação ausente no retorno da Pluggou', [
+            Log::error('[ProcessWithdrawJob] ⚠️ provider_id ausente', [
                 'withdraw_id' => $withdraw->id,
                 'response'    => $resp,
             ]);
 
+            // 🔥 Sem ID → falha
             $withdrawService->refundLocal($withdraw, 'missing_provider_id');
             return;
         }
 
         /*
         |--------------------------------------------------------------------------
-        | 6) Mapear status da Pluggou → status interno
-        |--------------------------------------------------------------------------
-        */
-        $providerStatus = strtoupper(data_get($resp, 'data.status', 'PROCESSING'));
-
-        $status = match ($providerStatus) {
-            'PAID', 'COMPLETED', 'APPROVED' => 'paid',
-            'FAILED', 'CANCELLED', 'ERROR', 'REFUSED' => 'failed',
-            'PENDING', 'PROCESSING', 'CREATED' => 'processing',
-            default => 'processing',
-        };
-
-        /*
-        |--------------------------------------------------------------------------
-        | 7) Atualizar saque local com dados do provider
+        | 6) Registrar provider_reference
         |--------------------------------------------------------------------------
         */
         $withdrawService->updateProviderReference(
             $withdraw,
             $providerId,
-            $status,
+            'processing',
             $resp
         );
 
-        Log::info('[ProcessWithdrawJob] 🔁 Saque atualizado com status do provider', [
+        Log::info('[ProcessWithdrawJob] 🔁 Saque enviado à Pluggou', [
             'withdraw_id' => $withdraw->id,
             'provider_id' => $providerId,
-            'status'      => $status,
         ]);
 
         /*
         |--------------------------------------------------------------------------
-        | 8) Se estiver pago, marcar como concluído e disparar webhook
+        | 7) STATUS retornado pela Pluggou imediatamente
         |--------------------------------------------------------------------------
         */
-        if ($status === 'paid') {
+        $providerStatus = strtolower(data_get($resp, 'data.status', 'processing'));
+
+        if (in_array($providerStatus, ['paid', 'success', 'completed'])) {
+
+            // 🔥 Se já veio pago → concluir imediatamente
             $withdrawService->markAsPaid($withdraw, $resp);
 
-            Log::info('[ProcessWithdrawJob] ✅ Saque concluído com sucesso!', [
-                'withdraw_id'   => $withdraw->id,
-                'provider_id'   => $providerId,
-                'provider_resp' => $resp,
+            Log::info('[ProcessWithdrawJob] ✅ Pago imediatamente no retorno', [
+                'withdraw_id' => $withdraw->id,
+                'provider_id' => $providerId,
             ]);
+
+            return;
         }
 
         /*
         |--------------------------------------------------------------------------
-        | 9) Se falhou, registrar logs (o estorno é feito no webhook/refundLocal)
+        | 8) STATUS ≠ PAID → NÃO estornar aqui
+        |    Aguardar webhook para concluir o saque.
         |--------------------------------------------------------------------------
         */
-        if ($status === 'failed') {
-            Log::warning('[ProcessWithdrawJob] 💸 Saque marcado como falhado', [
-                'withdraw_id'   => $withdraw->id,
-                'provider_id'   => $providerId,
-                'provider_resp' => $resp,
-            ]);
-        }
+        Log::info('[ProcessWithdrawJob] 🕒 Aguardando webhook Pluggou…', [
+            'withdraw_id' => $withdraw->id,
+            'provider_status' => $providerStatus,
+        ]);
     }
 }

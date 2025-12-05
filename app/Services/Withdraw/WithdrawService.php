@@ -17,12 +17,14 @@ class WithdrawService
     {
         return DB::transaction(function () use ($user, $gross, $net, $fee, $payload) {
 
+            // trava saldo
             $u = User::where('id', $user->id)->lockForUpdate()->first();
 
             if ($u->amount_available < $gross) {
                 throw new \Exception('Saldo insuficiente.');
             }
 
+            // 🔥 debita APENAS AQUI
             $u->amount_available = round($u->amount_available - $gross, 2);
             $u->save();
 
@@ -33,52 +35,57 @@ class WithdrawService
                 'fee_amount'      => $fee,
                 'pixkey'          => $payload['key'],
                 'pixkey_type'     => $payload['key_type'],
-                'status'          => 'pending',
-                'provider'        => 'podpay',
+                'status'          => 'processing',
+                'provider'        => 'pluggou',
                 'external_id'     => $payload['external_id'],
+                'provider_reference' => null,
                 'idempotency_key' => $payload['internal_ref'],
                 'meta' => [
                     'internal_reference' => $payload['internal_ref'],
-                    'tax_fixed'   => $user->tax_out_fixed,
-                    'tax_percent' => $user->tax_out_percent,
-                    'api_request' => true,
+                    'refund_done'        => false,
+                    'provider'           => 'pluggou',
+                    'api_request'        => true,
                 ],
             ]);
         });
     }
 
     /**
-     * Se falhar ANTES da criação no provider: estorna o BRUTO e marca como failed
-     *
-     * ✔️ Agora envia webhook withdraw.updated FAILED
+     * 🔥 Falhou — ESTORNA IMEDIATAMENTE (independente de motivo)
      */
     public function refundLocal(Withdraw $withdraw, string $reason): void
     {
-        Log::warning('💸 Refund LOCAL', [
+        Log::warning('💸 Refund LOCAL acionado', [
             'withdraw_id' => $withdraw->id,
             'reason'      => $reason,
         ]);
 
         DB::transaction(function () use ($withdraw, $reason) {
 
-            $u = User::where('id', $withdraw->user_id)->lockForUpdate()->first();
-            $u->amount_available = round($u->amount_available + $withdraw->gross_amount, 2);
-            $u->save();
+            $u = User::where('id', $withdraw->user_id)
+                ->lockForUpdate()
+                ->first();
 
+            // evita estornar mais de 1 vez
+            if (!($withdraw->meta['refund_done'] ?? false)) {
+                $u->amount_available = round($u->amount_available + $withdraw->gross_amount, 2);
+                $u->save();
+            }
+
+            // atualiza meta
             $meta = $withdraw->meta ?? [];
-            $meta['error'] = $reason;
             $meta['refund_done'] = true;
+            $meta['error'] = $reason;
             $meta['failed_at'] = now();
 
             $withdraw->update([
                 'status' => 'failed',
                 'meta'   => $meta,
+                'processed_at' => now(),
             ]);
         });
 
-        /**
-         * 🔥 Envia webhook FAILED (somente quando não veio provider_reference)
-         */
+        // 🔥 webhook OUT (FAILED)
         SendWebhookWithdrawUpdatedJob::dispatch(
             userId: $withdraw->user_id,
             withdrawId: $withdraw->id,
@@ -91,19 +98,19 @@ class WithdrawService
             ]
         )->onQueue('webhooks');
 
-        Log::info('📤 Webhook OUT disparado (FAILED - refundLocal)', [
+        Log::info('📤 Webhook OUT enviado (FAILED)', [
             'withdraw_id' => $withdraw->id,
-            'user_id'     => $withdraw->user_id,
             'reason'      => $reason,
         ]);
     }
 
     /**
-     * Atualiza saque após sucesso na criação do provider
+     * 🔥 Atualização após criação no provider
      */
     public function updateProviderReference(Withdraw $withdraw, string $providerRef, string $status, array $providerPayload)
     {
         DB::transaction(function () use ($withdraw, $providerRef, $status, $providerPayload) {
+
             $withdraw->update([
                 'provider_reference' => $providerRef,
                 'status'             => $status,
@@ -115,66 +122,7 @@ class WithdrawService
     }
 
     /**
-     * Processa o webhook da PodPay e decide se estorna ou confirma
-     */
-    public function handleWebhook(array $payload): array
-    {
-        $providerRef = (string) data_get($payload, 'objectId');
-        $status      = strtoupper((string) data_get($payload, 'data.status', 'UNKNOWN'));
-        $desc        = (string) data_get($payload, 'data.description', '');
-
-        $withdraw = Withdraw::where('provider_reference', $providerRef)->first();
-
-        if (!$withdraw) {
-            Log::warning('⚠️ Webhook ignorado — saque não encontrado.', [
-                'provider_reference' => $providerRef,
-                'status' => $status,
-            ]);
-            return ['ignored' => true];
-        }
-
-        if (in_array($withdraw->status, ['failed', 'paid'])) {
-            return ['ignored' => true];
-        }
-
-        $descLower = strtolower($desc);
-
-        $isFailed = collect([
-            'FAILED', 'ERROR', 'CANCELED', 'CANCELLED', 'REJECTED', 'REFUSED', 'DENIED', 'DECLINED'
-        ])->contains($status)
-            || str_contains($descLower, 'fail')
-            || str_contains($descLower, 'error')
-            || str_contains($descLower, 'cancel')
-            || str_contains($descLower, 'reject')
-            || str_contains($descLower, 'refuse')
-            || str_contains($descLower, 'denied')
-            || str_contains($descLower, 'declined');
-
-        $isCompleted = ($status === 'COMPLETED');
-
-        Log::info('🔎 Webhook PodPay recebido', [
-            'withdraw_id'   => $withdraw->id,
-            'status'        => $status,
-            'desc'          => $desc,
-            'isFailed'      => $isFailed,
-            'isCompleted'   => $isCompleted,
-        ]);
-
-        if ($isFailed) {
-            $this->refundWebhookFailed($withdraw, $payload);
-            return ['failed' => true];
-        }
-
-        if ($isCompleted) {
-            $this->markAsPaid($withdraw, $payload);
-            return ['paid' => true];
-        }
-
-        return ['ignored' => true];
-    }
-
-    /**
-     * Estorna via webhook — estorna o BRUTO e marca como FAILED + dispara webhook OUT
+     * 🔥 Falhou via webhook PodPay (não é usado para Pluggou, mas mantido)
      */
     public function refundWebhookFailed(Withdraw $withdraw, array $payload)
     {
@@ -197,34 +145,30 @@ class WithdrawService
             $withdraw->update([
                 'status' => 'failed',
                 'meta'   => $meta,
+                'processed_at' => now(),
             ]);
         });
 
-        dispatch(new SendWebhookWithdrawUpdatedJob(
+        SendWebhookWithdrawUpdatedJob::dispatch(
             userId: $withdraw->user_id,
             withdrawId: $withdraw->id,
             status: 'FAILED',
             reference: (string) ($withdraw->meta['internal_reference'] ?? $withdraw->id),
             raw: $payload
-        ))->onQueue('webhooks');
+        )->onQueue('webhooks');
 
-        Log::info('📤 Webhook OUT disparado (withdraw.updated FAILED)', [
-            'withdraw_id' => $withdraw->id,
-            'user_id'     => $withdraw->user_id,
-        ]);
+        Log::info('📤 Webhook OUT enviado (FAILED via webhook)');
     }
 
     /**
-     * Marca como PAGO e dispara webhook OUT (withdraw.updated - APPROVED)
+     * 🔥 Marca como pago
      */
     public function markAsPaid(Withdraw $withdraw, array $payload)
     {
         DB::transaction(function () use ($withdraw, $payload) {
-            $e2e = $this->generatePixE2E($withdraw);
 
             $meta = $withdraw->meta ?? [];
-            $meta['podpay_success_payload'] = $payload;
-            $meta['e2e'] = $e2e;
+            $meta['paid_payload'] = $payload;
             $meta['paid_at'] = now();
 
             $withdraw->update([
@@ -234,28 +178,14 @@ class WithdrawService
             ]);
         });
 
-        dispatch(new SendWebhookWithdrawUpdatedJob(
+        SendWebhookWithdrawUpdatedJob::dispatch(
             userId: $withdraw->user_id,
             withdrawId: $withdraw->id,
-            status: 'APPROVED',
+            status: 'PAID',
             reference: (string) ($withdraw->meta['internal_reference'] ?? $withdraw->id),
             raw: $payload
-        ))->onQueue('webhooks');
+        )->onQueue('webhooks');
 
-        Log::info('📤 Webhook OUT disparado (withdraw.updated APPROVED)', [
-            'withdraw_id' => $withdraw->id,
-            'user_id'     => $withdraw->user_id,
-        ]);
-    }
-
-    /**
-     * 🔢 Gera E2E PIX
-     */
-    private function generatePixE2E(Withdraw $withdraw): string
-    {
-        $ispb = '90400888';
-        $timestamp = now()->format('YmdHis');
-        $seq = str_pad($withdraw->id, 9, '0', STR_PAD_LEFT);
-        return "E{$ispb}{$timestamp}{$seq}";
+        Log::info('📤 Webhook OUT enviado (PAID)');
     }
 }

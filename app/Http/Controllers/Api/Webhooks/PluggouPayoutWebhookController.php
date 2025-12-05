@@ -18,7 +18,7 @@ class PluggouPayoutWebhookController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | 1) Validar payload base
+        | 1) Validar payload
         |--------------------------------------------------------------------------
         */
         $eventType = data_get($payload, 'event_type');
@@ -29,7 +29,7 @@ class PluggouPayoutWebhookController extends Controller
         }
 
         $providerId = data_get($data, 'id');
-        $status     = strtolower(data_get($data, 'status', ''));
+        $status     = strtolower(data_get($data, 'status', 'pending'));
         $paidAt     = data_get($data, 'paid_at');
 
         if (!$providerId) {
@@ -38,7 +38,7 @@ class PluggouPayoutWebhookController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | 2) Buscar saque no sistema
+        | 2) Buscar saque
         |--------------------------------------------------------------------------
         */
         $withdraw = Withdraw::where('provider_reference', $providerId)->first();
@@ -53,7 +53,7 @@ class PluggouPayoutWebhookController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | 3) Idempotência — já finalizado
+        | 3) Idempotência
         |--------------------------------------------------------------------------
         */
         if (in_array($withdraw->status, ['paid', 'failed'], true)) {
@@ -66,40 +66,42 @@ class PluggouPayoutWebhookController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | 4) Mapear status Pluggou
+        | 4) Mapear statuses
         |--------------------------------------------------------------------------
         */
         $isPaid = in_array($status, ['paid', 'success', 'completed'], true);
 
-        $isFailed = in_array($status, [
-            'failed', 'error', 'rejected', 'canceled', 'cancelled', 'expired'
-        ], true);
+        // sua regra: QUALQUER status ≠ PAID → failed
+        $isFailed = !$isPaid;
 
         /*
         |--------------------------------------------------------------------------
-        | 5) 💥 FALHOU → estorna imediatamente
+        | 5) 🔥 FAILED (QUALQUER status diferente de PAID)
         |--------------------------------------------------------------------------
         */
         if ($isFailed) {
 
-            Log::warning('[Pluggou Payout] Saque FALHOU — estornando BRUTO', [
+            Log::warning('[Pluggou Payout] Falhou — estornando BRUTO', [
                 'withdraw_id' => $withdraw->id,
                 'provider_id' => $providerId,
                 'status'      => $status,
             ]);
 
-            // chama método público do WithdrawService
-            $withdrawService->refundWebhookFailed($withdraw, $payload);
+            // 🚨 CHAMAR refundLocal (a versão correta agora)
+            $withdrawService->refundLocal(
+                $withdraw,
+                "Falha no PIXOUT via Pluggou — status recebido: {$status}"
+            );
 
             return response()->json([
                 'success' => true,
-                'status'  => 'failed'
+                'status'  => 'failed',
             ]);
         }
 
         /*
         |--------------------------------------------------------------------------
-        | 6) 💚 PAGO → confirmar
+        | 6) 💚 PAID → marcar como pago
         |--------------------------------------------------------------------------
         */
         if ($isPaid) {
@@ -110,26 +112,19 @@ class PluggouPayoutWebhookController extends Controller
                 'paid_at'     => $paidAt,
             ]);
 
-            // chama método público do service
             $withdrawService->markAsPaid($withdraw, $payload);
 
             return response()->json([
                 'success' => true,
-                'status'  => 'paid'
+                'status'  => 'paid',
             ]);
         }
 
         /*
         |--------------------------------------------------------------------------
-        | 7) Status intermediário
+        | 7) Nunca chega aqui, mas deixamos por segurança
         |--------------------------------------------------------------------------
         */
-        Log::info('[Pluggou Payout] Status intermediário ignorado', [
-            'withdraw_id' => $withdraw->id,
-            'provider_id' => $providerId,
-            'status'      => $status,
-        ]);
-
-        return response()->json(['message' => 'ok - intermediate']);
+        return response()->json(['message' => 'ok - processed']);
     }
 }
