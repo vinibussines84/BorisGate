@@ -48,16 +48,12 @@ class WithdrawOutController extends Controller
             | 2) Normalização da chave PIX
             |--------------------------------------------------------------------------
             */
-            $keyType = strtolower($request->input('key_type'));
-            $key     = trim($request->input('key'));
 
-            // 📌 Pluggou não aceita "evp". Convertemos para o padrão correto: "random".
-            if ($keyType === 'evp') {
-                $keyType = 'random';
-            }
+            $rawKeyType = strtolower($request->input('key_type'));
+            $key       = trim($request->input('key'));
 
-            // 📌 Normalização de telefone (sem +55 e somente números)
-            if ($keyType === 'phone') {
+            // Normaliza telefone
+            if ($rawKeyType === 'phone') {
                 $phone = preg_replace('/\D/', '', $key);
 
                 if (str_starts_with($phone, '55')) {
@@ -67,27 +63,44 @@ class WithdrawOutController extends Controller
                 $key = $phone;
             }
 
-            $request->merge([
-                'key'      => $key,
-                'key_type' => $keyType
-            ]);
+            /*
+            |--------------------------------------------------------------------------
+            | 3) Converter key_type para validação
+            |    random → evp (porque KeyValidator só valida EVP)
+            |    evp → evp
+            |--------------------------------------------------------------------------
+            */
+            $keyTypeForValidation = match ($rawKeyType) {
+                'random' => 'evp',
+                'evp'    => 'evp',
+                default  => $rawKeyType,
+            };
 
             /*
             |--------------------------------------------------------------------------
-            | 3) Validação de entrada
+            | 4) Validação
             |--------------------------------------------------------------------------
             */
             $data = $request->validate([
                 'amount'       => ['required', 'numeric', 'min:0.01'],
                 'key'          => ['required', 'string'],
-                'key_type'     => ['required', Rule::in(['cpf','cnpj','email','phone','random'])],
+                'key_type'     => ['required', Rule::in(['cpf','cnpj','email','phone','random','evp'])],
                 'description'  => ['nullable','string','max:255'],
                 'external_id'  => ['nullable','string','max:64'],
             ]);
 
             /*
             |--------------------------------------------------------------------------
-            | 4) Regras de negócio
+            | 5) Validar chave PIX
+            |--------------------------------------------------------------------------
+            */
+            if (!KeyValidator::validate($key, strtoupper($keyTypeForValidation))) {
+                return $this->error("Chave PIX inválida.");
+            }
+
+            /*
+            |--------------------------------------------------------------------------
+            | 6) Regras de negócio
             |--------------------------------------------------------------------------
             */
             $gross = (float) $data['amount'];
@@ -96,31 +109,23 @@ class WithdrawOutController extends Controller
                 return $this->error("Valor mínimo para saque é R$ 10,00.");
             }
 
-            if (!KeyValidator::validate($data['key'], strtoupper($data['key_type']))) {
-                return $this->error("Chave PIX inválida.");
-            }
-
             if (!$user->tax_out_enabled) {
                 return $this->error("Cashout desabilitado para este usuário.");
             }
 
             /*
             |--------------------------------------------------------------------------
-            | 5) Taxa fixa correta da Pluggou (R$ 0,20)
+            | 7) Taxas (você banca R$ 0,20)
             |--------------------------------------------------------------------------
             */
             $providerFeeFixed = 0.20;
-
-            // Valor total enviado à Pluggou
             $amountForProvider = $gross + $providerFeeFixed;
-
-            // Cliente recebe exatamente o valor solicitado
             $net = $gross;
             $fee = 0;
 
             /*
             |--------------------------------------------------------------------------
-            | 6) Idempotência
+            | 8) Idempotência
             |--------------------------------------------------------------------------
             */
             $externalId = $data['external_id']
@@ -138,7 +143,7 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 7) Criar saque local e debitar saldo
+            | 9) Criar saque local
             |--------------------------------------------------------------------------
             */
             $withdraw = $this->withdrawService->create(
@@ -147,8 +152,8 @@ class WithdrawOutController extends Controller
                 $net,
                 $fee,
                 [
-                    'key'         => $data['key'],
-                    'key_type'    => $keyType,
+                    'key'         => $key,
+                    'key_type'    => $rawKeyType,
                     'external_id' => $externalId,
                     'internal_ref'=> $internalRef,
                     'provider'    => 'pluggou',
@@ -158,36 +163,37 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 8) Formatar key_value
+            | 10) Converter para Pluggou
+            |     evp ou random → SEMPRE "random"
             |--------------------------------------------------------------------------
             */
-            $formattedKey = match ($keyType) {
-                'cpf', 'cnpj', 'phone' => preg_replace('/\D/', '', $data['key']),
-                default                => trim($data['key']),
+            $keyTypeForProvider = match ($rawKeyType) {
+                'evp', 'random' => 'random',
+                default          => $rawKeyType,
+            };
+
+            $formattedKey = match ($keyTypeForProvider) {
+                'cpf', 'cnpj', 'phone' => preg_replace('/\D/', '', $key),
+                default                => trim($key),
             };
 
             /*
             |--------------------------------------------------------------------------
-            | 9) Payload final para Pluggou
+            | 11) Payload para Pluggou
             |--------------------------------------------------------------------------
             */
             $payload = [
                 "amount"      => (int) round($amountForProvider * 100),
-                "key_type"    => $keyType, // já convertido evp → random
+                "key_type"    => $keyTypeForProvider,
                 "key_value"   => $formattedKey,
                 "description" => $data['description'] ?? 'Saque via API',
             ];
 
-            /*
-            |--------------------------------------------------------------------------
-            | 10) Enfileirar processamento
-            |--------------------------------------------------------------------------
-            */
             ProcessWithdrawJob::dispatch($withdraw, $payload)->onQueue('withdraws');
 
             /*
             |--------------------------------------------------------------------------
-            | 11) Webhook imediato
+            | 12) Webhook OUT
             |--------------------------------------------------------------------------
             */
             if ($user->webhook_enabled && $user->webhook_out_url) {
@@ -201,7 +207,7 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 12) Resposta
+            | 13) Resposta
             |--------------------------------------------------------------------------
             */
             return response()->json([
