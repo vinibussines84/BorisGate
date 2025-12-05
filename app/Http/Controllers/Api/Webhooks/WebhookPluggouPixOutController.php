@@ -14,24 +14,11 @@ class WebhookPluggouPixOutController extends Controller
 {
     /**
      * Webhook Pluggou PIXOUT — Recebe notificações de saque.
-     *
-     * Exemplo de payload:
-     * {
-     *   "id": "f47b180c...",
-     *   "event_type": "withdrawal",
-     *   "data": {
-     *      "id": "f47b180c...",
-     *      "status": "paid",
-     *      "e2e_id": "E2E...",
-     *      "paid_at": "2025-12-04 22:25:51",
-     *      "amount": 1300,
-     *      "liquid_amount": 1280
-     *   }
-     * }
      */
     public function __invoke(Request $request)
     {
         try {
+
             $raw = $request->json()->all();
             Log::info('📩 Webhook Pluggou PIXOUT recebido', ['payload' => $raw]);
 
@@ -45,36 +32,60 @@ class WebhookPluggouPixOutController extends Controller
             $withdraw = Withdraw::where('provider_reference', $providerId)->first();
 
             if (!$withdraw) {
-                Log::warning('⚠️ Saque não encontrado para provider_reference', ['id' => $providerId]);
+                Log::warning('⚠️ Saque não encontrado para provider_reference', [
+                    'id' => $providerId
+                ]);
                 return response()->json(['error' => 'withdraw_not_found'], 404);
             }
 
-            // Evita reprocessar estados finais
+            // Evita reprocessar conclusões
             if (in_array(strtolower($withdraw->status), ['paid', 'failed'], true)) {
                 return response()->json(['ignored' => true]);
             }
 
             /*
             |--------------------------------------------------------------------------
-            | 1) Determinar novo status
+            | 1) STATUS vindo do provider
             |--------------------------------------------------------------------------
             */
-            $providerStatus = strtolower(data_get($data, 'status', 'pending'));
+            $providerStatus = strtolower(data_get($data, 'status', 'processing'));
 
             $mappedStatus = match ($providerStatus) {
                 'paid', 'completed', 'approved' => 'paid',
-                'failed', 'rejected', 'refused', 'cancelled', 'canceled' => 'failed',
-                default => 'processing',
+                default => 'failed', // QUALQUER status diferente de PAID vira FAILED
             };
 
             /*
             |--------------------------------------------------------------------------
-            | 2) E2E - usar do provider ou gerar um interno
+            | 2) ESTORNAR IMEDIATAMENTE QUALQUER STATUS != PAID
+            |--------------------------------------------------------------------------
+            */
+            if ($mappedStatus !== 'paid') {
+
+                Log::warning('💸 Pluggou reportou falha — estornando saldo', [
+                    'withdraw_id' => $withdraw->id,
+                    'provider_status' => $providerStatus,
+                ]);
+
+                // Usa o método oficial de estorno
+                app(\App\Services\Withdraw\WithdrawService::class)
+                    ->refundLocal($withdraw, "Falha no PIXOUT via Pluggou ({$providerStatus})");
+
+                return response()->json([
+                    'success'     => true,
+                    'withdraw_id' => $withdraw->id,
+                    'status'      => 'failed',
+                ]);
+            }
+
+            /*
+            |--------------------------------------------------------------------------
+            | 3) STATUS = PAID → Concluir normalmente
             |--------------------------------------------------------------------------
             */
             $e2e = data_get($data, 'e2e_id');
 
-            if (empty($e2e) && $mappedStatus === 'paid') {
+            if (empty($e2e)) {
                 $e2e = 'E2E' . now()->format('YmdHis') . strtoupper(Str::random(8));
                 Log::warning('⚠️ E2E interno gerado (Pluggou não enviou)', [
                     'withdraw_id' => $withdraw->id,
@@ -82,40 +93,26 @@ class WebhookPluggouPixOutController extends Controller
                 ]);
             }
 
-            /*
-            |--------------------------------------------------------------------------
-            | 3) Determinar hora do pagamento
-            |--------------------------------------------------------------------------
-            */
             $paidAtProvider = data_get($data, 'paid_at');
-            $processedAt = $mappedStatus === 'paid'
-                ? ($paidAtProvider ? Carbon::parse($paidAtProvider) : now())
-                : $withdraw->processed_at;
+            $processedAt = $paidAtProvider ? Carbon::parse($paidAtProvider) : now();
 
-            /*
-            |--------------------------------------------------------------------------
-            | 4) Atualizar saque — INCLUINDO processed_at!!! 🎉
-            |--------------------------------------------------------------------------
-            */
             $withdraw->update([
-                'status'        => $mappedStatus,
+                'status'        => 'paid',
                 'processed_at'  => $processedAt,
                 'meta' => array_merge($withdraw->meta ?? [], [
-                    'e2e'              => $e2e,
-                    'pluggou_webhook'  => $data,
+                    'e2e'             => $e2e,
+                    'pluggou_webhook' => $data,
                 ]),
             ]);
 
-            Log::info('✅ Saque atualizado via Webhook Pluggou PIXOUT', [
-                'withdraw_id'  => $withdraw->id,
-                'status'       => $mappedStatus,
+            Log::info('✅ Saque confirmado como PAID via Pluggou', [
+                'withdraw_id' => $withdraw->id,
                 'processed_at' => $processedAt,
-                'e2e'          => $e2e,
             ]);
 
             /*
             |--------------------------------------------------------------------------
-            | 5) Enviar webhook OUT (para seu parceiro)
+            | 4) Webhook OUT para o parceiro
             |--------------------------------------------------------------------------
             */
             $user = $withdraw->user;
@@ -124,26 +121,22 @@ class WebhookPluggouPixOutController extends Controller
                 SendWebhookWithdrawUpdatedJob::dispatch(
                     $user->id,
                     $withdraw->id,
-                    strtoupper($mappedStatus),
+                    'PAID',
                     $providerId,
                     $data
                 )->onQueue('webhooks');
             }
 
-            /*
-            |--------------------------------------------------------------------------
-            | 6) Retorno
-            |--------------------------------------------------------------------------
-            */
             return response()->json([
                 'success'      => true,
                 'withdraw_id'  => $withdraw->id,
-                'status'       => $mappedStatus,
+                'status'       => 'paid',
                 'processed_at' => $processedAt,
                 'e2e'          => $e2e,
             ]);
 
         } catch (\Throwable $e) {
+
             Log::error('🚨 Erro ao processar Webhook Pluggou PIXOUT', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),

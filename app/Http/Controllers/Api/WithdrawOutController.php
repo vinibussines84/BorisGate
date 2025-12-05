@@ -22,6 +22,7 @@ class WithdrawOutController extends Controller
     public function store(Request $request)
     {
         try {
+
             /*
             |--------------------------------------------------------------------------
             | 1) Autenticação
@@ -50,11 +51,19 @@ class WithdrawOutController extends Controller
             $keyType = strtolower($request->input('key_type'));
             $key     = trim($request->input('key'));
 
+            // 📌 Pluggou não aceita "evp". Convertemos para o padrão correto: "random".
+            if ($keyType === 'evp') {
+                $keyType = 'random';
+            }
+
+            // 📌 Normalização de telefone (sem +55 e somente números)
             if ($keyType === 'phone') {
                 $phone = preg_replace('/\D/', '', $key);
+
                 if (str_starts_with($phone, '55')) {
                     $phone = substr($phone, 2);
                 }
+
                 $key = $phone;
             }
 
@@ -71,7 +80,7 @@ class WithdrawOutController extends Controller
             $data = $request->validate([
                 'amount'       => ['required', 'numeric', 'min:0.01'],
                 'key'          => ['required', 'string'],
-                'key_type'     => ['required', Rule::in(['cpf','cnpj','email','phone','random','evp'])],
+                'key_type'     => ['required', Rule::in(['cpf','cnpj','email','phone','random'])],
                 'description'  => ['nullable','string','max:255'],
                 'external_id'  => ['nullable','string','max:64'],
             ]);
@@ -81,7 +90,7 @@ class WithdrawOutController extends Controller
             | 4) Regras de negócio
             |--------------------------------------------------------------------------
             */
-            $gross = (float) $data['amount']; // valor solicitado pelo cliente
+            $gross = (float) $data['amount'];
 
             if ($gross < 10) {
                 return $this->error("Valor mínimo para saque é R$ 10,00.");
@@ -99,19 +108,15 @@ class WithdrawOutController extends Controller
             |--------------------------------------------------------------------------
             | 5) Taxa fixa correta da Pluggou (R$ 0,20)
             |--------------------------------------------------------------------------
-            |
-            | Comprovado pelos testes reais.
-            | Para o cliente receber o valor cheio, enviamos +0,20 para o provedor.
-            |
             */
             $providerFeeFixed = 0.20;
 
-            // Valor enviado para Pluggou
+            // Valor total enviado à Pluggou
             $amountForProvider = $gross + $providerFeeFixed;
 
             // Cliente recebe exatamente o valor solicitado
             $net = $gross;
-            $fee = 0; // você banca a taxa
+            $fee = 0;
 
             /*
             |--------------------------------------------------------------------------
@@ -143,7 +148,7 @@ class WithdrawOutController extends Controller
                 $fee,
                 [
                     'key'         => $data['key'],
-                    'key_type'    => $data['key_type'],
+                    'key_type'    => $keyType,
                     'external_id' => $externalId,
                     'internal_ref'=> $internalRef,
                     'provider'    => 'pluggou',
@@ -153,22 +158,22 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 8) Formatar chave
+            | 8) Formatar key_value
             |--------------------------------------------------------------------------
             */
-            $formattedKey = match ($data['key_type']) {
+            $formattedKey = match ($keyType) {
                 'cpf', 'cnpj', 'phone' => preg_replace('/\D/', '', $data['key']),
                 default                => trim($data['key']),
             };
 
             /*
             |--------------------------------------------------------------------------
-            | 9) Payload final para Pluggou (com taxa corrigida)
+            | 9) Payload final para Pluggou
             |--------------------------------------------------------------------------
             */
             $payload = [
                 "amount"      => (int) round($amountForProvider * 100),
-                "key_type"    => strtolower($data['key_type']),
+                "key_type"    => $keyType, // já convertido evp → random
                 "key_value"   => $formattedKey,
                 "description" => $data['description'] ?? 'Saque via API',
             ];
