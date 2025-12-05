@@ -44,7 +44,7 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 2) Normalização e padronização da chave PIX
+            | 2) Normalização da chave PIX
             |--------------------------------------------------------------------------
             */
             $keyType = strtolower($request->input('key_type'));
@@ -97,25 +97,25 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 5) Aqui entra a TAXA FIXA DA PLUGGOU
+            | 5) Taxa fixa correta da Pluggou (R$ 0,20)
             |--------------------------------------------------------------------------
             |
-            | Pluggou cobra R$ 0,30.
-            | O cliente deve receber o valor inteiro, então nós aumentamos o valor enviado.
+            | Comprovado pelos testes reais.
+            | Para o cliente receber o valor cheio, enviamos +0,20 para o provedor.
             |
             */
-            $providerFeeFixed = 0.30;
+            $providerFeeFixed = 0.20;
 
-            // Valor que enviaremos para a Pluggou
+            // Valor enviado para Pluggou
             $amountForProvider = $gross + $providerFeeFixed;
 
-            // Valor líquido recebido pelo cliente permanece o solicitado
+            // Cliente recebe exatamente o valor solicitado
             $net = $gross;
             $fee = 0; // você banca a taxa
 
             /*
             |--------------------------------------------------------------------------
-            | 6) Controle de idempotência
+            | 6) Idempotência
             |--------------------------------------------------------------------------
             */
             $externalId = $data['external_id']
@@ -133,13 +133,13 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 7) Criar saque local + debitar saldo
+            | 7) Criar saque local e debitar saldo
             |--------------------------------------------------------------------------
             */
             $withdraw = $this->withdrawService->create(
                 $user,
-                $gross, // valor solicitado
-                $net,   // liquido recebido pelo cliente
+                $gross,
+                $net,
                 $fee,
                 [
                     'key'         => $data['key'],
@@ -153,7 +153,7 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 8) Formatar chave PIX
+            | 8) Formatar chave
             |--------------------------------------------------------------------------
             */
             $formattedKey = match ($data['key_type']) {
@@ -163,11 +163,11 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 9) Payload para a Pluggou (com valor ajustado)
+            | 9) Payload final para Pluggou (com taxa corrigida)
             |--------------------------------------------------------------------------
             */
             $payload = [
-                "amount"      => (int) round($amountForProvider * 100), // ajustado!
+                "amount"      => (int) round($amountForProvider * 100),
                 "key_type"    => strtolower($data['key_type']),
                 "key_value"   => $formattedKey,
                 "description" => $data['description'] ?? 'Saque via API',
@@ -175,7 +175,7 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 10) Enfileirar job
+            | 10) Enfileirar processamento
             |--------------------------------------------------------------------------
             */
             ProcessWithdrawJob::dispatch($withdraw, $payload)->onQueue('withdraws');
@@ -196,24 +196,24 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 12) Retorno ao cliente
+            | 12) Resposta
             |--------------------------------------------------------------------------
             */
             return response()->json([
                 'success' => true,
                 'message' => 'Saque enfileirado para processamento.',
                 'data' => [
-                    'id'             => $withdraw->id,
-                    'external_id'    => $externalId,
-                    'requested'      => $gross,
+                    'id'               => $withdraw->id,
+                    'external_id'      => $externalId,
+                    'requested'        => $gross,
                     'sent_to_provider' => $amountForProvider,
-                    'liquid_amount'  => $withdraw->amount,
-                    'pix_key'        => $withdraw->pixkey,
-                    'pix_key_type'   => $withdraw->pixkey_type,
-                    'status'         => 'processing',
-                    'reference'      => null,
-                    'provider'       => 'Pluggou',
-                    'created_at'     => $withdraw->created_at->toIso8601String(),
+                    'liquid_amount'    => $withdraw->amount,
+                    'pix_key'          => $withdraw->pixkey,
+                    'pix_key_type'     => $withdraw->pixkey_type,
+                    'status'           => 'processing',
+                    'reference'        => null,
+                    'provider'         => 'Pluggou',
+                    'created_at'       => $withdraw->created_at->toIso8601String(),
                 ]
             ]);
 
