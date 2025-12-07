@@ -2,7 +2,6 @@ import React, { useMemo, useEffect } from "react";
 import {
   FileText,
   ArrowUpRight,
-  ArrowDownRight,
   Clock,
   Loader2,
   CheckCircle2,
@@ -91,20 +90,18 @@ const StatusPill = React.memo(({ status }) => {
 StatusPill.displayName = "StatusPill";
 
 /* =====================================================================================
-   ORIGIN PILL
+   ORIGIN PILL (AGORA SOMENTE PIX)
 ===================================================================================== */
-const OriginPill = React.memo(({ type }) => {
-  const credit = type === "PIX";
+const OriginPill = React.memo(() => {
   return (
     <span
-      className={`inline-flex items-center gap-1.5 px-2 py-0.5 text-[11px] rounded-lg border font-medium ${
-        credit
-          ? "bg-[#02fb5c]/10 text-[#02fb5c] border-[#02fb5c]/30"
-          : "bg-[#ff3b5c]/10 text-[#ff3b5c] border-[#ff3b5c]/30"
-      }`}
+      className={
+        "inline-flex items-center gap-1.5 px-2 py-0.5 text-[11px] rounded-lg border font-medium " +
+        "bg-[#02fb5c]/10 text-[#02fb5c] border-[#02fb5c]/30"
+      }
     >
-      {credit ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}
-      {credit ? "Credit (PIX)" : "Debit (Withdrawal)"}
+      <ArrowUpRight size={12} />
+      Credit (PIX)
     </span>
   );
 });
@@ -114,7 +111,7 @@ OriginPill.displayName = "OriginPill";
    CONFIG
 ===================================================================================== */
 const CACHE_KEY = "extract_table_cache_v1";
-const CACHE_TTL = 15 * 1000; // 15s
+const CACHE_TTL = 15 * 1000;
 
 /* =====================================================================================
    MAIN COMPONENT
@@ -140,7 +137,7 @@ export default function ExtractTable({
   const isSearching = searchTerm.trim() !== "";
 
   /* ------------------------------------------------------------------
-     CACHE — usado só quando NÃO estiver pesquisando
+     CACHE — só quando NÃO estiver pesquisando
   ------------------------------------------------------------------ */
   useEffect(() => {
     if (isSearching || loading) return;
@@ -157,32 +154,25 @@ export default function ExtractTable({
     }
   }, [transactions, loading, page, totalItems, isSearching]);
 
-  // 🔥 limpa cache ao pesquisar (evita mostrar dados velhos)
   useEffect(() => {
     if (isSearching) localStorage.removeItem(CACHE_KEY);
   }, [isSearching]);
 
-  // 🔥 se o cache expirar, força refresh automático
   useEffect(() => {
     if (isSearching) return;
     const cache = localStorage.getItem(CACHE_KEY);
     if (!cache) return;
     const parsed = JSON.parse(cache);
-    const expired = Date.now() - parsed.timestamp > CACHE_TTL;
-    if (expired) refresh?.(true);
+    if (Date.now() - parsed.timestamp > CACHE_TTL) refresh?.(true);
   }, [page, isSearching]);
 
-  /* ------------------------------------------------------------------
-     Aplica cache só se não estiver pesquisando
-  ------------------------------------------------------------------ */
   const cached = useMemo(() => {
     if (isSearching) return null;
     try {
       const c = localStorage.getItem(CACHE_KEY);
       if (!c) return null;
       const parsed = JSON.parse(c);
-      const valid = Date.now() - parsed.timestamp < CACHE_TTL;
-      return valid ? parsed : null;
+      return Date.now() - parsed.timestamp < CACHE_TTL ? parsed : null;
     } catch {
       return null;
     }
@@ -197,7 +187,7 @@ export default function ExtractTable({
      RENDER
   ===================================================================================== */
   return (
-    <div className="bg-[#0b0b0b]/95 border border-white/10 rounded-3xl p-6 backdrop-blur-sm min-h-[520px] flex flex-col justify-between transition-all duration-300">
+    <div className="bg-[#0b0b0b]/95 border border-white/10 rounded-3xl p-6 backdrop-blur-sm min-h-[520px] flex flex-col justify-between">
       {/* HEADER */}
       <div>
         <div className="flex items-center justify-between mb-4">
@@ -214,9 +204,9 @@ export default function ExtractTable({
         {/* TABLE */}
         <div className="overflow-x-auto rounded-2xl border border-white/10 min-h-[340px]">
           <table className="min-w-full text-sm">
-            <thead className="sticky top-0 bg-[#0a0a0a]/95 backdrop-blur border-b border-white/10">
+            <thead className="sticky top-0 bg-[#0a0a0a]/95 border-b border-white/10">
               <tr className="text-left text-gray-400">
-                <th className="py-2.5 px-4">ID/Ref.</th>
+                <th className="py-2.5 px-4">ID</th>
                 <th className="py-2.5 px-4">Type</th>
                 <th className="py-2.5 px-4 text-right">Amount</th>
                 <th className="py-2.5 px-4">Status</th>
@@ -243,7 +233,7 @@ export default function ExtractTable({
                 activeTransactions.map((t) => (
                   <tr
                     key={t.id}
-                    className="border-b border-white/5 hover:bg-[#141414]/60 cursor-pointer transition-colors"
+                    className="border-b border-white/5 hover:bg-[#141414]/60 cursor-pointer"
                     onClick={() => onView?.(t)}
                   >
                     <td className="py-2.5 px-4 font-mono text-xs text-gray-300">
@@ -251,7 +241,7 @@ export default function ExtractTable({
                     </td>
 
                     <td className="py-2.5 px-4">
-                      <OriginPill type={t.credit ? "PIX" : "SAQUE"} />
+                      <OriginPill />
                     </td>
 
                     <td className="py-2.5 px-4 text-right font-semibold text-gray-200">
@@ -262,9 +252,8 @@ export default function ExtractTable({
                       <StatusPill status={mapStatus(t.status)} />
                     </td>
 
-                    {/* ✅ Corrigido — mostra e2e tanto em Pix quanto em Saque */}
                     <td className="py-2.5 px-4 font-mono text-xs text-gray-400">
-                      {t.e2e || t.endtoend || t.e2e_id || "—"}
+                      {t.e2e || "—"}
                     </td>
 
                     <td className="py-2.5 px-4 text-gray-400">
@@ -291,7 +280,7 @@ export default function ExtractTable({
       </div>
 
       {/* PAGINATION */}
-      <div className="mt-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div className="mt-5 flex flex-col sm:flex-row sm:items-center justify-between">
         <p className="text-xs text-gray-400">
           Page {page} of {totalPages}
         </p>

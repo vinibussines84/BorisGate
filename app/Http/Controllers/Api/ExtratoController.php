@@ -6,7 +6,6 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use App\Models\Transaction;
-use App\Models\Withdraw;
 use App\Enums\TransactionStatus;
 
 class ExtratoController extends Controller
@@ -15,7 +14,7 @@ class ExtratoController extends Controller
     {
         $user = $request->user();
 
-        if (! $user) {
+        if (!$user) {
             return response()->json(['success' => false, 'message' => 'Não autenticado.'], 401);
         }
 
@@ -25,18 +24,23 @@ class ExtratoController extends Controller
         $perPage  = min(50, max(5, (int) $request->query('perPage', 20)));
         $offset   = ($page - 1) * $perPage;
 
+        // Alias de status usados em filtros
         $alias = [
-            'EFETIVADO' => ['paga','paid','approved','confirmed'],
-            'PENDENTE'  => ['pending','pendente','processing','created','under_review'],
-            'FALHADO'   => ['failed','falha','error','denied','canceled','cancelled'],
+            'EFETIVADO' => ['paga', 'paid', 'approved', 'confirmed'],
+            'PENDENTE'  => ['pending', 'pendente', 'processing', 'created', 'under_review'],
+            'FALHADO'   => ['failed', 'falha', 'error', 'denied', 'canceled', 'cancelled'],
         ];
 
-        /* PIX-IN */
+        /*
+        |--------------------------------------------------------------------------
+        | 🔥 SOMENTE PIX-IN
+        |--------------------------------------------------------------------------
+        */
         $pixQ = Transaction::query()
             ->selectRaw("
                 id,
                 'PIX' as _kind,
-                (direction = 'in') as credit,
+                true as credit,
                 amount,
                 fee,
                 status,
@@ -46,14 +50,19 @@ class ExtratoController extends Controller
                 created_at,
                 paid_at
             ")
-            ->where('user_id', $user->id);
+            ->where('user_id', $user->id)
+            ->where('direction', Transaction::DIR_IN)
+            ->where('method', 'pix');
 
+        // Filtro por status
         if ($statusIn !== 'ALL' && isset($alias[$statusIn])) {
             $pixQ->whereIn('status', $alias[$statusIn]);
         }
 
+        // Filtro de busca
         if ($search !== '') {
             $like = "%{$search}%";
+
             $pixQ->where(function ($q) use ($like) {
                 $q->where('id', 'LIKE', $like)
                   ->orWhere('txid', 'LIKE', $like)
@@ -62,77 +71,52 @@ class ExtratoController extends Controller
             });
         }
 
-        /* SAQUES */
-        $wdQ = Withdraw::query()
-            ->selectRaw("
-                id,
-                'SAQUE' as _kind,
-                false as credit,
-                gross_amount as amount,
-                fee_amount as fee,
-                status,
-                description,
-                pixkey as txid,
-                COALESCE(
-                    JSON_UNQUOTE(JSON_EXTRACT(meta, '$.e2e')),
-                    JSON_UNQUOTE(JSON_EXTRACT(meta, '$.endtoend'))
-                ) as e2e_id,
-                created_at,
-                processed_at as paid_at
-            ")
-            ->where('user_id', $user->id);
+        /*
+        |--------------------------------------------------------------------------
+        | 🔥 Total + Paginação
+        |--------------------------------------------------------------------------
+        */
+        $total = (clone $pixQ)->count();
 
-        if ($statusIn !== 'ALL' && isset($alias[$statusIn])) {
-            $wdQ->whereIn('status', $alias[$statusIn]);
-        }
-
-        if ($search !== '') {
-            $like = "%{$search}%";
-            $wdQ->where(function ($q) use ($like) {
-                $q->where('id', 'LIKE', $like)
-                   ->orWhere('pixkey', 'LIKE', $like)
-                   ->orWhere('description', 'LIKE', $like)
-                   ->orWhereRaw("JSON_EXTRACT(meta, '$.e2e') LIKE ?", [$like])
-                   ->orWhereRaw("JSON_EXTRACT(meta, '$.endtoend') LIKE ?", [$like]);
-            });
-        }
-
-        $union = $pixQ->unionAll($wdQ);
-        $total = DB::query()->fromSub($union, 't')->count();
-
-        $rows = DB::query()
-            ->fromSub($union, 't')
+        $rows = $pixQ
             ->orderBy('created_at', 'desc')
             ->offset($offset)
             ->limit($perPage)
             ->get();
 
+        /*
+        |--------------------------------------------------------------------------
+        | 🔥 Formatação final
+        |--------------------------------------------------------------------------
+        */
         $rows = $rows->map(function ($t) {
+
             $statusEnum = TransactionStatus::fromLoose($t->status);
+
             return [
-                'id' => $t->id,
-                '_kind' => $t->_kind,
-                'credit' => (bool) $t->credit,
-                'amount' => (float) $t->amount,
-                'fee' => round((float) $t->fee, 2),
-                'net' => $t->credit ? $t->amount - $t->fee : -$t->amount,
-                'status' => $statusEnum->value,
-                'status_label' => $statusEnum->label(),
-                'txid' => $t->txid,
-                'e2e' => $t->e2e_id,
-                'description' => $t->description,
-                'createdAt' => optional($t->created_at)->toIso8601String(),
-                'paidAt' => optional($t->paid_at)->toIso8601String(),
+                'id'            => $t->id,
+                '_kind'         => 'PIX',
+                'credit'        => true,
+                'amount'        => (float) $t->amount,
+                'fee'           => round((float) $t->fee, 2),
+                'net'           => $t->amount - $t->fee,
+                'status'        => $statusEnum->value,
+                'status_label'  => $statusEnum->label(),
+                'txid'          => $t->txid,
+                'e2e'           => $t->e2e_id,
+                'description'   => $t->description,
+                'createdAt'     => optional($t->created_at)->toIso8601String(),
+                'paidAt'        => optional($t->paid_at)->toIso8601String(),
             ];
         });
 
         return response()->json([
-            'success' => true,
-            'page' => $page,
-            'perPage' => $perPage,
-            'count' => $rows->count(),
-            'totalItems' => $total,
-            'transactions' => $rows->values(),
+            'success'       => true,
+            'page'          => $page,
+            'perPage'       => $perPage,
+            'count'         => $rows->count(),
+            'totalItems'    => $total,
+            'transactions'  => $rows->values(),
         ]);
     }
 }
