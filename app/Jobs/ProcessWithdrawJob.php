@@ -144,12 +144,21 @@ class ProcessWithdrawJob implements ShouldQueue
         |--------------------------------------------------------------------------
         | 7) STATUS imediato vindo do provider
         |--------------------------------------------------------------------------
+        |
+        | GetPay normalmente responde:
+        |   "pending"
+        |   "processing"
+        |   "paid"
+        |   "completed"
+        |
+        | Mesma lógica do Pluggou mantida!
+        |--------------------------------------------------------------------------
         */
         $providerStatus = strtolower(data_get($resp, 'data.status', 'pending'));
 
         if (in_array($providerStatus, ['paid', 'success', 'completed'])) {
 
-            // Pago no retorno → finalizar agora
+            // Pago no retorno → finalizar
             $withdrawService->markAsPaid($withdraw, $resp);
 
             Log::info('[ProcessWithdrawJob] ✅ Pago imediatamente no retorno', [
@@ -162,7 +171,7 @@ class ProcessWithdrawJob implements ShouldQueue
 
         /*
         |--------------------------------------------------------------------------
-        | 8) Se não estiver pago → aguarda webhook
+        | 8) Aguardar webhook (NÃO mudar esta lógica)
         |--------------------------------------------------------------------------
         */
         Log::info('[ProcessWithdrawJob] 🕒 Aguardando webhook (GetPay)…', [
