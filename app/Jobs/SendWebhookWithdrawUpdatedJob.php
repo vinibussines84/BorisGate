@@ -32,9 +32,9 @@ class SendWebhookWithdrawUpdatedJob implements ShouldQueue
         string $reference,
         array $raw = []
     ) {
-        $this->userId    = $userId;
+        $this->userId     = $userId;
         $this->withdrawId = $withdrawId;
-        $this->status     = strtoupper($status); // APPROVED, FAILED
+        $this->status     = strtoupper($status);
         $this->reference  = $reference;
         $this->raw        = $raw;
 
@@ -60,11 +60,11 @@ class SendWebhookWithdrawUpdatedJob implements ShouldQueue
             return;
         }
 
-        /**
-         * ▶ Preparar dados
-         */
         $meta = $withdraw->meta ?? [];
 
+        /**
+         * ▶ Monta payload FINAL
+         */
         $payload = [
             'event' => 'withdraw.updated',
             'data'  => [
@@ -89,7 +89,9 @@ class SendWebhookWithdrawUpdatedJob implements ShouldQueue
                     'receiver_name'      => $meta['receiver_name'] ?? $user->name,
                     'receiver_bank'      => $meta['receiver_bank'] ?? 'Bank N/A',
                     'receiver_bank_ispb' => $meta['receiver_ispb'] ?? '90400888',
-                    'refused_reason'     => $this->status !== 'APPROVED'
+
+                    // CORREÇÃO DA LÓGICA
+                    'refused_reason'     => $this->status === 'FAILED'
                         ? ($this->raw['data']['description'] ?? 'Withdraw Failed')
                         : null,
                 ]],
@@ -99,7 +101,7 @@ class SendWebhookWithdrawUpdatedJob implements ShouldQueue
         ];
 
         /**
-         * ▶ Assinatura
+         * ▶ Assinatura HMAC
          */
         $signature = hash_hmac('sha256', json_encode($payload), $user->secretkey);
 

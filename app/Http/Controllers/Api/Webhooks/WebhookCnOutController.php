@@ -3,12 +3,12 @@
 namespace App\Http\Controllers\Api\Webhooks;
 
 use App\Http\Controllers\Controller;
-use App\Jobs\SendWebhookWithdrawUpdatedJob;
 use App\Models\Withdraw;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Carbon\Carbon;
+use App\Services\Withdraw\WithdrawService;
 
 class WebhookCnOutController extends Controller
 {
@@ -37,7 +37,7 @@ class WebhookCnOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 2) Encontrar o saque pelo provider_reference = UUID
+            | 2) Encontrar o saque pelo UUID (provider_reference)
             |--------------------------------------------------------------------------
             */
             $withdraw =
@@ -45,7 +45,8 @@ class WebhookCnOutController extends Controller
                 ?? Withdraw::where('external_id', $payload['externalId'] ?? null)->first();
 
             if (!$withdraw) {
-                Log::warning('⚠️ Saque não encontrado para GETPAY provider_reference', [
+
+                Log::warning('⚠️ Saque não encontrado ao processar webhook GETPAY', [
                     'uuid'       => $payload['uuid'] ?? null,
                     'externalId' => $payload['externalId'] ?? null,
                 ]);
@@ -54,13 +55,13 @@ class WebhookCnOutController extends Controller
             }
 
             // Evita reprocessamento
-            if (in_array(strtolower($withdraw->status), ['paid', 'failed'], true)) {
+            if (in_array($withdraw->status, ['paid', 'failed'], true)) {
                 return response()->json(['ignored' => true]);
             }
 
             /*
             |--------------------------------------------------------------------------
-            | 3) Mapear STATUS
+            | 3) Status do provider
             |--------------------------------------------------------------------------
             */
             $providerStatus = strtolower($payload['status'] ?? 'pending');
@@ -72,7 +73,7 @@ class WebhookCnOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 4) Se NÃO for paid → estornar imediatamente
+            | 4) Se não for pago → estornar
             |--------------------------------------------------------------------------
             */
             if ($mappedStatus !== 'paid') {
@@ -82,8 +83,10 @@ class WebhookCnOutController extends Controller
                     'provider_status' => $providerStatus,
                 ]);
 
-                app(\App\Services\Withdraw\WithdrawService::class)
-                    ->refundLocal($withdraw, "Falha no PIXOUT via GetPay ({$providerStatus})");
+                app(WithdrawService::class)->refundLocal(
+                    $withdraw,
+                    "Falha no PIXOUT via GetPay ({$providerStatus})"
+                );
 
                 return response()->json([
                     'success'     => true,
@@ -94,16 +97,14 @@ class WebhookCnOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 5) STATUS = PAID → concluir igual Pluggou
+            | 5) PAID → processar corretamente
             |--------------------------------------------------------------------------
             */
             $e2e = $payload['endToEndId'] ?? null;
 
-            // Se a GetPay não enviar E2E → gera um interno igual Pluggou
-            if (empty($e2e)) {
+            if (!$e2e) {
                 $e2e = 'E2E' . now()->format('YmdHis') . strtoupper(Str::random(8));
-
-                Log::warning('⚠️ E2E interno gerado (GETPAY não enviou)', [
+                Log::warning('⚠️ E2E interno gerado', [
                     'withdraw_id' => $withdraw->id,
                     'generated_e2e' => $e2e,
                 ]);
@@ -112,37 +113,25 @@ class WebhookCnOutController extends Controller
             $paidAtProvider = $payload['processed_at'] ?? null;
             $processedAt = $paidAtProvider ? Carbon::parse($paidAtProvider) : now();
 
-            // Atualiza saque
-            $withdraw->update([
-                'status'        => 'paid',
-                'processed_at'  => $processedAt,
-                'meta' => array_merge($withdraw->meta ?? [], [
-                    'e2e'            => $e2e,
-                    'getpay_webhook' => $payload,
-                ]),
-            ]);
+            /*
+            |--------------------------------------------------------------------------
+            | 6) USAR O WithdrawService CORRETAMENTE
+            |--------------------------------------------------------------------------
+            */
+            app(WithdrawService::class)->markAsPaid(
+                withdraw: $withdraw,
+                payload: $payload,
+                extra: [
+                    'e2e'       => $e2e,
+                    'paid_at'   => $processedAt,
+                    'webhook'   => $payload,
+                ]
+            );
 
             Log::info('✅ Saque confirmado como PAID via GETPAY', [
                 'withdraw_id'  => $withdraw->id,
                 'processed_at' => $processedAt,
             ]);
-
-            /*
-            |--------------------------------------------------------------------------
-            | 6) Disparar webhook OUT para seu cliente — igual Pluggou
-            |--------------------------------------------------------------------------
-            */
-            $user = $withdraw->user;
-
-            if ($user && $user->webhook_enabled && $user->webhook_out_url) {
-                SendWebhookWithdrawUpdatedJob::dispatch(
-                    $user->id,
-                    $withdraw->id,
-                    'PAID',
-                    $payload['uuid'], // provider_reference
-                    $payload
-                )->onQueue('webhooks');
-            }
 
             return response()->json([
                 'success'      => true,
