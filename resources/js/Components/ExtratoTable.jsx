@@ -21,26 +21,49 @@ const formatCurrency = (value) =>
 /**
  * CORREÇÃO DEFINITIVA DO HORÁRIO
  *
- * - Se o backend enviar timezone (-03:00, -02:00, +HH:MM) → NÃO converter.
- * - Se vier UTC/Zulu (termina com Z) → converter para America/Sao_Paulo.
+ * ✔ Se o backend enviar timezone → NÃO usar new Date() (preserva exatamente o horário)
+ * ✔ Se vier UTC/Z → converter para America/Sao_Paulo
+ * ✔ Se vier SEM timezone → formatar manualmente sem conversão
  */
 const fmtDate = (iso) => {
   if (!iso) return "—";
 
   try {
-    const hasTZ =
-      iso.includes("-03:") ||
-      iso.includes("-02:") ||
-      iso.includes("+") ||
-      /[+-]\d{2}:\d{2}$/.test(iso);
+    const hasTZ = /[+-]\d{2}:\d{2}$/.test(iso);
+    const isUTC = iso.endsWith("Z");
 
-    const date = new Date(iso);
+    // =============================================
+    // 1) Se tem timezone → NÃO converter
+    // =============================================
+    if (hasTZ) {
+      return new Date(iso).toLocaleString("pt-BR", {
+        dateStyle: "short",
+        timeStyle: "short",
+      });
+    }
 
-    return date.toLocaleString("pt-BR", {
-      dateStyle: "short",
-      timeStyle: "short",
-      ...(hasTZ ? {} : { timeZone: "America/Sao_Paulo" }),
-    });
+    // =============================================
+    // 2) Se termina com "Z" → converter para SP
+    // =============================================
+    if (isUTC) {
+      return new Date(iso).toLocaleString("pt-BR", {
+        dateStyle: "short",
+        timeStyle: "short",
+        timeZone: "America/Sao_Paulo",
+      });
+    }
+
+    // =============================================
+    // 3) Sem timezone → NÃO usar new Date()
+    //    Apenas formatar a string manualmente
+    // =============================================
+    const [datePart, timePart] = iso.split("T");
+    if (!datePart) return iso;
+
+    const [year, month, day] = datePart.split("-");
+    const time = timePart?.substring(0, 5) ?? "00:00";
+
+    return `${day}/${month}/${year} ${time}`;
   } catch {
     return "—";
   }

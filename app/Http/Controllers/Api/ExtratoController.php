@@ -4,7 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Carbon;
 use App\Models\Transaction;
 use App\Enums\TransactionStatus;
 
@@ -67,9 +67,8 @@ class ExtratoController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | ❗ ORDEM CORRETA — APENAS CRIAÇÃO
-        |--------------------------------------------------------------------------
-        | Nunca mais ordenar por paid_at!
+        | ❗ ORDEM CORRETA
+        | Nunca ordenar por paid_at!
         |--------------------------------------------------------------------------
         */
         $rows = $pixQ
@@ -78,10 +77,33 @@ class ExtratoController extends Controller
             ->limit($perPage)
             ->get();
 
-        // 🔥 Formatação final
+        /* =========================================================================================== 
+           FORMATAÇÃO FINAL — SEM ALTERAR HORÁRIO
+        =========================================================================================== */
         $rows = $rows->map(function ($t) {
 
             $statusEnum = TransactionStatus::fromLoose($t->status);
+
+            // created_at → ISO com fuso
+            $createdAt = $t->created_at
+                ? Carbon::parse($t->created_at)->tz('America/Sao_Paulo')->format('Y-m-d\TH:i:sP')
+                : null;
+
+            // paid_at → manter EXATAMENTE o horário salvo
+            $paidAt = null;
+
+            if ($t->paid_at) {
+                // Detecta se contém timezone
+                $str = (string)$t->paid_at;
+
+                if (preg_match('/[+-]\d{2}:\d{2}$/', $str)) {
+                    // já tem timezone → enviar como veio
+                    $paidAt = $str;
+                } else {
+                    // sem timezone → assumir SP e formatar
+                    $paidAt = Carbon::parse($str, 'America/Sao_Paulo')->format('Y-m-d\TH:i:sP');
+                }
+            }
 
             return [
                 'id'            => $t->id,
@@ -95,8 +117,8 @@ class ExtratoController extends Controller
                 'txid'          => $t->txid,
                 'e2e'           => $t->e2e_id,
                 'description'   => $t->description,
-                'createdAt'     => optional($t->created_at)->toIso8601String(),
-                'paidAt'        => optional($t->paid_at)->toIso8601String(),
+                'createdAt'     => $createdAt,
+                'paidAt'        => $paidAt,
             ];
         });
 

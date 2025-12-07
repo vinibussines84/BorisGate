@@ -52,7 +52,9 @@ class Transaction extends Model
         'net_amount'                 => 'decimal:2',
         'provider_payload'           => 'array',
         'authorized_at'              => 'datetime',
-        'paid_at'                    => 'datetime',
+        // ⚠️ IMPORTANTE: paid_at NÃO PODE SER DATETIME
+        // pois altera o timezone automaticamente
+        'paid_at'                    => 'string',
         'refunded_at'                => 'datetime',
         'canceled_at'                => 'datetime',
         'applied_available_amount'   => 'decimal:2',
@@ -160,7 +162,7 @@ class Transaction extends Model
      * ============================================================ */
 
     /**
-     * 🎯 Mutator FINAL do paid_at — respeita timezone enviado pelo provedor
+     * 🎯 Mutator FINAL do paid_at — respeita EXACTAMENTE o horário do provedor
      */
     public function setPaidAtAttribute($value): void
     {
@@ -172,13 +174,16 @@ class Transaction extends Model
         try {
             $str = (string) $value;
 
+            // Detecta timezone
             $hasTZ =
                 str_contains($str, '+') ||
                 preg_match('/\-\d{2}:\d{2}$/', $str);
 
             if ($hasTZ) {
+                // Mantém exatamente o horário recebido
                 $this->attributes['paid_at'] = Carbon::parse($str)->format('Y-m-d H:i:s');
             } else {
+                // Assume horário de SP caso venha sem TZ
                 $this->attributes['paid_at'] = Carbon::parse($str, 'America/Sao_Paulo')->format('Y-m-d H:i:s');
             }
 

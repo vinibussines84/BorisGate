@@ -43,21 +43,20 @@ export default function Extrato() {
   const TABLE_CACHE_KEY = "extract_table_cache_v1";
   const debounceRef = useRef(null);
 
-  /* ==========================================================
-     FUNÇÃO PRINCIPAL DE BUSCA
-  ========================================================== */
+  /* =====================================================================================
+     FUNÇÃO PRINCIPAL DE BUSCA (agora estável, sem recriação desnecessária)
+  ===================================================================================== */
   const fetchExtrato = useCallback(
-    async (force = false) => {
+    async ({ force = false, page, statusFilter, searchTerm }) => {
       setLoadingTable(true);
 
-      // 🔹 Cache leve
+      /** CACHE DE 1 MINUTO */
       if (!force) {
         const cached = sessionStorage.getItem(CACHE_KEY);
         if (cached) {
           try {
             const parsed = JSON.parse(cached);
-            const valid = Date.now() - parsed.ts < 60000;
-            if (valid) {
+            if (Date.now() - parsed.ts < 60000) {
               setSaldo(parsed.saldo);
               setEntradas(parsed.entradas);
               setSaidas(parsed.saidas);
@@ -91,22 +90,23 @@ export default function Extrato() {
 
         const list = resTx?.data?.transactions || [];
         setTransactions(list);
-        setTotalItems(resTx?.data?.total ?? 0);
 
-        // 🔹 somatórios
+        setTotalItems(resTx?.data?.totalItems ?? 0);
+
         let entradasTotal = 0;
         let saidasTotal = 0;
+
         for (const t of list) {
           const st = (t.status || "").toLowerCase();
-          if (["paga", "paid", "approved"].includes(st)) {
+          if (["paga", "paid", "approved", "confirmed", "completed"].includes(st)) {
             if (t.credit) entradasTotal += Number(t.amount);
             else saidasTotal += Number(t.amount);
           }
         }
+
         setEntradas(entradasTotal);
         setSaidas(saidasTotal);
 
-        // 🔹 salvar cache
         sessionStorage.setItem(
           CACHE_KEY,
           JSON.stringify({
@@ -114,7 +114,7 @@ export default function Extrato() {
             entradas: entradasTotal,
             saidas: saidasTotal,
             transactions: list,
-            totalItems: resTx?.data?.total ?? 0,
+            totalItems: resTx?.data?.totalItems ?? 0,
             ts: Date.now(),
           })
         );
@@ -124,42 +124,57 @@ export default function Extrato() {
         setLoadingTable(false);
       }
     },
-    [page, statusFilter, searchTerm]
+    []
   );
 
-  /* ==========================================================
-     ATUALIZAÇÃO REATIVA E SEM BUGS
-  ========================================================== */
+  /* =====================================================================================
+     AUTO UPDATE QUANDO FILTROS / BUSCA / PAGINA ALTERAM
+  ===================================================================================== */
   useEffect(() => {
-    // 🔥 limpa caches a cada mudança de filtro ou busca
     sessionStorage.removeItem(CACHE_KEY);
     localStorage.removeItem(TABLE_CACHE_KEY);
 
     clearTimeout(debounceRef.current);
 
     if (searchTerm.trim() !== "") {
-      // debounce apenas para busca
-      debounceRef.current = setTimeout(() => fetchExtrato(true), 400);
+      debounceRef.current = setTimeout(
+        () =>
+          fetchExtrato({
+            force: true,
+            page,
+            statusFilter,
+            searchTerm,
+          }),
+        400
+      );
     } else {
-      fetchExtrato(true);
+      fetchExtrato({
+        force: true,
+        page,
+        statusFilter,
+        searchTerm,
+      });
     }
 
     return () => clearTimeout(debounceRef.current);
-  }, [statusFilter, searchTerm, page]);
+  }, [page, statusFilter, searchTerm]);
 
-  /* ==========================================================
+  /* =====================================================================================
      MODAL
-  ========================================================== */
+  ===================================================================================== */
   const openModal = (tx) => {
     setSelectedTransaction(tx);
     setIsModalOpen(true);
   };
+
   const closeModal = () => {
     setIsModalOpen(false);
     setTimeout(() => setSelectedTransaction(null), 150);
   };
 
-  /* ========================================================== */
+  /* =====================================================================================
+     RENDER
+  ===================================================================================== */
   return (
     <AuthenticatedLayout>
       <Head title="Extrato" />
@@ -178,7 +193,14 @@ export default function Extrato() {
               }}
               searchTerm={searchTerm}
               setSearchTerm={setSearchTerm}
-              refresh={() => fetchExtrato(true)}
+              refresh={() =>
+                fetchExtrato({
+                  force: true,
+                  page: 1,
+                  statusFilter,
+                  searchTerm,
+                })
+              }
             />
           </Suspense>
 
@@ -197,7 +219,14 @@ export default function Extrato() {
                 perPage={perPage}
                 loading={loadingTable}
                 searchTerm={searchTerm}
-                refresh={() => fetchExtrato(true)}
+                refresh={() =>
+                  fetchExtrato({
+                    force: true,
+                    page,
+                    statusFilter,
+                    searchTerm,
+                  })
+                }
               />
             </Suspense>
           </div>
