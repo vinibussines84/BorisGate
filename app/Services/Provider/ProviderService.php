@@ -18,13 +18,14 @@ class ProviderService
     {
         try {
 
-            // 🔥 Agora usa a Pluggou
-            return new ProviderPluggou();
+            // 🔥 Agora usa SOMENTE a GetPay (Voluti)
+            return new ProviderGetPay();
 
         } catch (\Throwable $e) {
             Log::error("PROVIDER_INIT_FAILED", [
                 'error' => $e->getMessage(),
             ]);
+
             throw new Exception("Falha ao inicializar o provedor de pagamentos.");
         }
     }

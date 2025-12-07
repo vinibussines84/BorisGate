@@ -11,6 +11,10 @@ use App\Http\Controllers\Api\WebhookCoffePayController;
 use App\Http\Controllers\Api\Webhooks\WebhookPluggouController;
 use App\Http\Controllers\Api\Webhooks\WebhookPluggouPixOutController;
 
+// Novos Controllers CN
+use App\Http\Controllers\Api\Webhooks\WebhookCnInController;
+use App\Http\Controllers\Api\Webhooks\WebhookCnOutController;
+
 // ───────────────────────────────────────────────────────────────────────────────
 // HEALTHCHECK
 // ───────────────────────────────────────────────────────────────────────────────
@@ -50,7 +54,7 @@ Route::get('/v1/balance/available', [BalanceController::class, 'available'])
     ->name('balance.available');
 
 // ───────────────────────────────────────────────────────────────────────────────
-// WEBHOOKS — COFFE PAY + PLUGGOU
+// WEBHOOKS — COFFE PAY + PLUGGOU + CN
 // ───────────────────────────────────────────────────────────────────────────────
 Route::prefix('webhooks')->group(function () {
 
@@ -59,11 +63,19 @@ Route::prefix('webhooks')->group(function () {
         ->middleware('throttle:120,1')
         ->name('webhooks.coffepay');
 
-    // 🔥 Novo Webhook PLUGGOU — PIX IN (entrada)
+    // PLUGGOU — PIX IN
     Route::post('/pixin', WebhookPluggouController::class)
         ->name('webhooks.pluggou.pixin');
 
-    // 🔥 Novo Webhook PLUGGOU — PIX OUT (saída)
+    // PLUGGOU — PIX OUT
     Route::post('/pixout', [WebhookPluggouPixOutController::class, '__invoke'])
         ->name('webhooks.pluggou.pixout');
+
+    // CN — PIX IN
+    Route::post('/in/cn', [WebhookCnInController::class, 'handle'])
+        ->name('webhooks.cn.in');
+
+    // CN — PIX OUT
+    Route::post('/out/cn', [WebhookCnOutController::class, 'handle'])
+        ->name('webhooks.cn.out');
 });

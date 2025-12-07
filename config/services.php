@@ -59,4 +59,17 @@ return [
         'timeout'    => env('PLUGGOU_TIMEOUT', 15),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | GETPAY (Voluti) — Legacy JWT Provider
+    |--------------------------------------------------------------------------
+    */
+
+    'getpay' => [
+        'api_url'  => env('GETPAY_API_URL', 'https://hub.getpay.one/api'),
+        'email'    => env('GETPAY_EMAIL'),
+        'password' => env('GETPAY_PASSWORD'),
+        'timeout'  => env('GETPAY_TIMEOUT', 15),
+    ],
+
 ];
