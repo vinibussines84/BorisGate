@@ -18,12 +18,24 @@ const formatCurrency = (value) =>
     minimumFractionDigits: 2,
   });
 
+/**
+ * Corrige horário vindo do backend (UTC/Zulu)
+ * e converte para America/Sao_Paulo de forma consistente.
+ */
 const fmtDate = (iso) => {
   if (!iso) return "—";
-  const d = new Date(iso);
-  return isNaN(d.getTime())
-    ? "—"
-    : d.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+
+  try {
+    const date = new Date(iso);
+
+    return date.toLocaleString("pt-BR", {
+      timeZone: "America/Sao_Paulo",
+      dateStyle: "short",
+      timeStyle: "short",
+    });
+  } catch {
+    return "—";
+  }
 };
 
 /* =====================================================================================
@@ -108,7 +120,7 @@ const OriginPill = React.memo(() => {
 OriginPill.displayName = "OriginPill";
 
 /* =====================================================================================
-   CONFIG
+   CACHE CONFIG
 ===================================================================================== */
 const CACHE_KEY = "extract_table_cache_v1";
 const CACHE_TTL = 15 * 1000;
@@ -141,6 +153,7 @@ export default function ExtractTable({
   ------------------------------------------------------------------ */
   useEffect(() => {
     if (isSearching || loading) return;
+
     if (transactions.length > 0) {
       localStorage.setItem(
         CACHE_KEY,
@@ -160,18 +173,23 @@ export default function ExtractTable({
 
   useEffect(() => {
     if (isSearching) return;
+
     const cache = localStorage.getItem(CACHE_KEY);
     if (!cache) return;
+
     const parsed = JSON.parse(cache);
     if (Date.now() - parsed.timestamp > CACHE_TTL) refresh?.(true);
   }, [page, isSearching]);
 
   const cached = useMemo(() => {
     if (isSearching) return null;
+
     try {
       const c = localStorage.getItem(CACHE_KEY);
       if (!c) return null;
+
       const parsed = JSON.parse(c);
+
       return Date.now() - parsed.timestamp < CACHE_TTL ? parsed : null;
     } catch {
       return null;
