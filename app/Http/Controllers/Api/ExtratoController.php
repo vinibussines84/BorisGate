@@ -26,7 +26,7 @@ class ExtratoController extends Controller
 
         // Alias de status usados em filtros
         $alias = [
-            'EFETIVADO' => ['paga', 'paid', 'approved', 'confirmed'],
+            'EFETIVADO' => ['paga', 'paid', 'approved', 'confirmed', 'completed'],
             'PENDENTE'  => ['pending', 'pendente', 'processing', 'created', 'under_review'],
             'FALHADO'   => ['failed', 'falha', 'error', 'denied', 'canceled', 'cancelled'],
         ];
@@ -78,8 +78,20 @@ class ExtratoController extends Controller
         */
         $total = (clone $pixQ)->count();
 
+        /*
+        |--------------------------------------------------------------------------
+        | 🔥 ORDENAR PELO HORÁRIO REAL DO PAGAMENTO (CORREÇÃO)
+        |--------------------------------------------------------------------------
+        |
+        | Se paid_at existir → ordenar por paid_at DESC
+        | Se ainda não tiver pago → cair para created_at DESC
+        |
+        | COALESCE(paid_at, created_at) é a forma correta.
+        |--------------------------------------------------------------------------
+        */
+
         $rows = $pixQ
-            ->orderBy('created_at', 'desc')
+            ->orderByRaw("COALESCE(paid_at, created_at) DESC")
             ->offset($offset)
             ->limit($perPage)
             ->get();
