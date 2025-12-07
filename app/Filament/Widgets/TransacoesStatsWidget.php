@@ -29,7 +29,7 @@ class TransacoesStatsWidget extends BaseWidget
         $tenantId = auth()->user()?->tenant_id;
 
         /* ============================================================
-           🔄 CASH IN PAGAS HOJE (VALOR BRUTO, SEM DESCONTOS)
+           🔄 CASH IN PAGAS HOJE (VALOR BRUTO)
         ============================================================ */
         $baseHojePagasIn = Transaction::query()
             ->when($tenantId, fn($q) => $q->where('tenant_id', $tenantId))
@@ -145,13 +145,18 @@ class TransacoesStatsWidget extends BaseWidget
             ->whereBetween('paid_at', [$inicioMes, $amanha])
             ->sum('fee');
 
+        /* ============================================================
+           NOVO CARD → 1.5% DO VALOR PAGO DE ENTRADA DO DIA
+        ============================================================ */
+        $valueFee = $cashInTotal * 0.015; // 1.5% sobre cashInTotal
+
         /* FORMATADOR */
         $brl = fn(float $v) => 'R$ ' . number_format($v, 2, ',', '.');
 
         return [
 
             /* ============================================================
-               🔹 TRANSAÇÕES DE HOJE — AGORA MOSTRA BRUTO
+               🔹 TRANSAÇÕES DE HOJE (BRUTO)
             ============================================================ */
             Stat::make('TRANSAÇÕES DE HOJE', '')
                 ->icon('heroicon-o-currency-dollar')
@@ -164,10 +169,18 @@ class TransacoesStatsWidget extends BaseWidget
                     "IN: {$brl($cashInTotal)} ({$entradasCriadasHoje}) | OUT: {$brl($cashOutTotal)} ({$saquesCriadosHoje})"
                 ),
 
+            /* ============================================================
+               NOVO CARD — VALUE FEE (1.5% DO IN)
+            ============================================================ */
+            Stat::make('ValueFee (1.5% IN)', $brl($valueFee))
+                ->description("1.5% sobre {$brl($cashInTotal)} pagos hoje")
+                ->icon('heroicon-o-currency-dollar')
+                ->color('warning'),
+
             Stat::make('Gerado Hoje', $brl($pixGeradosHojeValor))
                 ->description("{$pixGeradosHojeCount} PIX gerados")
                 ->icon('heroicon-o-bolt')
-                ->color('warning'),
+                ->color('info'),
 
             Stat::make('Conversão do Dia', "{$conversaoHojePorcentagem}%")
                 ->description("Pagas: {$pagasHojeInCount} / Geradas: {$pixGeradosHojeCount}")
