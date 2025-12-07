@@ -7,6 +7,7 @@ use App\Support\StatusMap;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Carbon;
 
 class Transaction extends Model
 {
@@ -35,7 +36,7 @@ class Transaction extends Model
         'provider_payload',
         'description',
         'authorized_at',
-        'paid_at',       // <-- manter
+        'paid_at',
         'refunded_at',
         'canceled_at',
         'idempotency_key',
@@ -50,9 +51,8 @@ class Transaction extends Model
         'fee'                        => 'decimal:2',
         'net_amount'                 => 'decimal:2',
         'provider_payload'           => 'array',
-        // CORRIGIDO — NÃO CONVERTER MAIS PARA UTC AUTOMATICAMENTE
         'authorized_at'              => 'datetime',
-        'paid_at'                    => 'string',   // <── AQUI ESTÁ A SOLUÇÃO
+        'paid_at'                    => 'datetime',
         'refunded_at'                => 'datetime',
         'canceled_at'                => 'datetime',
         'applied_available_amount'   => 'decimal:2',
@@ -69,29 +69,132 @@ class Transaction extends Model
     ];
 
     /* ============================================================
-       MUTATOR FINAL QUE NUNCA ALTERA O HORÁRIO
-       Mesmo que venha com timezone ou sem.
-    ============================================================ */
+     * RELAÇÕES
+     * ============================================================ */
+    public function tenant()
+    {
+        return $this->belongsTo(\App\Models\Tenant::class);
+    }
+
+    public function user()
+    {
+        return $this->belongsTo(\App\Models\User::class);
+    }
+
+    /* ============================================================
+     * STATUS ENUM
+     * ============================================================ */
+    protected function statusEnum(): ?TransactionStatus
+    {
+        $raw = $this->attributes['status'] ?? null;
+        return $raw ? TransactionStatus::tryFrom(strtoupper($raw)) : null;
+    }
+
+    /* ============================================================
+     * SCOPES
+     * ============================================================ */
+    public function scopePaid($q)       { return $q->where('status', 'PAID'); }
+    public function scopePending($q)    { return $q->where('status', 'PENDING'); }
+    public function scopeFailed($q)     { return $q->where('status', 'FAILED'); }
+    public function scopeError($q)      { return $q->where('status', 'ERROR'); }
+    public function scopeProcessing($q) { return $q->where('status', 'PROCESSING'); }
+    public function scopeCashIn($q)     { return $q->where('direction', self::DIR_IN); }
+    public function scopeCashOut($q)    { return $q->where('direction', self::DIR_OUT); }
+
+    /* ============================================================
+     * ACCESSORS
+     * ============================================================ */
+    protected function statusLabel(): Attribute
+    {
+        return Attribute::get(fn () =>
+            $this->statusEnum()?->label() ?? '—'
+        );
+    }
+
+    protected function statusColor(): Attribute
+    {
+        return Attribute::get(fn () =>
+            $this->statusEnum()?->color() ?? 'secondary'
+        );
+    }
+
+    protected function pixCode(): Attribute
+    {
+        return Attribute::get(fn () =>
+            data_get($this->provider_payload, 'provider_response.qr_code_text')
+            ?? data_get($this->provider_payload, 'pix')
+            ?? data_get($this->provider_payload, 'qrcode')
+            ?? data_get($this->provider_payload, 'qr_code_text')
+        );
+    }
+
+    protected function pixExpire(): Attribute
+    {
+        return Attribute::get(fn () =>
+            data_get($this->provider_payload, 'expire')
+            ?? data_get($this->provider_payload, 'data.expire')
+        );
+    }
+
+    protected function pixExpiresAt(): Attribute
+    {
+        return Attribute::get(function () {
+            $created = data_get($this->provider_payload, 'created_at');
+            $expire  = $this->pix_expire;
+
+            if (!$created || !$expire) return null;
+
+            return Carbon::parse($created)->addSeconds($expire);
+        });
+    }
+
+    protected function pixExpired(): Attribute
+    {
+        return Attribute::get(fn () =>
+            $this->pix_expires_at ? $this->pix_expires_at->lt(now()) : false
+        );
+    }
+
+    /* ============================================================
+     * MUTATORS
+     * ============================================================ */
+
+    /**
+     * 🎯 Mutator FINAL do paid_at — respeita timezone enviado pelo provedor
+     */
     public function setPaidAtAttribute($value): void
     {
-        if (!$value) {
+        if (empty($value)) {
             $this->attributes['paid_at'] = null;
             return;
         }
 
-        // Sempre salva a STRING EXATA enviada pelo provedor
-        $this->attributes['paid_at'] = (string) $value;
+        try {
+            $str = (string) $value;
+
+            $hasTZ =
+                str_contains($str, '+') ||
+                preg_match('/\-\d{2}:\d{2}$/', $str);
+
+            if ($hasTZ) {
+                $this->attributes['paid_at'] = Carbon::parse($str)->format('Y-m-d H:i:s');
+            } else {
+                $this->attributes['paid_at'] = Carbon::parse($str, 'America/Sao_Paulo')->format('Y-m-d H:i:s');
+            }
+
+        } catch (\Throwable $e) {
+            $this->attributes['paid_at'] = $value;
+        }
     }
 
-    /* ============================================================
-       STATUS
-    ============================================================ */
     public function setStatusAttribute($value): void
     {
-        $normalized = $value instanceof TransactionStatus
-            ? $value->value
-            : StatusMap::normalize((string) $value);
+        if ($value instanceof TransactionStatus) {
+            $this->attributes['status'] = $value->value;
+            return;
+        }
 
+        $normalized = StatusMap::normalize((string)$value);
         $this->attributes['status'] = strtoupper($normalized);
     }
 
@@ -104,48 +207,47 @@ class Transaction extends Model
 
     public function setTxidAttribute($value): void
     {
-        $v = preg_replace('/[^A-Za-z0-9\-\._]/', '', (string)$value);
+        $v = preg_replace('/[^A-Za-z0-9\-\._]/', '', (string)$value) ?? null;
         $this->attributes['txid'] = $v ? substr($v, 0, 64) : null;
     }
 
     public function setProviderTransactionIdAttribute($value): void
     {
-        $v = preg_replace('/[^A-Za-z0-9\-\._]/', '', (string)$value);
+        $v = preg_replace('/[^A-Za-z0-9\-\._]/', '', (string)$value) ?? null;
         $this->attributes['provider_transaction_id'] =
             $v ? substr($v, 0, 100) : null;
     }
 
     public function setE2eIdAttribute($value): void
     {
-        $v = preg_replace('/[^A-Za-z0-9\-\.]/', '', (string)$value);
+        $v = preg_replace('/[^A-Za-z0-9\-\.]/', '', (string)$value) ?? null;
         $this->attributes['e2e_id'] = $v ? substr($v, 0, 100) : null;
     }
 
     /* ============================================================
-       ACCESSORS (não mexidos)
-    ============================================================ */
+     * HELPERS
+     * ============================================================ */
+    public function isPaid(): bool       { return $this->status === 'PAID'; }
+    public function isPending(): bool    { return $this->status === 'PENDING'; }
+    public function isFailed(): bool     { return $this->status === 'FAILED'; }
+    public function isError(): bool      { return $this->status === 'ERROR'; }
+    public function isProcessing(): bool { return $this->status === 'PROCESSING'; }
 
-    protected function statusLabel(): Attribute
+    public function isStatus(TransactionStatus $status): bool
     {
-        return Attribute::get(fn () =>
-            ($this->statusEnum()?->label()) ?? '—'
-        );
+        return $this->status === $status->value;
     }
 
-    protected function statusColor(): Attribute
+    public function markPaid(?\DateTimeInterface $when = null): void
     {
-        return Attribute::get(fn () =>
-            ($this->statusEnum()?->color()) ?? 'secondary'
-        );
+        $this->status  = 'PAID';
+        $this->paid_at = $when ?? now();
+        $this->save();
     }
 
-    protected function statusEnum(): ?TransactionStatus
-    {
-        $raw = $this->attributes['status'] ?? null;
-        return $raw ? TransactionStatus::tryFrom(strtoupper($raw)) : null;
-    }
-
-    /* defaults */
+    /* ============================================================
+     * DEFAULTS
+     * ============================================================ */
     protected static function booted(): void
     {
         static::creating(function (self $m) {
