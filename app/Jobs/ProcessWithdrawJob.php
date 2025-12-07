@@ -68,7 +68,7 @@ class ProcessWithdrawJob implements ShouldQueue
 
         /*
         |--------------------------------------------------------------------------
-        | 3) Chamar API da GetPay
+        | 3) Chamar provider GetPay
         |--------------------------------------------------------------------------
         */
         try {
@@ -79,7 +79,7 @@ class ProcessWithdrawJob implements ShouldQueue
                 'exception'   => $e->getMessage(),
             ]);
 
-            // Falha antes do envio → estorna
+            // Falha → estorna local
             $withdrawService->refundLocal(
                 $withdraw,
                 'Erro ao comunicar com o provider: ' . $e->getMessage()
@@ -92,7 +92,7 @@ class ProcessWithdrawJob implements ShouldQueue
         | 4) Validar resposta
         |--------------------------------------------------------------------------
         */
-        if (!isset($resp['success']) || $resp['success'] === false) {
+        if (!isset($resp['success']) || $resp['success'] !== true) {
 
             $reason = $resp['message'] ?? 'Erro desconhecido do provider';
 
@@ -101,17 +101,19 @@ class ProcessWithdrawJob implements ShouldQueue
                 'response'    => $resp,
             ]);
 
-            // Falha → estorna
             $withdrawService->refundLocal($withdraw, $reason);
             return;
         }
 
         /*
         |--------------------------------------------------------------------------
-        | 5) Capturar ID do provider
+        | 5) Capturar provider_id (UUID)
         |--------------------------------------------------------------------------
         */
-        $providerId = data_get($resp, 'data.id') ?? data_get($resp, 'id');
+        $providerId =
+            data_get($resp, 'data.uuid')
+            ?? data_get($resp, 'data.id')
+            ?? data_get($resp, 'id');
 
         if (!$providerId) {
             Log::error('[ProcessWithdrawJob] ⚠️ provider_id ausente', [
@@ -142,23 +144,14 @@ class ProcessWithdrawJob implements ShouldQueue
 
         /*
         |--------------------------------------------------------------------------
-        | 7) STATUS imediato vindo do provider
-        |--------------------------------------------------------------------------
-        |
-        | GetPay normalmente responde:
-        |   "pending"
-        |   "processing"
-        |   "paid"
-        |   "completed"
-        |
-        | Mesma lógica do Pluggou mantida!
+        | 7) Status imediato retornado pela GetPay
         |--------------------------------------------------------------------------
         */
         $providerStatus = strtolower(data_get($resp, 'data.status', 'pending'));
 
         if (in_array($providerStatus, ['paid', 'success', 'completed'])) {
 
-            // Pago no retorno → finalizar
+            // Pago imediato — finalizar
             $withdrawService->markAsPaid($withdraw, $resp);
 
             Log::info('[ProcessWithdrawJob] ✅ Pago imediatamente no retorno', [
@@ -171,7 +164,7 @@ class ProcessWithdrawJob implements ShouldQueue
 
         /*
         |--------------------------------------------------------------------------
-        | 8) Aguardar webhook (NÃO mudar esta lógica)
+        | 8) Caso pending/processing → aguarda webhook
         |--------------------------------------------------------------------------
         */
         Log::info('[ProcessWithdrawJob] 🕒 Aguardando webhook (GetPay)…', [
