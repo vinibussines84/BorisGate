@@ -17,7 +17,6 @@ class WebhookCnInController extends Controller
 {
     public function handle(Request $request, WalletService $wallet)
     {
-        // ✔ Garantir que o conteúdo seja JSON
         if (!$request->isJson()) {
             return response()->json([
                 'error' => 'Invalid content type. JSON expected.'
@@ -31,17 +30,6 @@ class WebhookCnInController extends Controller
         ]);
 
         try {
-            /*
-            |--------------------------------------------------------------------------
-            | CAMPOS ESPERADOS DA GETPAY
-            | type -> PAYIN_CONFIRMED
-            | externalId -> identificador local
-            | uuid -> identificador do provedor
-            | amount -> valor
-            | status -> "paid"
-            | endToEndId -> E2E real do BACEN
-            |--------------------------------------------------------------------------
-            */
 
             $externalId = data_get($payload, 'externalId');
             $uuid       = data_get($payload, 'uuid');
@@ -50,12 +38,16 @@ class WebhookCnInController extends Controller
                 return response()->json(['error' => 'missing_reference'], 422);
             }
 
-            // Primeira tentativa → localizar transação pelo external_reference
+            /*
+            |--------------------------------------------------------------------------
+            | LOCALIZAR TRANSAÇÃO
+            |--------------------------------------------------------------------------
+            */
+
             $tx = Transaction::where('external_reference', $externalId)
                 ->lockForUpdate()
                 ->first();
 
-            // Segunda tentativa → localizar pelo provider_transaction_id (uuid)
             if (!$tx && $uuid) {
                 $tx = Transaction::where('provider_transaction_id', $uuid)
                     ->lockForUpdate()
@@ -66,7 +58,7 @@ class WebhookCnInController extends Controller
                 return response()->json(['error' => 'transaction_not_found'], 404);
             }
 
-            // ✔ Se já está PAID ou FAILED → ignorar
+            // Já finalizada → ignorar
             if (in_array($tx->status, ['PAID', 'FAILED'], true)) {
                 Log::channel('webhooks')->info("⚠ GETPAY webhook ignorado — transação já finalizada", [
                     'transaction_id' => $tx->id,
@@ -78,21 +70,23 @@ class WebhookCnInController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | NORMALIZAR STATUS (status = "paid")
+            | NORMALIZAR STATUS
             |--------------------------------------------------------------------------
             */
+
             $normalized = StatusMap::normalize(data_get($payload, 'status'));
             $newEnum    = TransactionStatus::fromLoose($normalized);
             $oldEnum    = TransactionStatus::tryFrom($tx->status);
 
-            // ✔ Aplicar efeito de saldo APENAS se o status realmente mudou
+            // Aplicar impacto no saldo somente quando necessário
             $wallet->applyStatusChange($tx, $oldEnum, $newEnum);
 
             /*
             |--------------------------------------------------------------------------
-            | E2E real ou gerado se ausente
+            | DEFINIR / GERAR E2E
             |--------------------------------------------------------------------------
             */
+
             $incomingE2E = data_get($payload, 'endToEndId');
 
             if ($newEnum === TransactionStatus::PAID && empty($incomingE2E)) {
@@ -103,17 +97,33 @@ class WebhookCnInController extends Controller
                     'generated_e2e'  => $incomingE2E,
                 ]);
             } else {
-                // se não veio, mantém o anterior
                 $incomingE2E = $incomingE2E ?: $tx->e2e_id;
             }
 
-            $paidAt = data_get($payload, 'processed_at') ?: $tx->paid_at;
+            /*
+            |--------------------------------------------------------------------------
+            | CORRIGIR paid_at → Ajustar para America/Sao_Paulo
+            |--------------------------------------------------------------------------
+            */
+
+            $rawPaidAt = data_get($payload, 'processed_at') ?: $tx->paid_at;
+
+            if ($rawPaidAt) {
+                try {
+                    $paidAt = Carbon::parse($rawPaidAt)->setTimezone('America/Sao_Paulo');
+                } catch (\Exception $e) {
+                    $paidAt = now('America/Sao_Paulo');
+                }
+            } else {
+                $paidAt = now('America/Sao_Paulo');
+            }
 
             /*
             |--------------------------------------------------------------------------
-            | ATUALIZAR TRANSACAO LOCAL
+            | ATUALIZAR TRANSACAO
             |--------------------------------------------------------------------------
             */
+
             $tx->updateQuietly([
                 'status'           => $newEnum->value,
                 'e2e_id'           => $incomingE2E,
@@ -123,9 +133,10 @@ class WebhookCnInController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | WEBHOOK PARA O CLIENTE (SE HABILITADO)
+            | DISPARAR WEBHOOK PARA O CLIENTE
             |--------------------------------------------------------------------------
             */
+
             if (
                 $newEnum === TransactionStatus::PAID &&
                 $tx->user?->webhook_enabled &&
@@ -137,6 +148,7 @@ class WebhookCnInController extends Controller
             Log::channel('webhooks')->info("✅ GETPAY webhook processado com sucesso", [
                 'transaction_id' => $tx->id,
                 'status'         => $newEnum->value,
+                'paid_at'        => $paidAt,
             ]);
 
             return response()->json([
@@ -144,6 +156,7 @@ class WebhookCnInController extends Controller
                 'status'  => $newEnum->value,
                 'e2e_id'  => $incomingE2E,
             ]);
+
         } catch (\Throwable $e) {
 
             Log::channel('webhooks')->error("🚨 ERRO WEBHOOK GETPAY (CN IN)", [
