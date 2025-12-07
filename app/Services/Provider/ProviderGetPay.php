@@ -4,6 +4,7 @@ namespace App\Services\Provider;
 
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use Exception;
 
 class ProviderGetPay
@@ -11,16 +12,35 @@ class ProviderGetPay
     protected string $baseUrl = 'https://hub.getpay.one/api';
 
     /**
-     * Obtém o token JWT, com cache automático.
+     * Obtém o token JWT somente quando necessário.
      */
     protected function getToken(): string
     {
-        if (Cache::has('getpay_jwt')) {
-            return Cache::get('getpay_jwt');
+        $cache = Cache::get('getpay_jwt_data');
+
+        // 🟢 Token ainda válido → retorna sem renovar
+        if ($cache && isset($cache['token'], $cache['expires_at'])) {
+
+            if (now()->lt($cache['expires_at'])) {
+                return $cache['token'];
+            }
         }
 
+        // 🔄 Evita múltiplas requisições simultâneas
+        return Cache::remember('getpay_jwt_data', 55 * 60, function () {
+            return $this->refreshToken();
+        })['token'];
+    }
+
+    /**
+     * 🔐 Requisita novo token à GetPay (somente quando expira)
+     */
+    private function refreshToken(): array
+    {
+        Log::info("GETPAY_REFRESH_TOKEN", ['msg' => 'Solicitando novo JWT']);
+
         $response = Http::post("{$this->baseUrl}/login", [
-            'email' => config('services.getpay.email'),
+            'email'    => config('services.getpay.email'),
             'password' => config('services.getpay.password'),
         ]);
 
@@ -29,14 +49,23 @@ class ProviderGetPay
         }
 
         $token = $response->json('token');
+        $expires = $response->json('expires_at'); // formato: 2025-07-01 00:21:56
 
-        Cache::put('getpay_jwt', $token, now()->addMinutes(55));
+        // 🕒 converte para Carbon
+        $expiresAt = $expires ? now()->parse($expires) : now()->addMinutes(55);
 
-        return $token;
+        $data = [
+            'token'      => $token,
+            'expires_at' => $expiresAt,
+        ];
+
+        Cache::put('getpay_jwt_data', $data, $expiresAt);
+
+        return $data;
     }
 
     /**
-     * Criar PIX (equivalente ao create-payment)
+     * Criar PIX (create-payment)
      */
     public function createPix(float $amount, array $payer)
     {
@@ -62,7 +91,7 @@ class ProviderGetPay
     }
 
     /**
-     * A API legacy não possui este endpoint, deixo implementado para compatibilidade.
+     * A API legacy não possui consulta
      */
     public function getTransactionStatus(string $transactionId)
     {
@@ -70,16 +99,16 @@ class ProviderGetPay
     }
 
     /**
-     * Saque — API Legacy usa /api/withdrawals
+     * Saque
      */
     public function withdraw(float $amount, array $recipient)
     {
         $token = $this->getToken();
 
         $response = Http::withToken($token)->post("{$this->baseUrl}/withdrawals", [
-            'amount' => $amount,
+            'amount'   => $amount,
             'document' => $recipient['document'],
-            'name' => $recipient['name'],
+            'name'     => $recipient['name'],
         ]);
 
         if (!$response->successful() || !$response->json('success')) {
@@ -89,15 +118,11 @@ class ProviderGetPay
         return $response->json();
     }
 
-    /**
-     * Processar Webhook
-     */
     public function processWebhook(array $payload)
     {
-        // personalizar conforme sua regra
         return [
             'processed' => true,
-            'payload' => $payload,
+            'payload'   => $payload,
         ];
     }
 }
