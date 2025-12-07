@@ -21,11 +21,11 @@ class TransacoesStatsWidget extends BaseWidget
 
         $inicioHojeLocal = Carbon::today($tz);
         $amanhaLocal     = (clone $inicioHojeLocal)->addDay();
+        $inicioHojeUtc   = $inicioHojeLocal->copy()->utc();
+        $amanhaUtc       = $amanhaLocal->copy()->utc();
 
-        $inicioHojeUtc = $inicioHojeLocal->copy()->utc();
-        $amanhaUtc     = $amanhaLocal->copy()->utc();
-
-        $inicioMesUtc  = Carbon::now($tz)->startOfMonth()->utc();
+        $inicioSemanaUtc = Carbon::now($tz)->startOfWeek()->utc();
+        $inicioMesUtc    = Carbon::now($tz)->startOfMonth()->utc();
 
         $tenantId = auth()->user()?->tenant_id;
 
@@ -33,7 +33,7 @@ class TransacoesStatsWidget extends BaseWidget
            🔄 CASH IN PAGAS HOJE
         ============================================================ */
         $baseHojePagasIn = Transaction::query()
-            ->when($tenantId, fn ($q) => $q->where('tenant_id', $tenantId))
+            ->when($tenantId, fn($q) => $q->where('tenant_id', $tenantId))
             ->where('direction', Transaction::DIR_IN)
             ->where('status', TransactionStatus::PAID)
             ->whereBetween('paid_at', [$inicioHojeUtc, $amanhaUtc]);
@@ -41,127 +41,157 @@ class TransacoesStatsWidget extends BaseWidget
         $cashInTotal = (float)(clone $baseHojePagasIn)->sum('amount');
         $cashInCount =        (clone $baseHojePagasIn)->count();
 
-        /* ============================================================
-           🔄 CASH OUT PAGOS HOJE
-        ============================================================ */
-        $baseHojePagasOut = Withdraw::query()
-            ->when($tenantId, fn ($q) => $q->where('tenant_id', $tenantId))
+        /* 👇 DESCONTO SOMENTE VISUAL: 1.5% + R$0,10 POR TRANSAÇÃO */
+        $descontoPercentual = $cashInTotal * 0.015;
+        $descontoFixo = $cashInCount * 0.10;
+        $cashInTotalLiquidoVisual = $cashInTotal - ($descontoPercentual + $descontoFixo);
+
+        /* CASH OUT HOJE */
+        $baseHojeCriadasOut = Withdraw::query()
+            ->when($tenantId, fn($q) => $q->where('tenant_id', $tenantId))
+            ->whereBetween('created_at', [$inicioHojeUtc, $amanhaUtc]);
+
+        $cashOutTotal = (float)(clone $baseHojeCriadasOut)->sum('amount');
+        $cashOutCount =        (clone $baseHojeCriadasOut)->count();
+
+        $entradasCriadasHoje = $cashInCount;
+        $saquesCriadosHoje   = $cashOutCount;
+        $totalMovimentosHoje = $entradasCriadasHoje + $saquesCriadosHoje;
+
+        /* PAGAS DO DIA */
+        $valorTransacoesPagasDiaIn = (float)Transaction::query()
+            ->when($tenantId, fn($q) => $q->where('tenant_id', $tenantId))
+            ->where('direction', Transaction::DIR_IN)
+            ->where('status', TransactionStatus::PAID)
+            ->whereBetween('paid_at', [$inicioHojeUtc, $amanhaUtc])
+            ->sum('amount');
+
+        $valorTransacoesPagasDiaOut = (float)Withdraw::query()
+            ->when($tenantId, fn($q) => $q->where('tenant_id', $tenantId))
             ->where('status', Withdraw::STATUS_PAID)
-            ->whereBetween('processed_at', [$inicioHojeUtc, $amanhaUtc]);
+            ->whereBetween('processed_at', [$inicioHojeUtc, $amanhaUtc])
+            ->sum('amount');
 
-        $cashOutTotal = (float)(clone $baseHojePagasOut)->sum('amount');
-        $cashOutCount =        (clone $baseHojePagasOut)->count();
+        $valorTransacoesPagasDiaTotal = $valorTransacoesPagasDiaIn + $valorTransacoesPagasDiaOut;
 
-        /* ============================================================
-           🔄 TOTAL MOVIMENTOS PAGOS
-        ============================================================ */
-        $entradasPagasHoje = $cashInCount;
-        $saquesPagosHoje   = $cashOutCount;
+        $pagasHojeInCount = Transaction::query()
+            ->when($tenantId, fn($q) => $q->where('tenant_id', $tenantId))
+            ->where('direction', Transaction::DIR_IN)
+            ->where('status', TransactionStatus::PAID)
+            ->whereBetween('paid_at', [$inicioHojeUtc, $amanhaUtc])
+            ->count();
 
-        $valorTransacoesPagasDiaTotal = $cashInTotal + $cashOutTotal;
+        $pagasHojeOutCount = Withdraw::query()
+            ->when($tenantId, fn($q) => $q->where('tenant_id', $tenantId))
+            ->where('status', Withdraw::STATUS_PAID)
+            ->whereBetween('processed_at', [$inicioHojeUtc, $amanhaUtc])
+            ->count();
 
-        /* ============================================================
-           🔥 TAXAS APENAS DAS TRANSACÕES PAGAS
-        ============================================================ */
-        $taxasTransacoesDiaIn  = (float)$baseHojePagasIn->sum('fee');
-        $taxasTransacoesDiaOut = (float)$baseHojePagasOut->sum('fee_amount');
-
-        $taxasDiaTotal = $taxasTransacoesDiaIn + $taxasTransacoesDiaOut;
-
-        /* ============================================================
-           🔥 INTERMED — total de taxas pagas pelos usuários no dia
-        ============================================================ */
-        $intermedHoje = $taxasDiaTotal;
-
-        /* ============================================================
-           📌 PIX GERADOS HOJE
-        ============================================================ */
+        /* PIX GERADOS */
         $pixGeradosHojeValor = (float)Transaction::query()
-            ->when($tenantId, fn ($q) => $q->where('tenant_id', $tenantId))
+            ->when($tenantId, fn($q) => $q->where('tenant_id', $tenantId))
             ->where('direction', Transaction::DIR_IN)
             ->whereBetween('created_at', [$inicioHojeUtc, $amanhaUtc])
             ->sum('amount');
 
         $pixGeradosHojeCount = Transaction::query()
-            ->when($tenantId, fn ($q) => $q->where('tenant_id', $tenantId))
+            ->when($tenantId, fn($q) => $q->where('tenant_id', $tenantId))
             ->where('direction', Transaction::DIR_IN)
             ->whereBetween('created_at', [$inicioHojeUtc, $amanhaUtc])
             ->count();
 
-        /* ============================================================
-           🔥 CONVERSÃO DO DIA
-        ============================================================ */
-        $transacoesPagasHoje     = $entradasPagasHoje;
-        $transacoesGeradasHoje   = $pixGeradosHojeCount;
+        /* CONVERSÃO */
+        $transacoesPagasHoje = $pagasHojeInCount;
+        $transacoesGeradasHoje = $pixGeradosHojeCount;
 
-        $conversaoHojePorcentagem =
-            $transacoesGeradasHoje > 0
-                ? round(($transacoesPagasHoje / $transacoesGeradasHoje) * 100, 2)
-                : 0;
+        $conversaoHojePorcentagem = $transacoesGeradasHoje > 0
+            ? round(($transacoesPagasHoje / $transacoesGeradasHoje) * 100, 2)
+            : 0;
 
-        /* ============================================================
-           🔄 COMISSÃO DO MÊS (IN)
-        ============================================================ */
+        /* TAXAS */
+        $taxasTransacoesDiaIn = (float)Transaction::query()
+            ->when($tenantId, fn($q) => $q->where('tenant_id', $tenantId))
+            ->where('status', TransactionStatus::PAID)
+            ->whereBetween('paid_at', [$inicioHojeUtc, $amanhaUtc])
+            ->sum('fee');
+
+        $taxasTransacoesDiaOut = (float)Withdraw::query()
+            ->when($tenantId, fn($q) => $q->where('tenant_id', $tenantId))
+            ->where('status', Withdraw::STATUS_PAID)
+            ->whereBetween('processed_at', [$inicioHojeUtc, $amanhaUtc])
+            ->sum('fee_amount');
+
+        $taxasDiaTotal = $taxasTransacoesDiaIn + $taxasTransacoesDiaOut;
+
+        /* SEMANA / MÊS */
+        $totalSemanaPagas = (float)Transaction::query()
+            ->when($tenantId, fn($q) => $q->where('tenant_id', $tenantId))
+            ->where('status', TransactionStatus::PAID)
+            ->whereBetween('paid_at', [$inicioSemanaUtc, $amanhaUtc])
+            ->sum('amount');
+
+        $totalMes = (float)Transaction::query()
+            ->when($tenantId, fn($q) => $q->where('tenant_id', $tenantId))
+            ->whereBetween('created_at', [$inicioMesUtc, $amanhaUtc])
+            ->whereIn('status', [TransactionStatus::PAID, TransactionStatus::PENDING])
+            ->sum('amount');
+
         $comissaoBrutaMes = (float)Transaction::query()
-            ->when($tenantId, fn ($q) => $q->where('tenant_id', $tenantId))
+            ->when($tenantId, fn($q) => $q->where('tenant_id', $tenantId))
             ->where('status', TransactionStatus::PAID)
             ->whereBetween('paid_at', [$inicioMesUtc, $amanhaUtc])
             ->sum('fee');
 
-        /* ============================================================
-           FORMATADOR
-        ============================================================ */
-        $brl = fn (float $v) => 'R$ ' . number_format($v, 2, ',', '.');
+        /* FORMATADOR */
+        $brl = fn(float $v) => 'R$ ' . number_format($v, 2, ',', '.');
 
         return [
 
-            /* ============================================================
-               CARD — TRANSAÇÕES PAGAS HOJE
-            ============================================================ */
-            Stat::make('TRANSAÇÕES PAGAS HOJE', $brl($valorTransacoesPagasDiaTotal))
+            Stat::make('TRANSAÇÕES DE HOJE', '')
                 ->icon('heroicon-o-currency-dollar')
-                ->description("IN {$entradasPagasHoje} | OUT {$saquesPagosHoje}")
-                ->color('success'),
+                ->chart([
+                    (int) round($cashInTotal),
+                    (int) round($cashOutTotal)
+                ])
+                ->color($cashInTotal >= $cashOutTotal ? 'success' : 'danger')
+                ->description(
+                    "IN: {$brl($cashInTotalLiquidoVisual)} ({$entradasCriadasHoje}) | OUT: {$brl($cashOutTotal)} ({$saquesCriadosHoje})"
+                ),
 
-            /* ============================================================
-               CARD — INTERMED (TAXAS PAGAS)
-            ============================================================ */
-            Stat::make('INTERMED', $brl($intermedHoje))
-                ->description('Taxas pagas pelos usuários hoje')
-                ->icon('heroicon-o-document-currency-dollar')
-                ->color('warning'),
-
-            /* ============================================================
-               CARD — PIX GERADOS HOJE
-            ============================================================ */
             Stat::make('Gerado Hoje', $brl($pixGeradosHojeValor))
                 ->description("{$pixGeradosHojeCount} PIX gerados")
                 ->icon('heroicon-o-bolt')
                 ->color('warning'),
 
-            /* ============================================================
-               CARD — CONVERSÃO
-            ============================================================ */
             Stat::make('Conversão do Dia', "{$conversaoHojePorcentagem}%")
                 ->description("Pagas: {$transacoesPagasHoje} / Geradas: {$transacoesGeradasHoje}")
                 ->icon('heroicon-o-chart-pie')
                 ->color('success'),
 
-            /* ============================================================
-               CARD — TAXAS DO DIA
-            ============================================================ */
-            Stat::make('Taxas do Dia (Pagas)', $brl($taxasDiaTotal))
+            Stat::make('Transações do Dia', number_format($totalMovimentosHoje, 0, ',', '.'))
+                ->description("Entradas: {$entradasCriadasHoje} | Saques: {$saquesCriadosHoje}")
+                ->color('info'),
+
+            Stat::make('Transações Pagas (IN + OUT)', $brl($valorTransacoesPagasDiaTotal))
+                ->description("IN {$pagasHojeInCount} | OUT {$pagasHojeOutCount}")
+                ->color('success'),
+
+            Stat::make('Taxas do Dia', $brl($taxasDiaTotal))
                 ->description("IN: {$brl($taxasTransacoesDiaIn)} | OUT: {$brl($taxasTransacoesDiaOut)}")
-                ->icon('heroicon-o-banknotes')
                 ->color('warning'),
 
-            /* ============================================================
-               CARD — COMISSÃO DO MÊS
-            ============================================================ */
+            Stat::make('Total Semana (Pagas)', $brl($totalSemanaPagas))
+                ->description('Pagas na semana')
+                ->color('primary'),
+
+            Stat::make('Total Mês', $brl($totalMes))
+                ->description('Pagas + pendentes')
+                ->color('info'),
+
             Stat::make('Comissão Bruta do Mês', $brl($comissaoBrutaMes))
-                ->description('Somente taxas PAGAS no mês')
-                ->icon('heroicon-o-building-library')
+                ->description('Taxas do mês')
                 ->color('danger'),
+
         ];
     }
 }
