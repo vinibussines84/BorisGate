@@ -43,7 +43,6 @@ class WebhookCnInController extends Controller
             | LOCALIZAR TRANSAÇÃO
             |--------------------------------------------------------------------------
             */
-
             $tx = Transaction::where('external_reference', $externalId)
                 ->lockForUpdate()
                 ->first();
@@ -73,7 +72,6 @@ class WebhookCnInController extends Controller
             | NORMALIZAR STATUS
             |--------------------------------------------------------------------------
             */
-
             $normalized = StatusMap::normalize(data_get($payload, 'status'));
             $newEnum    = TransactionStatus::fromLoose($normalized);
             $oldEnum    = TransactionStatus::tryFrom($tx->status);
@@ -86,7 +84,6 @@ class WebhookCnInController extends Controller
             | DEFINIR / GERAR E2E
             |--------------------------------------------------------------------------
             */
-
             $incomingE2E = data_get($payload, 'endToEndId');
 
             if ($newEnum === TransactionStatus::PAID && empty($incomingE2E)) {
@@ -102,20 +99,16 @@ class WebhookCnInController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | CORRIGIR paid_at → Ajustar para America/Sao_Paulo
+            | CORRIGIR paid_at → **SEM MEXER NO FUSO**
             |--------------------------------------------------------------------------
             */
-
             $rawPaidAt = data_get($payload, 'processed_at') ?: $tx->paid_at;
 
-            if ($rawPaidAt) {
-                try {
-                    $paidAt = Carbon::parse($rawPaidAt)->setTimezone('America/Sao_Paulo');
-                } catch (\Exception $e) {
-                    $paidAt = now('America/Sao_Paulo');
-                }
-            } else {
-                $paidAt = now('America/Sao_Paulo');
+            try {
+                // Mantém exatamente o horário do provedor (incluindo -03:00)
+                $paidAt = Carbon::parse($rawPaidAt);
+            } catch (\Exception $e) {
+                $paidAt = now();
             }
 
             /*
@@ -123,11 +116,10 @@ class WebhookCnInController extends Controller
             | ATUALIZAR TRANSACAO
             |--------------------------------------------------------------------------
             */
-
             $tx->updateQuietly([
                 'status'           => $newEnum->value,
                 'e2e_id'           => $incomingE2E,
-                'paid_at'          => $paidAt,
+                'paid_at'          => $paidAt,  // agora correto
                 'provider_payload' => $payload,
             ]);
 
@@ -136,7 +128,6 @@ class WebhookCnInController extends Controller
             | DISPARAR WEBHOOK PARA O CLIENTE
             |--------------------------------------------------------------------------
             */
-
             if (
                 $newEnum === TransactionStatus::PAID &&
                 $tx->user?->webhook_enabled &&
