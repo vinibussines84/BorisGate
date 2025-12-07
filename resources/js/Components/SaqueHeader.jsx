@@ -1,9 +1,7 @@
 import React from "react";
 import {
   Banknote,
-  ArrowDownCircle,
   ListOrdered,
-  Clock,
   CalendarDays,
   RefreshCw,
 } from "lucide-react";
@@ -99,26 +97,15 @@ export default function WithdrawHeader({ cards, onRefresh, isRefreshing }) {
         </button>
       </div>
 
-      {/* CARDS GRID */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
-        <Card
-          title="Total Withdrawn"
-          value={BRL(cards.total)}
-          icon={ArrowDownCircle}
-          color="verde"
-        />
+      {/* CARDS GRID — agora com APENAS 2 CARDS */}
+      <div className="grid grid-cols-2 sm:grid-cols-2 gap-3 sm:gap-4">
         <Card
           title="Quantity"
           value={cards.qtd || 0}
           icon={ListOrdered}
           color="sky"
         />
-        <Card
-          title="Processing"
-          value={cards.proc || 0}
-          icon={Clock}
-          color="amber"
-        />
+
         <Card
           title="Last Withdrawal"
           value={cards.ult ? fmtDate(cards.ult) : "—"}

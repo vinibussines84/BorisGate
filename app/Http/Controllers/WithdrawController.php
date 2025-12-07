@@ -100,16 +100,15 @@ class WithdrawController extends Controller
             ->limit($perPage)
             ->get()
             ->map(function ($t) {
-
                 $statusEnum = TransactionStatus::fromLoose($t->status);
 
                 return [
                     'id'           => $t->id,
                     '_kind'        => $t->_kind,
                     'credit'       => false,
-                    'amount'       => (float)$t->amount,
+                    'amount'       => (float)$t->amount,  // bruto
                     'fee'          => round((float)$t->fee, 2),
-                    'net'          => round((float)$t->amount, 2),
+                    'net'          => round((float)$t->amount - $t->fee, 2), // líquido
                     'status'       => $statusEnum->value,
                     'status_label' => $statusEnum->label(),
                     'txid'         => $t->txid,
@@ -121,15 +120,21 @@ class WithdrawController extends Controller
             });
 
         /* ============================================================
-         * 🔥 TOTAIS CORRIGIDOS
+         *  🔥 TOTAIS CORRIGIDOS — AQUI ESTAVA O SEU BUG!
          * ============================================================ */
+
         $totalsBase = Withdraw::where('user_id', $user->id);
 
         $paidStatuses = ['paid', 'approved', 'confirmed', 'completed'];
 
         $totals = [
-            'sum_paid'         => (float)$totalsBase->clone()->whereIn('status', $paidStatuses)->sum('amount'),
+            // ✅ total bruto pago — o correto para "Total Withdrawn"
+            'sum_paid'         => (float)$totalsBase->clone()->whereIn('status', $paidStatuses)->sum('gross_amount'),
+
+            // quantidade total de saques
             'count_all'        => (int)$totalsBase->clone()->count(),
+
+            // quantidade em processamento
             'count_processing' => (int)$totalsBase->clone()->whereIn('status', ['pending', 'processing'])->count(),
         ];
 
