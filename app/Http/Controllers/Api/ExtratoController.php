@@ -24,7 +24,6 @@ class ExtratoController extends Controller
         $perPage  = min(50, max(5, (int) $request->query('perPage', 20)));
         $offset   = ($page - 1) * $perPage;
 
-        // Alias de status usados em filtros
         $alias = [
             'EFETIVADO' => ['paga', 'paid', 'approved', 'confirmed', 'completed'],
             'PENDENTE'  => ['pending', 'pendente', 'processing', 'created', 'under_review'],
@@ -33,7 +32,7 @@ class ExtratoController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | 🔥 SOMENTE PIX-IN
+        | 🔥 Apenas PIX entrada
         |--------------------------------------------------------------------------
         */
         $pixQ = Transaction::query()
@@ -46,7 +45,7 @@ class ExtratoController extends Controller
                 status,
                 description,
                 txid,
-                COALESCE(e2e_id, endtoend) as e2e_id,
+                e2e_id,
                 created_at,
                 paid_at
             ")
@@ -54,15 +53,12 @@ class ExtratoController extends Controller
             ->where('direction', Transaction::DIR_IN)
             ->where('method', 'pix');
 
-        // Filtro por status
         if ($statusIn !== 'ALL' && isset($alias[$statusIn])) {
             $pixQ->whereIn('status', $alias[$statusIn]);
         }
 
-        // Filtro de busca
         if ($search !== '') {
             $like = "%{$search}%";
-
             $pixQ->where(function ($q) use ($like) {
                 $q->where('id', 'LIKE', $like)
                   ->orWhere('txid', 'LIKE', $like)
@@ -71,27 +67,19 @@ class ExtratoController extends Controller
             });
         }
 
-        /*
-        |--------------------------------------------------------------------------
-        | 🔥 Total + Paginação
-        |--------------------------------------------------------------------------
-        */
         $total = (clone $pixQ)->count();
 
         /*
         |--------------------------------------------------------------------------
-        | 🔥 ORDENAR PELO HORÁRIO REAL DO PAGAMENTO (CORREÇÃO)
+        | 🔥 ORDENAR PELO HORÁRIO REAL DO PAGAMENTO
         |--------------------------------------------------------------------------
         |
-        | Se paid_at existir → ordenar por paid_at DESC
-        | Se ainda não tiver pago → cair para created_at DESC
+        | Se paid_at != null → ordenar por paid_at DESC
+        | Caso contrário → created_at DESC
         |
-        | COALESCE(paid_at, created_at) é a forma correta.
-        |--------------------------------------------------------------------------
         */
-
         $rows = $pixQ
-            ->orderByRaw("COALESCE(paid_at, created_at) DESC")
+            ->orderByRaw("CASE WHEN paid_at IS NOT NULL THEN paid_at ELSE created_at END DESC")
             ->offset($offset)
             ->limit($perPage)
             ->get();

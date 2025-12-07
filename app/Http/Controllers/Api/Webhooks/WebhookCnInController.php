@@ -99,13 +99,23 @@ class WebhookCnInController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | CORRIGIR paid_at → **SEM MEXER NO FUSO**
+            | CORRIGIR paid_at → USAR SEMPRE O HORÁRIO REAL (-03:00)
+            |--------------------------------------------------------------------------
+            |
+            | PRIORIDADE:
+            | 1) metadata.paymentDateTime  → correto, com timezone BR
+            | 2) processed_at (UTC/Z)     → fallback
+            | 3) valor antigo no banco
             |--------------------------------------------------------------------------
             */
-            $rawPaidAt = data_get($payload, 'processed_at') ?: $tx->paid_at;
+
+            $rawPaidAt =
+                data_get($payload, 'metadata.paymentDateTime') ??
+                data_get($payload, 'processed_at') ??
+                $tx->paid_at;
 
             try {
-                // Mantém exatamente o horário do provedor (incluindo -03:00)
+                // Salvar EXATAMENTE com o timezone enviado (não alterar)
                 $paidAt = Carbon::parse($rawPaidAt);
             } catch (\Exception $e) {
                 $paidAt = now();
@@ -119,7 +129,7 @@ class WebhookCnInController extends Controller
             $tx->updateQuietly([
                 'status'           => $newEnum->value,
                 'e2e_id'           => $incomingE2E,
-                'paid_at'          => $paidAt,  // agora correto
+                'paid_at'          => $paidAt,
                 'provider_payload' => $payload,
             ]);
 

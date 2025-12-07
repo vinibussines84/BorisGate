@@ -19,19 +19,27 @@ const formatCurrency = (value) =>
   });
 
 /**
- * Corrige horário vindo do backend (UTC/Zulu)
- * e converte para America/Sao_Paulo de forma consistente.
+ * CORREÇÃO DEFINITIVA DO HORÁRIO
+ *
+ * - Se o backend enviar timezone (-03:00, -02:00, +HH:MM) → NÃO converter.
+ * - Se vier UTC/Zulu (termina com Z) → converter para America/Sao_Paulo.
  */
 const fmtDate = (iso) => {
   if (!iso) return "—";
 
   try {
+    const hasTZ =
+      iso.includes("-03:") ||
+      iso.includes("-02:") ||
+      iso.includes("+") ||
+      /[+-]\d{2}:\d{2}$/.test(iso);
+
     const date = new Date(iso);
 
     return date.toLocaleString("pt-BR", {
-      timeZone: "America/Sao_Paulo",
       dateStyle: "short",
       timeStyle: "short",
+      ...(hasTZ ? {} : { timeZone: "America/Sao_Paulo" }),
     });
   } catch {
     return "—";
@@ -53,7 +61,6 @@ const mapStatus = (s) => {
   for (const [key, values] of Object.entries(groups)) {
     if (values.includes(normalized)) return key;
   }
-
   return normalized.toUpperCase();
 };
 
@@ -102,7 +109,7 @@ const StatusPill = React.memo(({ status }) => {
 StatusPill.displayName = "StatusPill";
 
 /* =====================================================================================
-   ORIGIN PILL (AGORA SOMENTE PIX)
+   ORIGIN PILL (PIX)
 ===================================================================================== */
 const OriginPill = React.memo(() => {
   return (
@@ -123,7 +130,7 @@ OriginPill.displayName = "OriginPill";
    CACHE CONFIG
 ===================================================================================== */
 const CACHE_KEY = "extract_table_cache_v1";
-const CACHE_TTL = 15 * 1000;
+const CACHE_TTL = 15000;
 
 /* =====================================================================================
    MAIN COMPONENT
@@ -148,13 +155,10 @@ export default function ExtractTable({
   const canNext = page < totalPages;
   const isSearching = searchTerm.trim() !== "";
 
-  /* ------------------------------------------------------------------
-     CACHE — só quando NÃO estiver pesquisando
-  ------------------------------------------------------------------ */
+  /* ====================== CACHE SAVE ====================== */
   useEffect(() => {
     if (isSearching || loading) return;
-
-    if (transactions.length > 0) {
+    if (transactions.length > 0)
       localStorage.setItem(
         CACHE_KEY,
         JSON.stringify({
@@ -164,16 +168,16 @@ export default function ExtractTable({
           timestamp: Date.now(),
         })
       );
-    }
   }, [transactions, loading, page, totalItems, isSearching]);
 
+  /* ====================== CLEAR ON SEARCH ====================== */
   useEffect(() => {
     if (isSearching) localStorage.removeItem(CACHE_KEY);
   }, [isSearching]);
 
+  /* ====================== AUTO-REFRESH ====================== */
   useEffect(() => {
     if (isSearching) return;
-
     const cache = localStorage.getItem(CACHE_KEY);
     if (!cache) return;
 
@@ -181,15 +185,13 @@ export default function ExtractTable({
     if (Date.now() - parsed.timestamp > CACHE_TTL) refresh?.(true);
   }, [page, isSearching]);
 
+  /* ====================== CACHE LOAD ====================== */
   const cached = useMemo(() => {
     if (isSearching) return null;
-
     try {
       const c = localStorage.getItem(CACHE_KEY);
       if (!c) return null;
-
       const parsed = JSON.parse(c);
-
       return Date.now() - parsed.timestamp < CACHE_TTL ? parsed : null;
     } catch {
       return null;
@@ -206,6 +208,7 @@ export default function ExtractTable({
   ===================================================================================== */
   return (
     <div className="bg-[#0b0b0b]/95 border border-white/10 rounded-3xl p-6 backdrop-blur-sm min-h-[520px] flex flex-col justify-between">
+      
       {/* HEADER */}
       <div>
         <div className="flex items-center justify-between mb-4">
@@ -314,6 +317,7 @@ export default function ExtractTable({
           >
             ← Previous
           </button>
+
           <button
             disabled={!canNext}
             onClick={() => canNext && setPage(page + 1)}

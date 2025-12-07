@@ -84,17 +84,6 @@ class Transaction extends Model
     }
 
     /* ============================================================
-     * SCOPES
-     * ============================================================ */
-    public function scopePaid($q)       { return $q->where('status', 'PAID'); }
-    public function scopePending($q)    { return $q->where('status', 'PENDING'); }
-    public function scopeFailed($q)     { return $q->where('status', 'FAILED'); }
-    public function scopeError($q)      { return $q->where('status', 'ERROR'); }
-    public function scopeProcessing($q) { return $q->where('status', 'PROCESSING'); }
-    public function scopeCashIn($q)     { return $q->where('direction', self::DIR_IN); }
-    public function scopeCashOut($q)    { return $q->where('direction', self::DIR_OUT); }
-
-    /* ============================================================
      * ACCESSORS
      * ============================================================ */
     protected function statusLabel(): Attribute
@@ -151,6 +140,38 @@ class Transaction extends Model
     /* ============================================================
      * MUTATORS
      * ============================================================ */
+
+    /**
+     * 🎯 Correção final: paid_at SEM conversão automática para UTC.
+     */
+    public function setPaidAtAttribute($value): void
+    {
+        if (empty($value)) {
+            $this->attributes['paid_at'] = null;
+            return;
+        }
+
+        try {
+            $str = (string)$value;
+
+            // detecta timezone explícito
+            $hasTimezone =
+                str_contains($str, '+') ||
+                preg_match('/\-\d{2}:\d{2}$/', $str);
+
+            if ($hasTimezone) {
+                $dt = Carbon::parse($str)->format('Y-m-d H:i:s');
+            } else {
+                $dt = Carbon::parse($str, 'America/Sao_Paulo')->format('Y-m-d H:i:s');
+            }
+
+            $this->attributes['paid_at'] = $dt;
+
+        } catch (\Throwable $e) {
+            $this->attributes['paid_at'] = $value;
+        }
+    }
+
     public function setStatusAttribute($value): void
     {
         if ($value instanceof TransactionStatus) {
@@ -159,7 +180,6 @@ class Transaction extends Model
         }
 
         $normalized = StatusMap::normalize((string)$value);
-
         $this->attributes['status'] = strtoupper($normalized);
     }
 
@@ -187,27 +207,6 @@ class Transaction extends Model
     {
         $v = preg_replace('/[^A-Za-z0-9\-\.]/', '', (string)$value) ?? null;
         $this->attributes['e2e_id'] = $v ? substr($v, 0, 100) : null;
-    }
-
-    /* ============================================================
-     * BOOLEAN HELPERS
-     * ============================================================ */
-    public function isPaid(): bool       { return $this->status === 'PAID'; }
-    public function isPending(): bool    { return $this->status === 'PENDING'; }
-    public function isFailed(): bool     { return $this->status === 'FAILED'; }
-    public function isError(): bool      { return $this->status === 'ERROR'; }
-    public function isProcessing(): bool { return $this->status === 'PROCESSING'; }
-
-    public function isStatus(TransactionStatus $status): bool
-    {
-        return $this->status === $status->value;
-    }
-
-    public function markPaid(?\DateTimeInterface $when = null): void
-    {
-        $this->status  = 'PAID';
-        $this->paid_at = $when ?? now();
-        $this->save();
     }
 
     /* ============================================================
