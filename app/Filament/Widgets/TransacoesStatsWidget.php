@@ -21,11 +21,11 @@ class TransacoesStatsWidget extends BaseWidget
 
         $inicioHojeLocal = Carbon::today($tz);
         $amanhaLocal     = (clone $inicioHojeLocal)->addDay();
-        $inicioHojeUtc   = $inicioHojeLocal->copy()->utc();
-        $amanhaUtc       = $amanhaLocal->copy()->utc();
 
-        $inicioSemanaUtc = Carbon::now($tz)->startOfWeek()->utc();
-        $inicioMesUtc    = Carbon::now($tz)->startOfMonth()->utc();
+        $inicioHojeUtc = $inicioHojeLocal->copy()->utc();
+        $amanhaUtc     = $amanhaLocal->copy()->utc();
+
+        $inicioMesUtc  = Carbon::now($tz)->startOfMonth()->utc();
 
         $tenantId = auth()->user()?->tenant_id;
 
@@ -33,7 +33,7 @@ class TransacoesStatsWidget extends BaseWidget
            🔄 CASH IN PAGAS HOJE
         ============================================================ */
         $baseHojePagasIn = Transaction::query()
-            ->when($tenantId, fn($q) => $q->where('tenant_id', $tenantId))
+            ->when($tenantId, fn ($q) => $q->where('tenant_id', $tenantId))
             ->where('direction', Transaction::DIR_IN)
             ->where('status', TransactionStatus::PAID)
             ->whereBetween('paid_at', [$inicioHojeUtc, $amanhaUtc]);
@@ -41,16 +41,11 @@ class TransacoesStatsWidget extends BaseWidget
         $cashInTotal = (float)(clone $baseHojePagasIn)->sum('amount');
         $cashInCount =        (clone $baseHojePagasIn)->count();
 
-        // Desconto apenas visual
-        $descontoPercentual = $cashInTotal * 0.015;
-        $descontoFixo = $cashInCount * 0.10;
-        $cashInTotalLiquidoVisual = $cashInTotal - ($descontoPercentual + $descontoFixo);
-
         /* ============================================================
            🔄 CASH OUT PAGOS HOJE
         ============================================================ */
         $baseHojePagasOut = Withdraw::query()
-            ->when($tenantId, fn($q) => $q->where('tenant_id', $tenantId))
+            ->when($tenantId, fn ($q) => $q->where('tenant_id', $tenantId))
             ->where('status', Withdraw::STATUS_PAID)
             ->whereBetween('processed_at', [$inicioHojeUtc, $amanhaUtc]);
 
@@ -58,35 +53,23 @@ class TransacoesStatsWidget extends BaseWidget
         $cashOutCount =        (clone $baseHojePagasOut)->count();
 
         /* ============================================================
-           🔄 TOTAL DE MOVIMENTOS PAGOS HOJE
+           🔄 TOTAL MOVIMENTOS PAGOS
         ============================================================ */
         $entradasPagasHoje = $cashInCount;
         $saquesPagosHoje   = $cashOutCount;
-        $totalMovimentosHoje = $entradasPagasHoje + $saquesPagosHoje;
+
+        $valorTransacoesPagasDiaTotal = $cashInTotal + $cashOutTotal;
 
         /* ============================================================
-           📌 PAGAS DO DIA — SOMENTE PAGAS (IN + OUT)
+           🔥 TAXAS APENAS DAS TRANSACÕES PAGAS
         ============================================================ */
-
-        $valorTransacoesPagasDiaIn = $cashInTotal;
-
-        $valorTransacoesPagasDiaOut = (float)(clone $baseHojePagasOut)->sum('amount');
-
-        $valorTransacoesPagasDiaTotal = $valorTransacoesPagasDiaIn + $valorTransacoesPagasDiaOut;
-
-        /* ============================================================
-           🔥 TAXAS DO DIA — SOMENTE PAGAS (IN + OUT)
-        ============================================================ */
-
-        $taxasTransacoesDiaIn = (float)$baseHojePagasIn->sum('fee');
-
+        $taxasTransacoesDiaIn  = (float)$baseHojePagasIn->sum('fee');
         $taxasTransacoesDiaOut = (float)$baseHojePagasOut->sum('fee_amount');
 
         $taxasDiaTotal = $taxasTransacoesDiaIn + $taxasTransacoesDiaOut;
 
         /* ============================================================
-           📌 INTERMED — Quanto os usuários pagaram de taxa por dia
-           (taxa paga IN + taxa paga OUT)
+           🔥 INTERMED — total de taxas pagas pelos usuários no dia
         ============================================================ */
         $intermedHoje = $taxasDiaTotal;
 
@@ -94,33 +77,33 @@ class TransacoesStatsWidget extends BaseWidget
            📌 PIX GERADOS HOJE
         ============================================================ */
         $pixGeradosHojeValor = (float)Transaction::query()
-            ->when($tenantId, fn($q) => $q->where('tenant_id', $tenantId))
+            ->when($tenantId, fn ($q) => $q->where('tenant_id', $tenantId))
             ->where('direction', Transaction::DIR_IN)
             ->whereBetween('created_at', [$inicioHojeUtc, $amanhaUtc])
             ->sum('amount');
 
         $pixGeradosHojeCount = Transaction::query()
-            ->when($tenantId, fn($q) => $q->where('tenant_id', $tenantId))
+            ->when($tenantId, fn ($q) => $q->where('tenant_id', $tenantId))
             ->where('direction', Transaction::DIR_IN)
             ->whereBetween('created_at', [$inicioHojeUtc, $amanhaUtc])
             ->count();
 
         /* ============================================================
-           🔥 CONVERSÃO
+           🔥 CONVERSÃO DO DIA
         ============================================================ */
-        $transacoesPagasHoje = $entradasPagasHoje;
-        $transacoesGeradasHoje = $pixGeradosHojeCount;
+        $transacoesPagasHoje     = $entradasPagasHoje;
+        $transacoesGeradasHoje   = $pixGeradosHojeCount;
 
-        $conversaoHojePorcentagem = $transacoesGeradasHoje > 0
-            ? round(($transacoesPagasHoje / $transacoesGeradasHoje) * 100, 2)
-            : 0;
+        $conversaoHojePorcentagem =
+            $transacoesGeradasHoje > 0
+                ? round(($transacoesPagasHoje / $transacoesGeradasHoje) * 100, 2)
+                : 0;
 
         /* ============================================================
-           🔄 TAXAS DO MÊS
+           🔄 COMISSÃO DO MÊS (IN)
         ============================================================ */
-
         $comissaoBrutaMes = (float)Transaction::query()
-            ->when($tenantId, fn($q) => $q->where('tenant_id', $tenantId))
+            ->when($tenantId, fn ($q) => $q->where('tenant_id', $tenantId))
             ->where('status', TransactionStatus::PAID)
             ->whereBetween('paid_at', [$inicioMesUtc, $amanhaUtc])
             ->sum('fee');
@@ -128,29 +111,28 @@ class TransacoesStatsWidget extends BaseWidget
         /* ============================================================
            FORMATADOR
         ============================================================ */
-
-        $brl = fn(float $v) => 'R$ ' . number_format($v, 2, ',', '.');
+        $brl = fn (float $v) => 'R$ ' . number_format($v, 2, ',', '.');
 
         return [
 
             /* ============================================================
-               CARD 1 — TRANSAÇÕES PAGAS HOJE
+               CARD — TRANSAÇÕES PAGAS HOJE
             ============================================================ */
             Stat::make('TRANSAÇÕES PAGAS HOJE', $brl($valorTransacoesPagasDiaTotal))
                 ->icon('heroicon-o-currency-dollar')
-                ->description("IN {$entradasPagasHoje}  |  OUT {$saquesPagosHoje}")
+                ->description("IN {$entradasPagasHoje} | OUT {$saquesPagosHoje}")
                 ->color('success'),
 
             /* ============================================================
-               CARD 2 — INTERMED (TAXAS PAGAS)
+               CARD — INTERMED (TAXAS PAGAS)
             ============================================================ */
             Stat::make('INTERMED', $brl($intermedHoje))
                 ->description('Taxas pagas pelos usuários hoje')
-                ->icon('heroicon-o-receipt-percent')
+                ->icon('heroicon-o-document-currency-dollar')
                 ->color('warning'),
 
             /* ============================================================
-               CARD 3 — PIX GERADOS HOJE
+               CARD — PIX GERADOS HOJE
             ============================================================ */
             Stat::make('Gerado Hoje', $brl($pixGeradosHojeValor))
                 ->description("{$pixGeradosHojeCount} PIX gerados")
@@ -158,7 +140,7 @@ class TransacoesStatsWidget extends BaseWidget
                 ->color('warning'),
 
             /* ============================================================
-               CARD 4 — CONVERSÃO DO DIA
+               CARD — CONVERSÃO
             ============================================================ */
             Stat::make('Conversão do Dia', "{$conversaoHojePorcentagem}%")
                 ->description("Pagas: {$transacoesPagasHoje} / Geradas: {$transacoesGeradasHoje}")
@@ -166,19 +148,19 @@ class TransacoesStatsWidget extends BaseWidget
                 ->color('success'),
 
             /* ============================================================
-               CARD 5 — TAXAS DO DIA
+               CARD — TAXAS DO DIA
             ============================================================ */
             Stat::make('Taxas do Dia (Pagas)', $brl($taxasDiaTotal))
                 ->description("IN: {$brl($taxasTransacoesDiaIn)} | OUT: {$brl($taxasTransacoesDiaOut)}")
-                ->icon('heroicon-o-cash')
+                ->icon('heroicon-o-banknotes')
                 ->color('warning'),
 
             /* ============================================================
-               CARD 6 — COMISSÃO BRUTA DO MÊS
+               CARD — COMISSÃO DO MÊS
             ============================================================ */
             Stat::make('Comissão Bruta do Mês', $brl($comissaoBrutaMes))
-                ->description('Taxas do mês (IN)')
-                ->icon('heroicon-o-banknotes')
+                ->description('Somente taxas PAGAS no mês')
+                ->icon('heroicon-o-building-library')
                 ->color('danger'),
         ];
     }
