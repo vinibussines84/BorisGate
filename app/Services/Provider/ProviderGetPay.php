@@ -12,13 +12,13 @@ class ProviderGetPay
     protected string $baseUrl = 'https://hub.getpay.one/api';
 
     /**
-     * Obtém o token JWT somente quando necessário.
+     * 🔓 Agora é PUBLIC — necessário para ser acessado pelo ProviderGetPayOut
      */
-    protected function getToken(): string
+    public function getToken(): string
     {
         $cache = Cache::get('getpay_jwt_data');
 
-        // 🟢 Token ainda válido → retorna sem renovar
+        // 🟢 Token válido → retorna
         if ($cache && isset($cache['token'], $cache['expires_at'])) {
 
             if (now()->lt($cache['expires_at'])) {
@@ -26,14 +26,14 @@ class ProviderGetPay
             }
         }
 
-        // 🔄 Evita múltiplas requisições simultâneas
+        // 🔄 Evita múltiplas requisições ao mesmo tempo
         return Cache::remember('getpay_jwt_data', 55 * 60, function () {
             return $this->refreshToken();
         })['token'];
     }
 
     /**
-     * 🔐 Requisita novo token à GetPay (somente quando expira)
+     * 🔐 Solicita novo JWT quando expira
      */
     private function refreshToken(): array
     {
@@ -48,10 +48,10 @@ class ProviderGetPay
             throw new Exception("Falha ao autenticar na GetPay: " . $response->body());
         }
 
-        $token = $response->json('token');
+        $token   = $response->json('token');
         $expires = $response->json('expires_at'); // formato: 2025-07-01 00:21:56
 
-        // 🕒 converte para Carbon
+        // Converte para Carbon
         $expiresAt = $expires ? now()->parse($expires) : now()->addMinutes(55);
 
         $data = [
@@ -91,7 +91,7 @@ class ProviderGetPay
     }
 
     /**
-     * A API legacy não possui consulta
+     * A API legacy NÃO possui endpoint de consulta
      */
     public function getTransactionStatus(string $transactionId)
     {
@@ -99,7 +99,8 @@ class ProviderGetPay
     }
 
     /**
-     * Saque
+     * ⚠ Este método withdraw é antigo e não segue a documentação nova.
+     * Você já substituiu pelo ProviderGetPayOut.
      */
     public function withdraw(float $amount, array $recipient)
     {
@@ -118,6 +119,9 @@ class ProviderGetPay
         return $response->json();
     }
 
+    /**
+     * Webhook Handler — permanece intacto
+     */
     public function processWebhook(array $payload)
     {
         return [
