@@ -23,32 +23,36 @@ class WithdrawController extends Controller
     {
         $user = $request->user();
 
-        if (! $user) {
-            return response()->json(['success' => false, 'message' => 'Não autenticado.'], 401);
+        if (!$user) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Não autenticado.'
+            ], 401);
         }
 
         $search   = trim($request->query('search', ''));
         $statusIn = strtoupper($request->query('status', 'ALL'));
-        $page     = max(1, (int) $request->query('page', 1));
-        $perPage  = min(50, max(5, (int) $request->query('perPage', 10)));
+        $page     = max(1, (int)$request->query('page', 1));
+        $perPage  = min(50, max(5, (int)$request->query('perPage', 10)));
         $offset   = ($page - 1) * $perPage;
 
         $alias = [
-            'PAID'      => ['paid', 'paga', 'approved', 'confirmed', 'completed'],
-            'PENDING'   => ['pending', 'pendente', 'processing', 'created', 'under_review'],
-            'FAILED'    => ['failed', 'falha', 'error', 'denied', 'canceled', 'cancelled', 'rejected'],
+            'PAID'    => ['paid', 'paga', 'approved', 'confirmed', 'completed'],
+            'PENDING' => ['pending', 'pendente', 'processing', 'created', 'under_review'],
+            'FAILED'  => ['failed', 'falha', 'error', 'denied', 'canceled', 'cancelled', 'rejected'],
         ];
 
-        // 🔧 Detecta driver (MySQL ou SQLite) e ajusta funções JSON
+        /* Detecta driver do BD */
         $driver = DB::getDriverName();
         if ($driver === 'sqlite') {
-            $e2eSql = "json_extract(meta, '$.e2e')";
+            $e2eSql      = "json_extract(meta, '$.e2e')";
             $endtoendSql = "json_extract(meta, '$.endtoend')";
         } else {
-            $e2eSql = "JSON_UNQUOTE(JSON_EXTRACT(meta, '$.e2e'))";
+            $e2eSql      = "JSON_UNQUOTE(JSON_EXTRACT(meta, '$.e2e'))";
             $endtoendSql = "JSON_UNQUOTE(JSON_EXTRACT(meta, '$.endtoend'))";
         }
 
+        /* QUERY principal */
         $q = Withdraw::query()
             ->selectRaw("
                 id,
@@ -65,10 +69,12 @@ class WithdrawController extends Controller
             ")
             ->where('user_id', $user->id);
 
+        /* Filtro por status */
         if ($statusIn !== 'ALL' && isset($alias[$statusIn])) {
             $q->whereIn('status', $alias[$statusIn]);
         }
 
+        /* Filtro de busca */
         if ($search !== '') {
             $like = "%{$search}%";
             $q->where(function ($w) use ($like, $driver) {
@@ -76,7 +82,6 @@ class WithdrawController extends Controller
                     ->orWhere('pixkey', 'LIKE', $like)
                     ->orWhere('description', 'LIKE', $like);
 
-                // 🔍 Filtros compatíveis com ambos os bancos
                 if ($driver === 'sqlite') {
                     $w->orWhereRaw("json_extract(meta, '$.e2e') LIKE ?", [$like])
                       ->orWhereRaw("json_extract(meta, '$.endtoend') LIKE ?", [$like]);
@@ -89,44 +94,53 @@ class WithdrawController extends Controller
 
         $total = (clone $q)->count();
 
+        /* Ordenação */
         $rows = $q->orderBy('created_at', 'desc')
             ->offset($offset)
             ->limit($perPage)
             ->get()
             ->map(function ($t) {
+
                 $statusEnum = TransactionStatus::fromLoose($t->status);
+
                 return [
-                    'id'            => $t->id,
-                    '_kind'         => $t->_kind,
-                    'credit'        => false,
-                    'amount'        => (float) $t->amount,
-                    'fee'           => round((float) $t->fee, 2),
-                    'net'           => round((float) $t->amount, 2),
-                    'status'        => $statusEnum->value,
-                    'status_label'  => $statusEnum->label(),
-                    'txid'          => $t->txid,
-                    'e2e'           => $t->e2e_id,
-                    'description'   => $t->description,
-                    'created_at'    => optional($t->created_at)->toIso8601String(),
-                    'paid_at'       => optional($t->paid_at)->toIso8601String(),
+                    'id'           => $t->id,
+                    '_kind'        => $t->_kind,
+                    'credit'       => false,
+                    'amount'       => (float)$t->amount,
+                    'fee'          => round((float)$t->fee, 2),
+                    'net'          => round((float)$t->amount, 2),
+                    'status'       => $statusEnum->value,
+                    'status_label' => $statusEnum->label(),
+                    'txid'         => $t->txid,
+                    'e2e'          => $t->e2e_id,
+                    'description'  => $t->description,
+                    'created_at'   => optional($t->created_at)->toIso8601String(),
+                    'paid_at'      => optional($t->paid_at)->toIso8601String(),
                 ];
             });
 
-        $totalsQuery = Withdraw::where('user_id', $user->id);
+        /* ============================================================
+         * 🔥 TOTAIS CORRIGIDOS
+         * ============================================================ */
+        $totalsBase = Withdraw::where('user_id', $user->id);
+
+        $paidStatuses = ['paid', 'approved', 'confirmed', 'completed'];
+
         $totals = [
-            'sum_all'          => (float) $totalsQuery->sum('amount'),
-            'count_all'        => (int)   $totalsQuery->count(),
-            'count_processing' => (int)   $totalsQuery->whereIn('status', ['pending', 'processing'])->count(),
+            'sum_paid'         => (float)$totalsBase->clone()->whereIn('status', $paidStatuses)->sum('amount'),
+            'count_all'        => (int)$totalsBase->clone()->count(),
+            'count_processing' => (int)$totalsBase->clone()->whereIn('status', ['pending', 'processing'])->count(),
         ];
 
         return response()->json([
-            'success' => true,
-            'page'    => $page,
-            'perPage' => $perPage,
-            'count'   => $rows->count(),
+            'success'    => true,
+            'page'       => $page,
+            'perPage'    => $perPage,
+            'count'      => $rows->count(),
             'totalItems' => $total,
-            'data' => $rows->values(),
-            'meta' => [
+            'data'       => $rows->values(),
+            'meta'       => [
                 'current_page' => $page,
                 'last_page'    => ceil($total / $perPage),
                 'per_page'     => $perPage,
@@ -139,7 +153,7 @@ class WithdrawController extends Controller
     }
 
     /*======================================================================
-     *  ✅ LISTAGEM VIA INERTIA (Painel)
+     *  LISTAGEM VIA INERTIA
      *======================================================================*/
     public function index(Request $request)
     {
@@ -147,12 +161,16 @@ class WithdrawController extends Controller
 
         $status = $request->query('status');
         $search = $request->query('search');
-        $page = max(1, (int) $request->query('page', 1));
+        $page   = max(1, (int)$request->query('page', 1));
 
         $apiResponse = $this->apiIndex($request)->getData(true);
 
         return Inertia::render('Saque/Index', [
-            'user'          => ['id' => $user->id, 'name' => $user->name, 'email' => $user->email],
+            'user'          => [
+                'id'    => $user->id,
+                'name'  => $user->name,
+                'email' => $user->email
+            ],
             'filters'       => compact('status', 'search'),
             'withdraws'     => $apiResponse['data'] ?? [],
             'meta'          => $apiResponse['meta'] ?? [],
@@ -180,47 +198,43 @@ class WithdrawController extends Controller
                 'name'  => $user->name,
                 'email' => $user->email,
             ],
-            'amount_available' => (float) ($user->amount_available ?? 0),
+            'amount_available' => (float)($user->amount_available ?? 0),
             'pixkeyTypes'      => ['cpf', 'cnpj', 'email', 'phone', 'randomkey'],
         ]);
     }
 
     /*======================================================================
-     *  STORE / API STORE
+     *  STORE - API & Painel
      *======================================================================*/
-    public function store(Request $request)
-    {
-        return $this->handleStore($request, 'panel');
-    }
-
-    public function apiStore(Request $request)
-    {
-        return $this->handleStore($request, 'api');
-    }
+    public function store(Request $request) { return $this->handleStore($request, 'panel'); }
+    public function apiStore(Request $request) { return $this->handleStore($request, 'api'); }
 
     private function handleStore(Request $request, string $source)
     {
         $user = $request->user();
         $ip   = $request->ip();
 
-        $withdrawLimitKey = "withdraw-request:{$user->id}";
-        if (RateLimiter::tooManyAttempts($withdrawLimitKey, 1)) {
-            $seconds = RateLimiter::availableIn($withdrawLimitKey);
-            $minutes = ceil($seconds / 60);
-            return $this->respond($source, "Você só pode solicitar outro saque em {$minutes} minuto(s).", null, 429);
+        $limitKey = "withdraw-request:{$user->id}";
+        if (RateLimiter::tooManyAttempts($limitKey, 1)) {
+            $seconds = RateLimiter::availableIn($limitKey);
+            return $this->respond($source, "Você só pode solicitar outro saque em " . ceil($seconds / 60) . " minuto(s).", null, 429);
         }
 
         try {
+            /* validação */
             $data = $this->validateStoreRequest($request);
             $this->guardPinOnly($user->pin, $data['pin']);
             RateLimiter::clear("withdraw-pin:{$user->id}");
 
+            /* idempotency */
             if (Withdraw::where('idempotency_key', $data['idempotency_key'])->exists()) {
                 return $this->respond($source, 'Saque já registrado.');
             }
 
+            /* criação */
             $withdraw = DB::transaction(function () use ($user, $data, $source, $ip) {
                 [$gross, $fee, $net] = $this->resolveGrossFeeNet($user, $data['amount']);
+
                 $u = User::lockForUpdate()->findOrFail($user->id);
 
                 if ($u->amount_available < $gross) {
@@ -245,7 +259,8 @@ class WithdrawController extends Controller
                 ]);
             });
 
-            RateLimiter::hit($withdrawLimitKey, 300);
+            RateLimiter::hit($limitKey, 300);
+
             return $this->respond($source, 'Saque registrado com sucesso.', $withdraw, 201);
 
         } catch (ValidationException $e) {
@@ -266,15 +281,19 @@ class WithdrawController extends Controller
     private function resolveGrossFeeNet(User $user, float $amount): array
     {
         $gross = round($amount, 2);
-        $fee = 10.00;
-        $net = round($gross - $fee, 2);
+        $fee   = 10.00;
+        $net   = round($gross - $fee, 2);
 
         if ($gross < 20) {
-            throw ValidationException::withMessages(['amount' => 'O valor mínimo para saque é R$ 20,00.']);
+            throw ValidationException::withMessages([
+                'amount' => 'O valor mínimo para saque é R$ 20,00.'
+            ]);
         }
 
         if ($net <= 0) {
-            throw ValidationException::withMessages(['amount' => 'Valor líquido inválido após taxa de R$10,00.']);
+            throw ValidationException::withMessages([
+                'amount' => 'Valor líquido inválido após taxa fixa de R$10,00.'
+            ]);
         }
 
         return [$gross, $fee, $net];
@@ -284,7 +303,7 @@ class WithdrawController extends Controller
     {
         return $request->validate([
             'amount'          => ['required', 'numeric', 'min:20', 'max:1000000'],
-            'pixkey'          => ['required', 'string', 'max:140'],
+            'pixkey'          => ['required', 'string', 'max140'],
             'pixkey_type'     => ['required', Rule::in(['cpf', 'cnpj', 'email', 'phone', 'randomkey'])],
             'description'     => ['nullable', 'string', 'max:255'],
             'idempotency_key' => ['required', 'string', 'max:100'],
@@ -296,7 +315,9 @@ class WithdrawController extends Controller
     {
         if (!$hash || !Hash::check($pin, $hash)) {
             RateLimiter::hit("withdraw-pin:" . auth()->id(), 60);
-            throw ValidationException::withMessages(['pin' => 'PIN incorreto.']);
+            throw ValidationException::withMessages([
+                'pin' => 'PIN incorreto.'
+            ]);
         }
     }
 
@@ -312,9 +333,12 @@ class WithdrawController extends Controller
         }
 
         if ($status >= 400) {
-            return back()->withErrors(['general' => is_string($message) ? $message : 'Erro.']);
+            return back()->withErrors([
+                'general' => is_string($message) ? $message : 'Erro.'
+            ]);
         }
 
-        return redirect()->route('saques.index')->with('success', $message);
+        return redirect()->route('saques.index')
+            ->with('success', $message);
     }
 }
