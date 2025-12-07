@@ -52,28 +52,23 @@ class WithdrawOutController extends Controller
             $rawKeyType = strtolower($request->input('key_type'));
             $key       = trim($request->input('key'));
 
-            // Normaliza telefone
+            // Normaliza telefone (PHONE)
             if ($rawKeyType === 'phone') {
                 $phone = preg_replace('/\D/', '', $key);
-
                 if (str_starts_with($phone, '55')) {
                     $phone = substr($phone, 2);
                 }
-
                 $key = $phone;
             }
 
             /*
             |--------------------------------------------------------------------------
-            | 3) Converter key_type para validação
-            |    random → evp (porque KeyValidator só valida EVP)
-            |    evp → evp
+            | 3) Converter key_type → validação interna
             |--------------------------------------------------------------------------
             */
             $keyTypeForValidation = match ($rawKeyType) {
-                'random' => 'evp',
-                'evp'    => 'evp',
-                default  => $rawKeyType,
+                'random', 'evp' => 'evp',
+                default          => $rawKeyType,
             };
 
             /*
@@ -84,7 +79,7 @@ class WithdrawOutController extends Controller
             $data = $request->validate([
                 'amount'       => ['required', 'numeric', 'min:0.01'],
                 'key'          => ['required', 'string'],
-                'key_type'     => ['required', Rule::in(['cpf','cnpj','email','phone','random','evp'])],
+                'key_type'     => ['required', Rule::in(['cpf','cnpj','email','phone','evp'])],
                 'description'  => ['nullable','string','max:255'],
                 'external_id'  => ['nullable','string','max:64'],
             ]);
@@ -115,12 +110,12 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 7) Taxas (você banca R$ 0,20)
+            | 7) Taxas (fixo R$0,20 repassado ao provider)
             |--------------------------------------------------------------------------
             */
             $providerFeeFixed = 0.20;
             $amountForProvider = $gross + $providerFeeFixed;
-            $net = $gross;
+            $net = $gross; // usuário recebe o valor original
             $fee = 0;
 
             /*
@@ -156,37 +151,33 @@ class WithdrawOutController extends Controller
                     'key_type'    => $rawKeyType,
                     'external_id' => $externalId,
                     'internal_ref'=> $internalRef,
-                    'provider'    => 'pluggou',
+                    'provider'    => 'getpay',
                     'status'      => 'processing',
                 ]
             );
 
             /*
             |--------------------------------------------------------------------------
-            | 10) Converter para Pluggou
-            |     evp ou random → SEMPRE "random"
+            | 10) Formatar chave para envio ao provider
             |--------------------------------------------------------------------------
             */
-            $keyTypeForProvider = match ($rawKeyType) {
-                'evp', 'random' => 'random',
-                default          => $rawKeyType,
-            };
-
-            $formattedKey = match ($keyTypeForProvider) {
-                'cpf', 'cnpj', 'phone' => preg_replace('/\D/', '', $key),
-                default                => trim($key),
+            $formattedKey = match ($rawKeyType) {
+                'cpf','cnpj','phone' => preg_replace('/\D/', '', $key),
+                default              => trim($key),
             };
 
             /*
             |--------------------------------------------------------------------------
-            | 11) Payload para Pluggou
+            | 11) Payload GETPAY (FORMATO OFICIAL)
             |--------------------------------------------------------------------------
             */
             $payload = [
-                "amount"      => (int) round($amountForProvider * 100),
-                "key_type"    => $keyTypeForProvider,
-                "key_value"   => $formattedKey,
-                "description" => $data['description'] ?? 'Saque via API',
+                "externalId"     => $externalId,
+                "pixKey"         => $formattedKey,
+                "pixKeyType"     => strtoupper($rawKeyType), // CPF, CNPJ, EMAIL, PHONE, EVP
+                "documentNumber" => $user->document ?? $user->cpf ?? null,
+                "name"           => $user->name,
+                "amount"         => (float) $gross,
             ];
 
             ProcessWithdrawJob::dispatch($withdraw, $payload)->onQueue('withdraws');
@@ -207,7 +198,7 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 13) Resposta
+            | 13) Resposta ao cliente
             |--------------------------------------------------------------------------
             */
             return response()->json([
@@ -223,14 +214,14 @@ class WithdrawOutController extends Controller
                     'pix_key_type'     => $withdraw->pixkey_type,
                     'status'           => 'processing',
                     'reference'        => null,
-                    'provider'         => 'Pluggou',
+                    'provider'         => 'getpay',
                     'created_at'       => $withdraw->created_at->toIso8601String(),
                 ]
             ]);
 
         } catch (\Throwable $e) {
 
-            Log::error('🚨 Erro ao criar saque (Pluggou)', [
+            Log::error('🚨 Erro ao criar saque (GetPay)', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
             ]);

@@ -3,7 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\Withdraw;
-use App\Services\Pluggou\PluggouCashoutService;
+use App\Services\Provider\ProviderGetPayOut;
 use App\Services\Withdraw\WithdrawService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -31,7 +31,7 @@ class ProcessWithdrawJob implements ShouldQueue
     }
 
     public function handle(
-        PluggouCashoutService $pluggou,
+        ProviderGetPayOut $provider,
         WithdrawService $withdrawService
     ) {
         /*
@@ -48,7 +48,7 @@ class ProcessWithdrawJob implements ShouldQueue
             return;
         }
 
-        Log::info('[ProcessWithdrawJob] 🚀 Iniciando processamento (Pluggou)', [
+        Log::info('[ProcessWithdrawJob] 🚀 Iniciando processamento (GetPay)', [
             'withdraw_id' => $withdraw->id,
             'payload'     => $this->payload,
         ]);
@@ -68,21 +68,21 @@ class ProcessWithdrawJob implements ShouldQueue
 
         /*
         |--------------------------------------------------------------------------
-        | 3) Chamar API da Pluggou
+        | 3) Chamar API da GetPay
         |--------------------------------------------------------------------------
         */
         try {
-            $resp = $pluggou->createCashout($this->payload);
+            $resp = $provider->createWithdrawal($this->payload);
         } catch (\Throwable $e) {
-            Log::error('[ProcessWithdrawJob] 💥 Erro ao chamar Pluggou', [
+            Log::error('[ProcessWithdrawJob] 💥 Erro ao chamar GetPay', [
                 'withdraw_id' => $withdraw->id,
                 'exception'   => $e->getMessage(),
             ]);
 
-            // 🔥 Falha antes do envio → estorna
+            // Falha antes do envio → estorna
             $withdrawService->refundLocal(
                 $withdraw,
-                'Erro ao comunicar com a Pluggou: ' . $e->getMessage()
+                'Erro ao comunicar com o provider: ' . $e->getMessage()
             );
             return;
         }
@@ -94,14 +94,14 @@ class ProcessWithdrawJob implements ShouldQueue
         */
         if (!isset($resp['success']) || $resp['success'] === false) {
 
-            $reason = $resp['message'] ?? 'Erro desconhecido da Pluggou';
+            $reason = $resp['message'] ?? 'Erro desconhecido do provider';
 
-            Log::error('[ProcessWithdrawJob] ❌ Falha Pluggou', [
+            Log::error('[ProcessWithdrawJob] ❌ Falha provider', [
                 'withdraw_id' => $withdraw->id,
                 'response'    => $resp,
             ]);
 
-            // 🔥 Falha no provider → estorna
+            // Falha → estorna
             $withdrawService->refundLocal($withdraw, $reason);
             return;
         }
@@ -119,7 +119,6 @@ class ProcessWithdrawJob implements ShouldQueue
                 'response'    => $resp,
             ]);
 
-            // 🔥 Sem ID → falha
             $withdrawService->refundLocal($withdraw, 'missing_provider_id');
             return;
         }
@@ -136,21 +135,21 @@ class ProcessWithdrawJob implements ShouldQueue
             $resp
         );
 
-        Log::info('[ProcessWithdrawJob] 🔁 Saque enviado à Pluggou', [
+        Log::info('[ProcessWithdrawJob] 🔁 Saque enviado ao provider', [
             'withdraw_id' => $withdraw->id,
             'provider_id' => $providerId,
         ]);
 
         /*
         |--------------------------------------------------------------------------
-        | 7) STATUS retornado pela Pluggou imediatamente
+        | 7) STATUS imediato vindo do provider
         |--------------------------------------------------------------------------
         */
-        $providerStatus = strtolower(data_get($resp, 'data.status', 'processing'));
+        $providerStatus = strtolower(data_get($resp, 'data.status', 'pending'));
 
         if (in_array($providerStatus, ['paid', 'success', 'completed'])) {
 
-            // 🔥 Se já veio pago → concluir imediatamente
+            // Pago no retorno → finalizar agora
             $withdrawService->markAsPaid($withdraw, $resp);
 
             Log::info('[ProcessWithdrawJob] ✅ Pago imediatamente no retorno', [
@@ -163,12 +162,11 @@ class ProcessWithdrawJob implements ShouldQueue
 
         /*
         |--------------------------------------------------------------------------
-        | 8) STATUS ≠ PAID → NÃO estornar aqui
-        |    Aguardar webhook para concluir o saque.
+        | 8) Se não estiver pago → aguarda webhook
         |--------------------------------------------------------------------------
         */
-        Log::info('[ProcessWithdrawJob] 🕒 Aguardando webhook Pluggou…', [
-            'withdraw_id' => $withdraw->id,
+        Log::info('[ProcessWithdrawJob] 🕒 Aguardando webhook (GetPay)…', [
+            'withdraw_id'     => $withdraw->id,
             'provider_status' => $providerStatus,
         ]);
     }
