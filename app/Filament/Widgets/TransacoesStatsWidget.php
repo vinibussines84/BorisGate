@@ -19,7 +19,7 @@ class TransacoesStatsWidget extends BaseWidget
     {
         $tz = 'America/Sao_Paulo';
 
-        /** 🕒 AGORA: FILTRAGEM NO MESMO FUSO QUE O paid_at É SALVO */
+        /** 🕒 Períodos no fuso correto */
         $inicioHoje = Carbon::today($tz);
         $amanha     = $inicioHoje->copy()->addDay();
 
@@ -29,7 +29,7 @@ class TransacoesStatsWidget extends BaseWidget
         $tenantId = auth()->user()?->tenant_id;
 
         /* ============================================================
-           🔄 CASH IN PAGAS HOJE (AGORA CERTINHO)
+           🔄 CASH IN PAGAS HOJE (VALOR BRUTO, SEM DESCONTOS)
         ============================================================ */
         $baseHojePagasIn = Transaction::query()
             ->when($tenantId, fn($q) => $q->where('tenant_id', $tenantId))
@@ -39,11 +39,6 @@ class TransacoesStatsWidget extends BaseWidget
 
         $cashInTotal = (float)(clone $baseHojePagasIn)->sum('amount');
         $cashInCount =        (clone $baseHojePagasIn)->count();
-
-        /* Apenas visual */
-        $descontoPercentual = $cashInTotal * 0.015;
-        $descontoFixo = $cashInCount * 0.10;
-        $cashInTotalLiquidoVisual = $cashInTotal - ($descontoPercentual + $descontoFixo);
 
         /* ============================================================
            🔄 CASH OUT HOJE
@@ -60,7 +55,7 @@ class TransacoesStatsWidget extends BaseWidget
         $totalMovimentosHoje = $entradasCriadasHoje + $saquesCriadosHoje;
 
         /* ============================================================
-           🔥 PAGAS DO DIA (IN + OUT) — AGORA CORRETO
+           🔥 PAGAS DO DIA (IN + OUT)
         ============================================================ */
         $valorTransacoesPagasDiaIn = (float)Transaction::query()
             ->when($tenantId, fn($q) => $q->where('tenant_id', $tenantId))
@@ -130,7 +125,7 @@ class TransacoesStatsWidget extends BaseWidget
         $taxasDiaTotal = $taxasTransacoesDiaIn + $taxasTransacoesDiaOut;
 
         /* ============================================================
-           PERÍODOS SEMANA / MÊS
+           PERÍODO SEMANA / MÊS
         ============================================================ */
         $totalSemanaPagas = (float)Transaction::query()
             ->when($tenantId, fn($q) => $q->where('tenant_id', $tenantId))
@@ -154,15 +149,19 @@ class TransacoesStatsWidget extends BaseWidget
         $brl = fn(float $v) => 'R$ ' . number_format($v, 2, ',', '.');
 
         return [
+
+            /* ============================================================
+               🔹 TRANSAÇÕES DE HOJE — AGORA MOSTRA BRUTO
+            ============================================================ */
             Stat::make('TRANSAÇÕES DE HOJE', '')
                 ->icon('heroicon-o-currency-dollar')
                 ->chart([
                     (int) round($cashInTotal),
-                    (int) round($cashOutTotal)
+                    (int) round($cashOutTotal),
                 ])
                 ->color($cashInTotal >= $cashOutTotal ? 'success' : 'danger')
                 ->description(
-                    "IN: {$brl($cashInTotalLiquidoVisual)} ({$entradasCriadasHoje}) | OUT: {$brl($cashOutTotal)} ({$saquesCriadosHoje})"
+                    "IN: {$brl($cashInTotal)} ({$entradasCriadasHoje}) | OUT: {$brl($cashOutTotal)} ({$saquesCriadosHoje})"
                 ),
 
             Stat::make('Gerado Hoje', $brl($pixGeradosHojeValor))
