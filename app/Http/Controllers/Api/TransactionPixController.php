@@ -12,6 +12,7 @@ use App\Enums\TransactionStatus;
 use App\Services\Provider\ProviderService;
 use App\Jobs\SendWebhookPixCreatedJob;
 use App\Support\StatusMap;
+use Carbon\Carbon;
 
 class TransactionPixController extends Controller
 {
@@ -70,14 +71,16 @@ class TransactionPixController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        |  📌 Criação local SEMPRE antes da GetPay
+        |  📌 Criação local ANTES da GetPay — AGORA COM TIMEZONE CORRIGIDO
         |--------------------------------------------------------------------------
         */
+        $now = Carbon::now('America/Sao_Paulo');
+
         $tx = Transaction::create([
             'tenant_id'          => $user->tenant_id,
             'user_id'            => $user->id,
             'direction'          => Transaction::DIR_IN,
-            'status'             => TransactionStatus::PENDING, // nunca muda aqui
+            'status'             => TransactionStatus::PENDING,
             'currency'           => 'BRL',
             'method'             => 'pix',
             'provider'           => 'GetPay',
@@ -86,16 +89,13 @@ class TransactionPixController extends Controller
             'external_reference' => $externalId,
             'ip'                 => $request->ip(),
             'user_agent'         => $request->userAgent(),
+            'created_at'         => $now,
+            'updated_at'         => $now,
         ]);
 
         /*
         |--------------------------------------------------------------------------
         |  🚀 GETPAY - CREATE PAYMENT
-        |--------------------------------------------------------------------------
-        |  Resposta esperada:
-        |   pix -> EMV
-        |   uuid
-        |   externalId
         |--------------------------------------------------------------------------
         */
         try {
@@ -118,7 +118,7 @@ class TransactionPixController extends Controller
 
         } catch (\Throwable $e) {
 
-            // ❌ só muda status em erro, nunca depois
+            // ❌ só muda status em erro
             $tx->updateQuietly(['status' => TransactionStatus::FAILED]);
 
             Log::error("GETPAY_CREATE_PAYMENT_ERROR", [
@@ -133,7 +133,7 @@ class TransactionPixController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | 📌 Atualiza apenas dados não relacionados a status
+        | 📌 Atualiza somente dados auxiliares (não status)
         |--------------------------------------------------------------------------
         */
         $tx->updateQuietly([
@@ -192,7 +192,7 @@ class TransactionPixController extends Controller
             return response()->json(['success' => false, 'error' => 'Invalid credentials.'], 401);
         }
 
-        // 🔍 busca transação local (somente retorna, NÃO altera)
+        // 🔍 busca transação local (somente retorna)
         $tx = Transaction::where('external_reference', $externalId)
             ->where('user_id', $user->id)
             ->first();
@@ -218,7 +218,7 @@ class TransactionPixController extends Controller
             ]);
         }
 
-        // 🔍 saque (não altera nada)
+        // 🔍 saque
         $withdraw = Withdraw::where('external_id', $externalId)
             ->where('user_id', $user->id)
             ->first();
