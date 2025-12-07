@@ -30,11 +30,7 @@ class ExtratoController extends Controller
             'FALHADO'   => ['failed', 'falha', 'error', 'denied', 'canceled', 'cancelled'],
         ];
 
-        /*
-        |--------------------------------------------------------------------------
-        | 🔥 Apenas PIX entrada
-        |--------------------------------------------------------------------------
-        */
+        // 🔥 Somente PIX de entrada
         $pixQ = Transaction::query()
             ->selectRaw("
                 id,
@@ -71,24 +67,18 @@ class ExtratoController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | 🔥 ORDENAR PELO HORÁRIO REAL DO PAGAMENTO
+        | ❗ ORDEM CORRETA — APENAS CRIAÇÃO
         |--------------------------------------------------------------------------
-        |
-        | Se paid_at != null → ordenar por paid_at DESC
-        | Caso contrário → created_at DESC
-        |
+        | Nunca mais ordenar por paid_at!
+        |--------------------------------------------------------------------------
         */
         $rows = $pixQ
-            ->orderByRaw("CASE WHEN paid_at IS NOT NULL THEN paid_at ELSE created_at END DESC")
+            ->orderBy('created_at', 'desc')
             ->offset($offset)
             ->limit($perPage)
             ->get();
 
-        /*
-        |--------------------------------------------------------------------------
-        | 🔥 Formatação final
-        |--------------------------------------------------------------------------
-        */
+        // 🔥 Formatação final
         $rows = $rows->map(function ($t) {
 
             $statusEnum = TransactionStatus::fromLoose($t->status);
