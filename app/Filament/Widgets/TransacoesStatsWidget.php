@@ -19,57 +19,60 @@ class TransacoesStatsWidget extends BaseWidget
     {
         $tz = 'America/Sao_Paulo';
 
-        $inicioHojeLocal = Carbon::today($tz);
-        $amanhaLocal     = (clone $inicioHojeLocal)->addDay();
-        $inicioHojeUtc   = $inicioHojeLocal->copy()->utc();
-        $amanhaUtc       = $amanhaLocal->copy()->utc();
+        /** 🕒 AGORA: FILTRAGEM NO MESMO FUSO QUE O paid_at É SALVO */
+        $inicioHoje = Carbon::today($tz);
+        $amanha     = $inicioHoje->copy()->addDay();
 
-        $inicioSemanaUtc = Carbon::now($tz)->startOfWeek()->utc();
-        $inicioMesUtc    = Carbon::now($tz)->startOfMonth()->utc();
+        $inicioSemana = Carbon::now($tz)->startOfWeek();
+        $inicioMes    = Carbon::now($tz)->startOfMonth();
 
         $tenantId = auth()->user()?->tenant_id;
 
         /* ============================================================
-           🔄 CASH IN PAGAS HOJE
+           🔄 CASH IN PAGAS HOJE (AGORA CERTINHO)
         ============================================================ */
         $baseHojePagasIn = Transaction::query()
             ->when($tenantId, fn($q) => $q->where('tenant_id', $tenantId))
             ->where('direction', Transaction::DIR_IN)
             ->where('status', TransactionStatus::PAID)
-            ->whereBetween('paid_at', [$inicioHojeUtc, $amanhaUtc]);
+            ->whereBetween('paid_at', [$inicioHoje, $amanha]);
 
         $cashInTotal = (float)(clone $baseHojePagasIn)->sum('amount');
         $cashInCount =        (clone $baseHojePagasIn)->count();
 
-        /* 👇 DESCONTO SOMENTE VISUAL: 1.5% + R$0,10 POR TRANSAÇÃO */
+        /* Apenas visual */
         $descontoPercentual = $cashInTotal * 0.015;
         $descontoFixo = $cashInCount * 0.10;
         $cashInTotalLiquidoVisual = $cashInTotal - ($descontoPercentual + $descontoFixo);
 
-        /* CASH OUT HOJE */
-        $baseHojeCriadasOut = Withdraw::query()
+        /* ============================================================
+           🔄 CASH OUT HOJE
+        ============================================================ */
+        $baseHojeOut = Withdraw::query()
             ->when($tenantId, fn($q) => $q->where('tenant_id', $tenantId))
-            ->whereBetween('created_at', [$inicioHojeUtc, $amanhaUtc]);
+            ->whereBetween('created_at', [$inicioHoje, $amanha]);
 
-        $cashOutTotal = (float)(clone $baseHojeCriadasOut)->sum('amount');
-        $cashOutCount =        (clone $baseHojeCriadasOut)->count();
+        $cashOutTotal = (float)(clone $baseHojeOut)->sum('amount');
+        $cashOutCount =        (clone $baseHojeOut)->count();
 
         $entradasCriadasHoje = $cashInCount;
         $saquesCriadosHoje   = $cashOutCount;
         $totalMovimentosHoje = $entradasCriadasHoje + $saquesCriadosHoje;
 
-        /* PAGAS DO DIA */
+        /* ============================================================
+           🔥 PAGAS DO DIA (IN + OUT) — AGORA CORRETO
+        ============================================================ */
         $valorTransacoesPagasDiaIn = (float)Transaction::query()
             ->when($tenantId, fn($q) => $q->where('tenant_id', $tenantId))
             ->where('direction', Transaction::DIR_IN)
             ->where('status', TransactionStatus::PAID)
-            ->whereBetween('paid_at', [$inicioHojeUtc, $amanhaUtc])
+            ->whereBetween('paid_at', [$inicioHoje, $amanha])
             ->sum('amount');
 
         $valorTransacoesPagasDiaOut = (float)Withdraw::query()
             ->when($tenantId, fn($q) => $q->where('tenant_id', $tenantId))
             ->where('status', Withdraw::STATUS_PAID)
-            ->whereBetween('processed_at', [$inicioHojeUtc, $amanhaUtc])
+            ->whereBetween('processed_at', [$inicioHoje, $amanha])
             ->sum('amount');
 
         $valorTransacoesPagasDiaTotal = $valorTransacoesPagasDiaIn + $valorTransacoesPagasDiaOut;
@@ -78,75 +81,79 @@ class TransacoesStatsWidget extends BaseWidget
             ->when($tenantId, fn($q) => $q->where('tenant_id', $tenantId))
             ->where('direction', Transaction::DIR_IN)
             ->where('status', TransactionStatus::PAID)
-            ->whereBetween('paid_at', [$inicioHojeUtc, $amanhaUtc])
+            ->whereBetween('paid_at', [$inicioHoje, $amanha])
             ->count();
 
         $pagasHojeOutCount = Withdraw::query()
             ->when($tenantId, fn($q) => $q->where('tenant_id', $tenantId))
             ->where('status', Withdraw::STATUS_PAID)
-            ->whereBetween('processed_at', [$inicioHojeUtc, $amanhaUtc])
+            ->whereBetween('processed_at', [$inicioHoje, $amanha])
             ->count();
 
-        /* PIX GERADOS */
+        /* ============================================================
+           PIX GERADOS HOJE
+        ============================================================ */
         $pixGeradosHojeValor = (float)Transaction::query()
             ->when($tenantId, fn($q) => $q->where('tenant_id', $tenantId))
             ->where('direction', Transaction::DIR_IN)
-            ->whereBetween('created_at', [$inicioHojeUtc, $amanhaUtc])
+            ->whereBetween('created_at', [$inicioHoje, $amanha])
             ->sum('amount');
 
         $pixGeradosHojeCount = Transaction::query()
             ->when($tenantId, fn($q) => $q->where('tenant_id', $tenantId))
             ->where('direction', Transaction::DIR_IN)
-            ->whereBetween('created_at', [$inicioHojeUtc, $amanhaUtc])
+            ->whereBetween('created_at', [$inicioHoje, $amanha])
             ->count();
 
-        /* CONVERSÃO */
-        $transacoesPagasHoje = $pagasHojeInCount;
-        $transacoesGeradasHoje = $pixGeradosHojeCount;
-
-        $conversaoHojePorcentagem = $transacoesGeradasHoje > 0
-            ? round(($transacoesPagasHoje / $transacoesGeradasHoje) * 100, 2)
+        /* ============================================================
+           CONVERSÃO DO DIA
+        ============================================================ */
+        $conversaoHojePorcentagem = $pixGeradosHojeCount > 0
+            ? round(($pagasHojeInCount / $pixGeradosHojeCount) * 100, 2)
             : 0;
 
-        /* TAXAS */
+        /* ============================================================
+           TAXAS DO DIA
+        ============================================================ */
         $taxasTransacoesDiaIn = (float)Transaction::query()
             ->when($tenantId, fn($q) => $q->where('tenant_id', $tenantId))
             ->where('status', TransactionStatus::PAID)
-            ->whereBetween('paid_at', [$inicioHojeUtc, $amanhaUtc])
+            ->whereBetween('paid_at', [$inicioHoje, $amanha])
             ->sum('fee');
 
         $taxasTransacoesDiaOut = (float)Withdraw::query()
             ->when($tenantId, fn($q) => $q->where('tenant_id', $tenantId))
             ->where('status', Withdraw::STATUS_PAID)
-            ->whereBetween('processed_at', [$inicioHojeUtc, $amanhaUtc])
+            ->whereBetween('processed_at', [$inicioHoje, $amanha])
             ->sum('fee_amount');
 
         $taxasDiaTotal = $taxasTransacoesDiaIn + $taxasTransacoesDiaOut;
 
-        /* SEMANA / MÊS */
+        /* ============================================================
+           PERÍODOS SEMANA / MÊS
+        ============================================================ */
         $totalSemanaPagas = (float)Transaction::query()
             ->when($tenantId, fn($q) => $q->where('tenant_id', $tenantId))
             ->where('status', TransactionStatus::PAID)
-            ->whereBetween('paid_at', [$inicioSemanaUtc, $amanhaUtc])
+            ->whereBetween('paid_at', [$inicioSemana, $amanha])
             ->sum('amount');
 
         $totalMes = (float)Transaction::query()
             ->when($tenantId, fn($q) => $q->where('tenant_id', $tenantId))
-            ->whereBetween('created_at', [$inicioMesUtc, $amanhaUtc])
+            ->whereBetween('created_at', [$inicioMes, $amanha])
             ->whereIn('status', [TransactionStatus::PAID, TransactionStatus::PENDING])
             ->sum('amount');
 
         $comissaoBrutaMes = (float)Transaction::query()
             ->when($tenantId, fn($q) => $q->where('tenant_id', $tenantId))
             ->where('status', TransactionStatus::PAID)
-            ->whereBetween('paid_at', [$inicioMesUtc, $amanhaUtc])
+            ->whereBetween('paid_at', [$inicioMes, $amanha])
             ->sum('fee');
 
         /* FORMATADOR */
         $brl = fn(float $v) => 'R$ ' . number_format($v, 2, ',', '.');
 
         return [
-
             Stat::make('TRANSAÇÕES DE HOJE', '')
                 ->icon('heroicon-o-currency-dollar')
                 ->chart([
@@ -164,7 +171,7 @@ class TransacoesStatsWidget extends BaseWidget
                 ->color('warning'),
 
             Stat::make('Conversão do Dia', "{$conversaoHojePorcentagem}%")
-                ->description("Pagas: {$transacoesPagasHoje} / Geradas: {$transacoesGeradasHoje}")
+                ->description("Pagas: {$pagasHojeInCount} / Geradas: {$pixGeradosHojeCount}")
                 ->icon('heroicon-o-chart-pie')
                 ->color('success'),
 
@@ -191,7 +198,6 @@ class TransacoesStatsWidget extends BaseWidget
             Stat::make('Comissão Bruta do Mês', $brl($comissaoBrutaMes))
                 ->description('Taxas do mês')
                 ->color('danger'),
-
         ];
     }
 }

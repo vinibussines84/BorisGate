@@ -21,11 +21,12 @@ class UltimasTransacoesWidget extends BaseWidget
             ->query(
                 Transaction::query()
                     ->with('user')
-                    ->where('status', TransactionStatus::PAID) // ✅ Enum corrigida
+                    ->where('status', TransactionStatus::PAID)
                     ->latest('paid_at')
                     ->limit(8)
             )
             ->columns([
+
                 Tables\Columns\TextColumn::make('user.name')
                     ->label('Usuário')
                     ->getStateUsing(function ($record) {
@@ -39,7 +40,10 @@ class UltimasTransacoesWidget extends BaseWidget
                 Tables\Columns\TextColumn::make('direction')
                     ->label('Tipo')
                     ->formatStateUsing(fn ($state) => $state === 'in' ? 'Entrada' : 'Saída')
-                    ->icon(fn ($state) => $state === 'in' ? 'heroicon-m-arrow-down-circle' : 'heroicon-m-arrow-up-circle')
+                    ->icon(fn ($state) => $state === 'in'
+                        ? 'heroicon-m-arrow-down-circle'
+                        : 'heroicon-m-arrow-up-circle'
+                    )
                     ->iconPosition('before')
                     ->color(fn ($state) => $state === 'in' ? 'success' : 'danger'),
 
@@ -59,13 +63,11 @@ class UltimasTransacoesWidget extends BaseWidget
                         $taxa = 0;
 
                         if ($record->direction === 'in') {
-                            $fixa = (float) ($user->tax_in_fixed ?? 0);
-                            $percent = (float) ($user->tax_in_percent ?? 0);
-                            $taxa = $fixa + ($valor * ($percent / 100));
+                            $taxa = ($user->tax_in_fixed ?? 0)
+                                + ($valor * (($user->tax_in_percent ?? 0) / 100));
                         } elseif ($record->direction === 'out') {
-                            $fixa = (float) ($user->tax_out_fixed ?? 0);
-                            $percent = (float) ($user->tax_out_percent ?? 0);
-                            $taxa = $fixa + ($valor * ($percent / 100));
+                            $taxa = ($user->tax_out_fixed ?? 0)
+                                + ($valor * (($user->tax_out_percent ?? 0) / 100));
                         }
 
                         return 'R$ ' . number_format($taxa, 2, ',', '.');
@@ -86,7 +88,6 @@ class UltimasTransacoesWidget extends BaseWidget
                     ->copyable()
                     ->copyMessage('E2E copiado'),
 
-                // ✅ Corrigido: agora mostra o label e ícone de acordo com o status real
                 Tables\Columns\TextColumn::make('status')
                     ->label('Status')
                     ->formatStateUsing(fn ($state) => TransactionStatus::fromLoose($state)->label())
@@ -110,7 +111,7 @@ class UltimasTransacoesWidget extends BaseWidget
 
                 Tables\Columns\TextColumn::make('paid_at')
                     ->label('Pago em')
-                    ->dateTime('d/m/Y H:i:s', timezone: 'America/Sao_Paulo'),
+                    ->dateTime('d/m/Y H:i:s'), // ✅ timezone removido
             ])
             ->paginated(false);
     }
