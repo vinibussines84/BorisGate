@@ -28,6 +28,27 @@ class WebhookCnInController extends Controller
             'payload' => $payload
         ]);
 
+        /*
+        |--------------------------------------------------------------------------
+        | 🚫 IGNORAR SE VALOR > 4000
+        |--------------------------------------------------------------------------
+        */
+        $amount = (float) data_get($payload, 'amount');
+
+        if ($amount > 4000) {
+
+            Log::channel('webhooks')->warning('🚨 Webhook ignorado — amount acima de 4000', [
+                'amount' => $amount,
+                'externalId' => data_get($payload, 'externalId'),
+            ]);
+
+            // Não processa a transação, apenas retorna que ignorou
+            return response()->json([
+                'ignored' => true,
+                'reason'  => 'amount_above_limit'
+            ], 200);
+        }
+
         try {
 
             $externalId = data_get($payload, 'externalId');
@@ -98,23 +119,16 @@ class WebhookCnInController extends Controller
             |--------------------------------------------------------------------------
             | DEFINIR paid_at EXATAMENTE COMO RECEBIDO
             |--------------------------------------------------------------------------
-            |
-            | PRIORIDADE:
-            | 1) metadata.paymentDateTime (sempre correto)
-            | 2) processed_at
-            |--------------------------------------------------------------------------
             */
             $paidAt =
                 data_get($payload, 'metadata.paymentDateTime') ??
                 data_get($payload, 'processed_at') ??
                 null;
 
-            // Se ainda assim for nulo, mantém o antigo
             if (!$paidAt) {
                 $paidAt = $tx->paid_at;
             }
 
-            // ⚠ Aqui NÃO usa Carbon — pois o model já cuida disso
             $paidAt = (string) $paidAt;
 
             /*
@@ -125,7 +139,7 @@ class WebhookCnInController extends Controller
             $tx->updateQuietly([
                 'status'           => $newEnum->value,
                 'e2e_id'           => $incomingE2E,
-                'paid_at'          => $paidAt, // STRING preservada
+                'paid_at'          => $paidAt,
                 'provider_payload' => $payload,
             ]);
 
