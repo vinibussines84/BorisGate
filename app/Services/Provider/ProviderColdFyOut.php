@@ -14,7 +14,7 @@ class ProviderColdFyOut
     public function __construct()
     {
         $this->baseUrl = config('services.coldfy.base_url', 'https://api.coldfypay.com/functions/v1');
-        $this->authorization = config('services.coldfy.auth'); // Basic d3d3dzp3d3d3dw==
+        $this->authorization = config('services.coldfy.auth');
     }
 
     /**
@@ -24,29 +24,39 @@ class ProviderColdFyOut
     {
         $endpoint = "{$this->baseUrl}/withdrawals/cashout";
 
-        // 🔹 Gera um pixkeyid único por saque
-        $pixKeyId = 'pix_' . Str::uuid()->toString();
+        /*
+        |--------------------------------------------------------------------------
+        | Construção final do payload compatível com a API ColdFy
+        |--------------------------------------------------------------------------
+        */
 
-        // 🔹 Monta o corpo no formato exigido pela ColdFy
         $data = [
             'isPix'           => true,
-            'pixkeyid'        => $pixKeyId,
-            'pixkeytype'      => strtolower($payload['pixKeyType'] ?? ''),
-            'pixkey'          => $payload['pixKey'] ?? '',
-            'requestedamount' => intval(($payload['amount'] ?? 0) * 100),
-            'description'     => $payload['description'] ?? 'Saque diário do parceiro',
-            'postbackUrl'     => route('webhooks.coldfy'),
+            'pixkeytype'      => strtolower($payload['pixKeyType']), // email, cpf, etc.
+            'pixkey'          => $payload['pixKey'],                 // chave limpa
+            'requestedamount' => intval($payload['amount'] * 100),   // converter para centavos
+            'description'     => $payload['description'],
+            'postbackUrl'     => route('webhooks.coldfy'),           // tem que ser https em produção
         ];
 
-        // 🔹 Gera chave de idempotência única
-        $idempotencyKey = 'cashout_' . Str::random(10);
+        /*
+        |--------------------------------------------------------------------------
+        | Idempotência
+        |--------------------------------------------------------------------------
+        */
+        $idempotencyKey = 'cashout_' . Str::random(12);
 
         Log::info('💸 Enviando requisição CASHOUT (ColdFyOut)', [
-            'endpoint'         => '/withdrawals/cashout',
-            'data'             => $data,
-            'idempotency_key'  => $idempotencyKey,
+            'endpoint' => $endpoint,
+            'payload'  => $data,
+            'idempotency_key' => $idempotencyKey,
         ]);
 
+        /*
+        |--------------------------------------------------------------------------
+        | Requisição HTTP para a ColdFy
+        |--------------------------------------------------------------------------
+        */
         try {
             $response = Http::withHeaders([
                 'Authorization'   => 'Basic ' . $this->authorization,
@@ -70,10 +80,12 @@ class ProviderColdFyOut
             ]);
 
             return $json;
+
         } catch (\Throwable $e) {
             Log::error('🚨 ERRO CASHOUT_COLDFYOUT', [
                 'error' => $e->getMessage(),
             ]);
+
             throw new \Exception("Falha ao criar saque na ColdFy: " . $e->getMessage());
         }
     }
