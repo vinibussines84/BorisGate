@@ -47,10 +47,10 @@ class TransactionPixController extends Controller
 
         $amountReais = (float) $data['amount'];
 
-        if ($amountReais > 5000) {
+        if ($amountReais > 10000) {
             return response()->json([
                 'success' => false,
-                'error'   => 'O valor máximo permitido para PIX é de R$ 5.000,00.',
+                'error'   => 'O valor máximo permitido para PIX é de R$ 10.000,00.',
             ], 422);
         }
 
