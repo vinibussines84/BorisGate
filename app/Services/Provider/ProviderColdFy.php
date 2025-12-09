@@ -15,44 +15,52 @@ class ProviderColdFy
 
     public function __construct()
     {
-        $this->secretKey = config('services.coldfy.secret_key');
-        $this->companyId = config('services.coldfy.company_id');
+        $this->secretKey = (string) config('services.coldfy.secret_key');
+        $this->companyId = (string) config('services.coldfy.company_id');
 
-        if (!$this->secretKey || !$this->companyId) {
-            throw new Exception("ColdFy: Credenciais ausentes no .env");
+        if (empty($this->secretKey) || empty($this->companyId)) {
+            Log::critical('⚠️ ColdFy: Credenciais ausentes', [
+                'secret_key' => $this->secretKey,
+                'company_id' => $this->companyId,
+            ]);
+
+            throw new Exception("ColdFy: credenciais ausentes. Verifique o arquivo .env ou config/services.php");
         }
 
         $this->authorization = base64_encode("{$this->secretKey}:{$this->companyId}");
     }
 
-    protected function request($method, $endpoint, $data = [])
+    protected function request(string $method, string $endpoint, array $data = [])
     {
         try {
             $response = Http::withHeaders([
                 'Authorization' => "Basic {$this->authorization}",
+                'Accept'        => 'application/json',
                 'Content-Type'  => 'application/json',
-                'Accept'        => 'application/json'
-            ])->$method("{$this->baseUrl}{$endpoint}", $data);
+            ])
+            ->timeout(config('services.coldfy.timeout', 15))
+            ->$method("{$this->baseUrl}{$endpoint}", $data);
 
             if ($response->failed()) {
-                Log::error("COLDFY_API_ERROR", [
+                Log::error("❌ COLDFY_API_ERROR", [
                     'endpoint' => $endpoint,
                     'data' => $data,
-                    'response' => $response->body(),
+                    'status' => $response->status(),
+                    'body' => $response->body(),
                 ]);
 
-                throw new Exception("Erro na API ColdFy.");
+                throw new Exception("Erro ao comunicar com a API ColdFy (HTTP {$response->status()})");
             }
 
             return $response->json();
 
         } catch (\Throwable $e) {
-            Log::error("COLDFY_HTTP_EXCEPTION", [
+            Log::error("🚨 COLDFY_HTTP_EXCEPTION", [
                 'error' => $e->getMessage(),
                 'endpoint' => $endpoint,
             ]);
 
-            throw new Exception("Falha ao comunicar com ColdFy.");
+            throw new Exception("Falha ao comunicar com o provedor ColdFy: {$e->getMessage()}");
         }
     }
 
@@ -63,13 +71,13 @@ class ProviderColdFy
     {
         $data = [
             "customer" => [
-                "name"    => $payer["name"],
-                "email"   => $payer["email"],
-                "phone"   => preg_replace('/\D/', '', $payer["phone"]),
+                "name"    => $payer["name"] ?? 'Cliente',
+                "email"   => $payer["email"] ?? 'cliente@exemplo.com',
+                "phone"   => preg_replace('/\D/', '', $payer["phone"] ?? ''),
                 "document" => [
-                    "number" => preg_replace('/\D/', '', $payer["document"]),
-                    "type"   => strlen($payer["document"]) === 11 ? "CPF" : "CNPJ"
-                ]
+                    "number" => preg_replace('/\D/', '', $payer["document"] ?? ''),
+                    "type"   => (strlen(preg_replace('/\D/', '', $payer["document"] ?? '')) === 11 ? "CPF" : "CNPJ")
+                ],
             ],
 
             "paymentMethod" => "PIX",
@@ -84,8 +92,11 @@ class ProviderColdFy
 
             "amount" => intval($amount * 100),
 
-            "postbackUrl" => route("coldfy.webhook"),
+            // rota definida em routes/api.php → name('webhooks.coldfy')
+            "postbackUrl" => route("webhooks.coldfy"),
         ];
+
+        Log::info("💸 Enviando requisição PIX para ColdFy", $data);
 
         return $this->request("post", "/transactions", $data);
     }
@@ -95,11 +106,15 @@ class ProviderColdFy
      */
     public function getTransactionStatus(string $transactionId)
     {
+        Log::info("🔍 Consultando status da transação ColdFy", [
+            'transaction_id' => $transactionId,
+        ]);
+
         return $this->request("get", "/transactions/{$transactionId}");
     }
 
     /**
-     * ColdFy NÃO possui saque → implementar stub
+     * ColdFy NÃO possui endpoint de saque
      */
     public function withdraw(float $amount, array $recipient)
     {
@@ -111,10 +126,7 @@ class ProviderColdFy
      */
     public function processWebhook(array $payload)
     {
-        Log::info("COLDFY_WEBHOOK_RECEIVED", $payload);
-
-        // Exemplo: você trata status aqui
-        // $payload['status'] → paid, pending, canceled, failed…
+        Log::info("📬 COLDFY_WEBHOOK_RECEIVED", $payload);
 
         return [
             "success" => true,
