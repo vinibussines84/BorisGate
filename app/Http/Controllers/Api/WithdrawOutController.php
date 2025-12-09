@@ -162,7 +162,7 @@ class WithdrawOutController extends Controller
             $payload = [
                 "externalId"     => $externalId,
                 "pixKey"         => $formattedKey,
-                "pixKeyType"     => strtoupper($rawKeyType), // CPF, CNPJ, EMAIL, PHONE, EVP
+                "pixKeyType"     => strtoupper($rawKeyType),
                 "description"    => $data['description'] ?? 'Saque diário do parceiro',
                 "amount"         => (float) $gross,
             ];

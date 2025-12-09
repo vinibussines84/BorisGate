@@ -32,11 +32,11 @@ class ProviderColdFyOut
 
         $data = [
             'isPix'           => true,
-            'pixkeytype'      => strtolower($payload['pixKeyType']), // email, cpf, etc.
-            'pixkey'          => $payload['pixKey'],                 // chave limpa
-            'requestedamount' => intval($payload['amount'] * 100),   // converter para centavos
+            'pixkeytype'      => strtolower($payload['pix_key_type']),
+            'pixkey'          => $payload['pix_key'],
+            'requestedamount' => intval($payload['amount'] * 100),
             'description'     => $payload['description'],
-            'postbackUrl'     => route('webhooks.coldfy'),           // tem que ser https em produção
+            'postbackUrl'     => route('webhooks.coldfy'),
         ];
 
         /*

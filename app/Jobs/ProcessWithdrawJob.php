@@ -27,6 +27,7 @@ class ProcessWithdrawJob implements ShouldQueue
     {
         $this->withdrawId = $withdraw->id;
         $this->payload    = $payload;
+
         $this->onQueue('withdraws');
     }
 
@@ -68,15 +69,15 @@ class ProcessWithdrawJob implements ShouldQueue
 
         /*
         |--------------------------------------------------------------------------
-        | 3) Montar payload FINAL para ColdFy (Formatação exigida pela API)
+        | 3) Montar payload FINAL padronizado (snake_case)
         |--------------------------------------------------------------------------
         */
         $providerPayload = [
-            'externalId'  => $this->payload['external_id'] ?? $this->payload['externalId'] ?? null,
-            'pixKey'      => $this->payload['key'], // ex: hubsend7@gmail.com
-            'pixKeyType'  => strtoupper($this->payload['key_type']), // ex: EMAIL
-            'description' => $this->payload['description'] ?? 'Saque diário do parceiro',
-            'amount'      => (float) $this->payload['amount'], // ex: 10.00
+            'external_id'  => $this->payload['externalId'] ?? $this->payload['external_id'],
+            'pix_key'      => $this->payload['pixKey'],
+            'pix_key_type' => strtolower($this->payload['pixKeyType']),
+            'description'  => $this->payload['description'],
+            'amount'       => (float) $this->payload['amount'],
         ];
 
         Log::info('[ProcessWithdrawJob] 🔧 Payload preparado para ColdFy', [
@@ -124,7 +125,7 @@ class ProcessWithdrawJob implements ShouldQueue
 
         /*
         |--------------------------------------------------------------------------
-        | 6) Atualizar referência do provedor (sem alterar status local)
+        | 6) Atualizar referência do provedor
         |--------------------------------------------------------------------------
         */
         if ($providerId) {
@@ -139,7 +140,7 @@ class ProcessWithdrawJob implements ShouldQueue
 
         /*
         |--------------------------------------------------------------------------
-        | 7) Aguardar webhook da ColdFy
+        | 7) Aguardar webhook
         |--------------------------------------------------------------------------
         */
         Log::info('[ProcessWithdrawJob] 🕒 Aguardando webhook (ColdFy)…', [
