@@ -20,7 +20,8 @@ class ProcessWithdrawJob implements ShouldQueue
     public int $withdrawId;
     public array $payload;
 
-    public $tries   = 5;
+    // 🔥 NÃO REFAZ automaticamente
+    public $tries   = 1;
     public $timeout = 60;
 
     public function __construct(Withdraw $withdraw, array $payload)
@@ -42,22 +43,28 @@ class ProcessWithdrawJob implements ShouldQueue
         }
 
         Log::info('[ProcessWithdrawJob] 🚀 Iniciando processamento', [
-            'withdraw_id' => $withdraw->id
+            'withdraw_id' => $withdraw->id,
         ]);
 
         /**
-         * ✔ IMPEDIR REENVIO AO PROVIDER
+         * ✔ EVITAR reprocessar se já enviado ao provider
          */
         if (!empty($withdraw->provider_reference)) {
-            Log::warning('[ProcessWithdrawJob] ⛔ Já enviado anteriormente ao provider — ignorando retry');
+            Log::warning('[ProcessWithdrawJob] ❌ Já tem provider_reference — ignorando');
             return;
         }
 
-        if (in_array($withdraw->status, ['paid', 'failed', 'canceled'], true)) {
-            Log::warning('[ProcessWithdrawJob] ⛔ Saque já finalizado — ignorando');
+        /**
+         * ✔ Evitar reprocessar se já finalizado
+         */
+        if (in_array($withdraw->status, ['paid','failed','canceled'], true)) {
+            Log::warning('[ProcessWithdrawJob] ❌ Já finalizado — ignorando');
             return;
         }
 
+        /**
+         * ✔ Criar payload para provider
+         */
         $providerPayload = [
             'external_id'  => $this->payload['externalId'] ?? $this->payload['external_id'],
             'pix_key'      => $this->payload['pixKey'],
@@ -71,34 +78,45 @@ class ProcessWithdrawJob implements ShouldQueue
 
         } catch (Throwable $e) {
 
-            // ⚠️ RATE_LIMIT = NÃO É FALHA
+            // ⚠️ SE FOR RATE-LIMIT → PERMITIR retry MANUAL
             if ($e->getMessage() === "RATE_LIMIT") {
-                Log::warning('[ProcessWithdrawJob] ⏳ Rate limit ColdFy — retry automático');
+                Log::warning('[ProcessWithdrawJob] ⏳ Rate limit — tentando novamente em 10s');
+
                 $this->release(10);
                 return;
             }
 
-            // ❌ Erro real → estornar
-            Log::error('[ProcessWithdrawJob] ❌ Erro real ao chamar provider', [
+            // ❌ ERRO REAL → NÃO CHAMAR DE NOVO
+            Log::error('[ProcessWithdrawJob] ❌ Falha real ao chamar provider', [
                 'error' => $e->getMessage(),
             ]);
 
-            $withdrawService->refundLocal($withdraw, "Erro ao criar saque: " . $e->getMessage());
+            $withdrawService->refundLocal($withdraw, "Erro ao criar saque: ".$e->getMessage());
             return;
         }
 
-        $withdrawal = data_get($resp, 'withdrawal');
-        $providerId     = data_get($withdrawal, 'id');
-        $providerStatus = strtolower(data_get($withdrawal, 'status', 'pending'));
+        /**
+         * ✔ Processar resposta
+         */
+        $withdrawal      = data_get($resp, 'withdrawal');
+        $providerId      = data_get($withdrawal, 'id');
+        $providerStatus  = strtolower(data_get($withdrawal, 'status', 'pending'));
 
-        Log::info('[ProcessWithdrawJob] 🔁 Retorno ColdFy', [
-            'withdraw_id' => $withdraw->id,
-            'provider_id' => $providerId,
-            'status'      => $providerStatus,
+        Log::info('[ProcessWithdrawJob] 🔁 Retorno provider', [
+            'withdraw_id'     => $withdraw->id,
+            'provider_id'     => $providerId,
+            'provider_status' => $providerStatus,
         ]);
 
         /**
-         * ✔ Atualizar referência do provider (IMPORTANTE!)
+         * ✔ Converter approved → paid
+         */
+        if ($providerStatus === 'approved') {
+            $providerStatus = 'paid';
+        }
+
+        /**
+         * ✔ Salvar provider_reference
          */
         if ($providerId) {
             $withdrawService->updateProviderReference(
@@ -111,27 +129,32 @@ class ProcessWithdrawJob implements ShouldQueue
         }
 
         /**
-         * ✔ Caso aprovado → marcar como pago
+         * ✔ Se for considerado pago → marcar como paid
          */
-        if ($providerStatus === 'approved') {
+        if ($providerStatus === 'paid') {
             $withdrawService->markAsPaid(
                 $withdraw,
                 payload: $resp,
                 extra: [
                     'paid_at' => now(),
-                    'provider_status' => $providerStatus
+                    'provider_status' => 'paid'
                 ]
             );
 
-            Log::info('[ProcessWithdrawJob] ✅ Saque aprovado');
+            Log::info('[ProcessWithdrawJob] ✅ Saque concluído como PAID');
             return;
         }
 
         /**
-         * ❌ Qualquer outro status real de falha
+         * ❌ Falha real do provider
          */
-        $withdrawService->refundLocal($withdraw, "ColdFy status: {$providerStatus}");
+        $withdrawService->refundLocal(
+            $withdraw,
+            "ColdFy retornou status: {$providerStatus}"
+        );
 
-        Log::warning('[ProcessWithdrawJob] ❌ Saque recusado pelo provider');
+        Log::warning('[ProcessWithdrawJob] ❌ Saque marcado como FAILED (provider não aprovou)', [
+            'withdraw_id' => $withdraw->id
+        ]);
     }
 }
