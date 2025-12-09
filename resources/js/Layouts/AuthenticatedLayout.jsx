@@ -39,7 +39,7 @@ function LogoutConfirmModal({ open, onCancel, onConfirm }) {
 
           <button
             onClick={onConfirm}
-            className="px-4 py-2 text-sm rounded-lg bg-[#ff005d] hover:bg-[#e00052] text-white transition"
+            className="px-4 py-2 text-sm rounded-lg bg-[#02fb5c] hover:bg-[#00e756] text-neutral-900 transition"
           >
             Logout
           </button>
@@ -53,7 +53,7 @@ function LogoutConfirmModal({ open, onCancel, onConfirm }) {
 function BrandLogo({ className = "block h-[28px] w-auto md:h-[32px]" }) {
   return (
     <img
-      src="/images/logopixon.png"
+      src="/images/equitpay.png"
       alt="Logo"
       className={`${className} select-none pointer-events-none opacity-90 hover:opacity-100 transition`}
       loading="eager"
@@ -83,7 +83,7 @@ function UserFavicon({ initials, closeMobile, openConfirm }) {
         onClick={() => setOpen((v) => !v)}
         className="grid size-9 place-items-center rounded-full bg-neutral-900 
         text-[13px] font-medium text-neutral-200 ring-1 ring-neutral-700 
-        hover:ring-[#ff005d] transition"
+        hover:ring-[#02fb5c] transition"
       >
         {initials}
       </button>
@@ -217,7 +217,7 @@ export default function AuthenticatedLayout({ header, children, boxed = false })
                   className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition
                   ${
                     item.active
-                      ? "bg-[#ff005d]/10 text-[#ff005d]"
+                      ? "bg-[#02fb5c]/10 text-[#02fb5c]"
                       : "text-neutral-400 hover:bg-neutral-900/80 hover:text-white"
                   }`}
                 >
@@ -226,11 +226,14 @@ export default function AuthenticatedLayout({ header, children, boxed = false })
                 </Link>
               )}
 
+              {/* DROPDOWN MOBILE */}
               {item.isDropdown && (
                 <>
                   <button
                     onClick={() =>
-                      setIntegrationOpen((prev) => (prev === item.key ? false : item.key))
+                      setIntegrationOpen((prev) =>
+                        prev === item.key ? false : item.key
+                      )
                     }
                     className="flex items-center justify-between w-full px-4 py-3 rounded-xl text-sm text-neutral-400 hover:text-white hover:bg-neutral-900/70"
                   >
@@ -251,7 +254,7 @@ export default function AuthenticatedLayout({ header, children, boxed = false })
                           className={`block px-4 py-2 rounded-lg text-sm transition
                           ${
                             currentPath.startsWith(c.href)
-                              ? "text-[#ff005d] bg-[#ff005d]/10"
+                              ? "text-[#02fb5c] bg-[#02fb5c]/10"
                               : "text-neutral-400 hover:bg-neutral-900/60 hover:text-neutral-300"
                           }`}
                         >
@@ -268,7 +271,7 @@ export default function AuthenticatedLayout({ header, children, boxed = false })
       </aside>
 
       {/* SIDEBAR DESKTOP */}
-      <aside className="fixed inset-y-0 left-0 z-40 hidden w-[282px] 
+      <aside className="fixed inset-y-0 left-0 z-40 hidden w-[282px]
       lg:flex lg:flex-col lg:border-r lg:border-neutral-800/60 lg:bg-neutral-950">
         <div className="flex items-center gap-3 px-6 py-5 border-b border-neutral-800/70">
           <Link href="/dashboard" className="flex items-center gap-3">
@@ -285,12 +288,14 @@ export default function AuthenticatedLayout({ header, children, boxed = false })
                   <>
                     <button
                       onClick={() =>
-                        setIntegrationOpen((prev) => (prev === item.key ? false : item.key))
+                        setIntegrationOpen((prev) =>
+                          prev === item.key ? false : item.key
+                        )
                       }
                       className={`flex items-center justify-between w-full px-4 py-3 rounded-xl text-sm font-medium transition 
                       ${
                         item.active
-                          ? "text-[#ff005d]"
+                          ? "text-[#02fb5c]"
                           : "text-neutral-400 hover:text-white hover:bg-neutral-900/80"
                       }`}
                     >
@@ -298,7 +303,11 @@ export default function AuthenticatedLayout({ header, children, boxed = false })
                         <item.icon size={17} />
                         {item.label}
                       </span>
-                      {integrationOpen === item.key ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                      {integrationOpen === item.key ? (
+                        <ChevronUp size={16} />
+                      ) : (
+                        <ChevronDown size={16} />
+                      )}
                     </button>
 
                     {integrationOpen === item.key && (
@@ -310,7 +319,7 @@ export default function AuthenticatedLayout({ header, children, boxed = false })
                               className={`block px-4 py-2 text-sm rounded-lg transition 
                               ${
                                 currentPath.startsWith(normalizePath(c.href))
-                                  ? "text-[#ff005d] bg-[#ff005d]/10 font-medium"
+                                  ? "text-[#02fb5c] bg-[#02fb5c]/10 font-medium"
                                   : "text-neutral-400 hover:bg-neutral-900/60 hover:text-neutral-300"
                               }`}
                             >
@@ -327,7 +336,7 @@ export default function AuthenticatedLayout({ header, children, boxed = false })
                     className={`flex items-center gap-3.5 rounded-xl px-4 py-3 text-[14.5px] transition font-medium 
                     ${
                       item.active
-                        ? "bg-[#ff005d]/10 text-[#ff005d] shadow-inner shadow-black/30 ring-1 ring-[#ff005d]/30"
+                        ? "bg-[#02fb5c]/10 text-[#02fb5c] shadow-inner shadow-black/30 ring-1 ring-[#02fb5c]/30"
                         : "text-neutral-400 hover:bg-neutral-900/80 hover:text-white"
                     }`}
                   >

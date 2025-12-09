@@ -1,4 +1,3 @@
-// resources/js/Pages/Auth/Register.jsx
 import React, { useMemo, useState, useEffect, useRef } from "react";
 import { Head, Link, useForm } from "@inertiajs/react";
 import {
@@ -25,7 +24,7 @@ const formatCpfMask = (v = "") =>
     .replace(/(\d{3})(\d{1,2})$/, "$1-$2");
 
 /* ===========================
-   Input Styling
+   Input Styling (verde login)
 =========================== */
 function inputClass(hasError = false) {
   return [
@@ -34,12 +33,12 @@ function inputClass(hasError = false) {
     "ring-1 ring-inset border border-transparent",
     hasError
       ? "ring-rose-600/70"
-      : "ring-neutral-800 focus:ring-[2px] focus:ring-[#ff0a66]",
+      : "ring-neutral-800 focus:ring-[2px] focus:ring-[#02fb5c]",
   ].join(" ");
 }
 
 /* ===========================
-   Status Badge
+   Status Badge (verde)
 =========================== */
 function StatusBadge({
   state,
@@ -49,7 +48,7 @@ function StatusBadge({
 }) {
   if (state === "ok") {
     return (
-      <span className="inline-flex items-center gap-1.5 rounded-full border border-[#ff0a66]/40 bg-[#ff0a66]/10 px-2 py-0.5 text-[11px] text-[#ff0a66]">
+      <span className="inline-flex items-center gap-1.5 rounded-full border border-[#02fb5c]/40 bg-[#02fb5c]/10 px-2 py-0.5 text-[11px] text-[#02fb5c]">
         <CheckCircle size={12} /> {okText}
       </span>
     );
@@ -69,7 +68,7 @@ function StatusBadge({
 }
 
 /* ===========================
-   Primary Button
+   Primary Button (igual login)
 =========================== */
 function PrimaryButton({
   text,
@@ -85,10 +84,10 @@ function PrimaryButton({
     variant === "outline"
       ? disabled
         ? "ring-1 ring-inset ring-neutral-800 text-neutral-600 bg-neutral-950"
-        : "ring-1 ring-inset ring-[#ff0a66] text-[#ff0a66] bg-neutral-950 hover:bg-[#ff0a66]/10"
+        : "ring-1 ring-inset ring-[#02fb5c]/60 text-[#02fb5c] bg-neutral-950 hover:bg-[#02fb5c]/10"
       : disabled
-      ? "bg-[#ff0a66]/40 text-neutral-900 cursor-not-allowed"
-      : "bg-[#ff0a66] text-neutral-900 hover:bg-[#e0085a]";
+      ? "bg-[#02fb5c]/40 text-neutral-900 cursor-not-allowed"
+      : "bg-[#02fb5c] text-neutral-900 hover:bg-[#00e756]";
 
   return (
     <button
@@ -97,7 +96,7 @@ function PrimaryButton({
       className={`${base} ${styles}`}
     >
       {loading && (
-        <span className="h-4 w-4 animate-spin rounded-full border-2 border-neutral-800/20 border-t-neutral-800" />
+        <span className="h-4 w-4 animate-spin rounded-full border-2 border-neutral-900/20 border-t-neutral-900" />
       )}
       {text}
     </button>
@@ -150,7 +149,7 @@ export default function Register() {
 
   /* Step selection based on errors */
   useEffect(() => {
-    const mapStep = {
+    const map = {
       nome_completo: 1,
       data_nascimento: 1,
       cpf: 1,
@@ -159,10 +158,11 @@ export default function Register() {
       password: 2,
       password_confirmation: 2,
     };
+
     const keys = Object.keys(errors || {});
     if (keys.length) {
       let go = 2;
-      keys.forEach((k) => (go = Math.min(go, mapStep[k] || go)));
+      keys.forEach((k) => (go = Math.min(go, map[k] || go)));
       setStep(go);
     }
   }, [errors]);
@@ -199,15 +199,23 @@ export default function Register() {
     <>
       <Head title="Register" />
 
-      {/* Background */}
+      {/* Background igual login + efeito exclusivo scanline */}
       <div
         className={[
-          "min-h-screen flex items-center justify-center text-neutral-200 bg-neutral-950 relative",
-          "before:absolute before:inset-0 before:pointer-events-none",
-          "before:[background:radial-gradient(70%_70%_at_50%_100%,rgba(255,10,102,0.14),transparent_80%)]",
+          "min-h-screen flex items-center justify-center text-neutral-200 bg-neutral-950 relative overflow-hidden",
+          "before:absolute before:inset-0 before:[background:radial-gradient(70%_70%_at_50%_100%,rgba(2,251,92,0.13),transparent_75%)] before:pointer-events-none",
         ].join(" ")}
       >
-        <div className="w-full max-w-[480px] px-6 sm:px-10 py-10">
+        {/* Scanlines exclusivas */}
+        <div className="pointer-events-none absolute inset-0 opacity-[0.04] bg-[url('/images/scanline.png')] mix-blend-overlay" />
+
+        {/* Light lines overlay */}
+        <img
+          src="/images/line.png"
+          className="absolute inset-0 w-full h-full object-cover opacity-20 mix-blend-lighten pointer-events-none"
+        />
+
+        <div className="w-full max-w-[480px] px-6 sm:px-10 py-10 relative z-10">
           {/* Header */}
           <div className="mb-4 inline-flex items-center gap-2 text-sm text-neutral-400">
             <span className="inline-flex h-8 w-8 items-center justify-center rounded-2xl ring-1 ring-inset ring-neutral-800 bg-neutral-900/70 backdrop-blur-sm">
@@ -224,7 +232,7 @@ export default function Register() {
             Complete the 2 steps to finish your registration.
           </p>
 
-          {/* Card */}
+          {/* Card (igual login) */}
           <div
             className={[
               "mt-6 w-full rounded-[22px] p-5 sm:p-6 relative overflow-hidden",
@@ -232,6 +240,9 @@ export default function Register() {
               "shadow-[0_30px_80px_-30px_rgba(0,0,0,.8)]",
             ].join(" ")}
           >
+            {/* Glow verde exclusivo atrás do card */}
+            <div className="absolute -bottom-10 left-1/2 -translate-x-1/2 w-[140%] h-[120px] bg-[#02fb5c]/5 blur-3xl pointer-events-none"></div>
+
             {/* Server Errors */}
             {hasServerErrors && (
               <div className="mb-4 rounded-2xl border border-rose-600/30 bg-rose-600/10 p-3 text-sm text-rose-200">
@@ -247,7 +258,7 @@ export default function Register() {
               </div>
             )}
 
-            {/* Progress bar */}
+            {/* Progress bar (agora verde) */}
             <div className="mb-4">
               <div className="flex items-center justify-between text-xs text-neutral-400 mb-2">
                 <span>
@@ -258,7 +269,7 @@ export default function Register() {
 
               <div className="h-2 w-full rounded-full bg-white/10 overflow-hidden">
                 <div
-                  className="h-full bg-[#ff0a66] transition-all"
+                  className="h-full bg-[#02fb5c] transition-all"
                   style={{ width: `${progressPct}%` }}
                 />
               </div>
@@ -269,7 +280,9 @@ export default function Register() {
               </div>
             </div>
 
-            {/* STEP 1 */}
+            {/* ========================
+                 STEP 1
+               ======================== */}
             {step === 1 && (
               <form onSubmit={next} className="space-y-4">
                 {/* Full Name */}
@@ -339,7 +352,9 @@ export default function Register() {
               </form>
             )}
 
-            {/* STEP 2 */}
+            {/* ========================
+                 STEP 2
+               ======================== */}
             {step === 2 && (
               <form onSubmit={submit} className="space-y-4">
                 {/* Header */}

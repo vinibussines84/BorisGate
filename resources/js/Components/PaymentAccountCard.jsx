@@ -1,4 +1,3 @@
-// resources/js/Components/PaymentAccountCard.jsx
 import { useState, useEffect, useCallback } from "react";
 import {
   Eye,
@@ -29,7 +28,8 @@ function CardProgress({ visible }) {
         }
       `}</style>
       <div className="absolute inset-x-0 top-0 h-[2px] overflow-hidden">
-        <div className="h-full w-1/3 bg-[#ff005d]/70 animate-[cardSlide_1.4s_linear_infinite]" />
+        {/* Verde aplicado aqui */}
+        <div className="h-full w-1/3 bg-[#02fb5c]/70 animate-[cardSlide_1.4s_linear_infinite]" />
       </div>
     </>
   );
@@ -56,9 +56,7 @@ export default function PaymentAccountCard({ minHeight = 80 }) {
         setBlockedBalance(cache.blockedBalance);
         setLoading(false);
       }
-    } catch {
-      // ignore parse errors
-    }
+    } catch {}
   }, []);
 
   /* Fetch function with cache write */
@@ -124,7 +122,7 @@ export default function PaymentAccountCard({ minHeight = 80 }) {
         <div className="inline-flex items-center gap-2 rounded-full border border-neutral-700 bg-neutral-900/60 px-3 py-1.5">
           <span
             className={`h-2 w-2 rounded-full ${
-              error ? "bg-red-500" : "bg-[#ff005d]"
+              error ? "bg-red-500" : "bg-[#02fb5c]"
             }`}
           />
           <span className="text-[11px] text-neutral-300 tracking-wide">
@@ -141,7 +139,7 @@ export default function PaymentAccountCard({ minHeight = 80 }) {
             <RefreshCw
               size={15}
               className={
-                isRefreshing ? "animate-spin text-[#ff005d]" : "text-neutral-300"
+                isRefreshing ? "animate-spin text-[#02fb5c]" : "text-neutral-300"
               }
             />
           </button>
@@ -198,6 +196,8 @@ export default function PaymentAccountCard({ minHeight = 80 }) {
       {/* Footer */}
       <footer className="px-5 py-3">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          
+          {/* Left Button (Statement) */}
           <button
             onClick={() => (window.location.href = "/extrato")}
             className="flex items-center justify-center gap-2 h-10 text-sm rounded-xl border border-neutral-700 bg-neutral-900/40 hover:bg-neutral-800/40 text-neutral-200 transition"
@@ -206,13 +206,16 @@ export default function PaymentAccountCard({ minHeight = 80 }) {
             Statement
           </button>
 
+          {/* Right Button (Send Pix) — agora VERDE */}
           <button
             onClick={() => (window.location.href = '/saques/solicitar')}
-            className="flex items-center justify-center gap-2 h-10 text-sm rounded-xl bg-[#ff005d] hover:bg-[#e00052] text-neutral-50 font-semibold transition"
+            className="flex items-center justify-center gap-2 h-10 text-sm rounded-xl 
+            bg-[#02fb5c] hover:bg-[#00e756] text-neutral-900 font-semibold transition shadow-md shadow-[#02fb5c]/20"
           >
-            <SendHorizonal size={16} />
+            <SendHorizonal size={16} className="text-neutral-900" />
             Send Pix
           </button>
+
         </div>
       </footer>
     </section>

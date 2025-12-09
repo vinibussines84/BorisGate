@@ -31,7 +31,7 @@ export default function ExtratoHeader({
   const tabRefs = useRef([]);
 
   /* ==========================================================
-     ATUALIZA A “PÍLULA” DO STATUS SELECIONADO
+     ATUALIZA A PÍLULA DO STATUS SELECIONADO
   ========================================================== */
   const calcPill = useCallback(() => {
     const idx = STATUS_TABS.findIndex((s) => s.key === statusFilter);
@@ -64,30 +64,28 @@ export default function ExtratoHeader({
   const handleResetFilters = () => {
     setSearchTerm("");
     setStatusFilter("all");
-    refresh(true); // 🔥 força recarregar do zero
+    refresh(true);
   };
 
-  /* ==========================================================
-     RENDER
-  ========================================================== */
   return (
     <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[#0b0b0b]/95 p-6 sm:p-7 backdrop-blur-sm min-h-[180px] transition-all duration-300">
+
       {/* HEADER SUPERIOR */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+
         <div className="flex items-center gap-3">
           <div className="p-3 rounded-2xl border border-white/10 bg-[#0a0a0a]/90 shrink-0">
-            <FileText className="w-5 h-5 text-[#ff005d]" />
+            {/* Ícone verde */}
+            <FileText className="w-5 h-5 text-[#02fb5c]" />
           </div>
+
           <div>
-            <h1 className="text-xl font-semibold text-white leading-none">
-              Statement
-            </h1>
-            <p className="text-gray-400 text-sm mt-0.5">
-              Overview of account activity
-            </p>
+            <h1 className="text-xl font-semibold text-white leading-none">Statement</h1>
+            <p className="text-gray-400 text-sm mt-0.5">Overview of account activity</p>
           </div>
         </div>
 
+        {/* Actions */}
         <div className="flex items-center gap-2">
           <button
             onClick={() => refresh(false)}
@@ -98,11 +96,12 @@ export default function ExtratoHeader({
             Refresh
           </button>
 
-          {/* RESET FILTERS */}
+          {/* RESET FILTERS — AGORA VERDE */}
           <button
             onClick={handleResetFilters}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium 
-              text-[#ff3b5c] border border-[#ff3b5c]/40 rounded-lg bg-[#2b0000]/40 hover:bg-[#3a0000]/60 transition-colors"
+              text-[#02fb5c] border border-[#02fb5c]/40 rounded-lg 
+              bg-[#003d1a]/40 hover:bg-[#005524]/60 transition-colors"
           >
             <XCircle size={13} /> Reset
           </button>
@@ -111,22 +110,30 @@ export default function ExtratoHeader({
 
       {/* SALDOS */}
       <div className="mt-6 flex flex-col sm:flex-row sm:items-center justify-between gap-6">
+
+        {/* Disponível */}
         <div className="flex-1 rounded-2xl bg-[#0a0a0a]/95 border border-white/10 px-6 py-5 min-h-[110px] flex flex-col justify-between shadow-[0_0_25px_rgba(0,0,0,0.4)]">
           <div className="flex items-center gap-2 text-[11px] uppercase tracking-wide text-gray-400">
             <CreditCard size={12} className="text-gray-500" />
             Available Balance
           </div>
-          <p className="text-4xl font-semibold text-white tabular-nums leading-none transition-opacity duration-300">
+          <p className="text-4xl font-semibold text-white tabular-nums leading-none">
             {formatCurrency(saldo)}
           </p>
         </div>
 
+        {/* Cards de entradas e saídas */}
         <div className="flex sm:flex-row flex-col gap-3 shrink-0">
-          {/* Entradas (Agora usa a cor do ativo [#ff005d]) */}
-          <div className="flex items-center justify-between sm:justify-start gap-3 rounded-2xl px-5 py-3 bg-[#0a0a0a]/95 border border-[#1b1b1b] shadow-inner w-[180px]">
-            <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-[#ff005d]/20 border border-[#ff005d]/40">
-              <ArrowUpRight size={15} className="text-[#ff005d]" />
+
+          {/* Entradas — agora verde */}
+          <div className="flex items-center justify-between sm:justify-start gap-3 rounded-2xl px-5 py-3 
+            bg-[#0a0a0a]/95 border border-[#1b1b1b] shadow-inner w-[180px]">
+
+            <div className="flex items-center justify-center w-8 h-8 rounded-lg 
+              bg-[#02fb5c]/20 border border-[#02fb5c]/40">
+              <ArrowUpRight size={15} className="text-[#02fb5c]" />
             </div>
+
             <div className="flex flex-col">
               <span className="text-[12px] text-gray-400">Credits</span>
               <span className="text-sm font-medium text-white tabular-nums">
@@ -135,11 +142,15 @@ export default function ExtratoHeader({
             </div>
           </div>
 
-          {/* Saídas (Mantém a cor de falha [#ff3b5c]) */}
-          <div className="flex items-center justify-between sm:justify-start gap-3 rounded-2xl px-5 py-3 bg-[#0a0a0a]/95 border border-[#1b1b1b] shadow-inner w-[180px]">
-            <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-[#2b0000]/40 border border-[#ff3b5c]/40">
-              <ArrowDownRight size={15} className="text-[#ff3b5c]" />
+          {/* Saídas — também verde para padronizar */}
+          <div className="flex items-center justify-between sm:justify-start gap-3 rounded-2xl px-5 py-3 
+            bg-[#0a0a0a]/95 border border-[#1b1b1b] shadow-inner w-[180px]">
+
+            <div className="flex items-center justify-center w-8 h-8 rounded-lg 
+              bg-[#02fb5c]/20 border border-[#02fb5c]/40">
+              <ArrowDownRight size={15} className="text-[#02fb5c]" />
             </div>
+
             <div className="flex flex-col">
               <span className="text-[12px] text-gray-400">Debits</span>
               <span className="text-sm font-medium text-white tabular-nums">
@@ -147,23 +158,30 @@ export default function ExtratoHeader({
               </span>
             </div>
           </div>
+
         </div>
       </div>
 
       {/* FILTROS */}
       <div className="mt-8 flex flex-col lg:flex-row gap-3 items-center justify-between">
+
         {/* STATUS FILTER */}
         <div className="flex items-center gap-2 w-full lg:w-auto">
+
           <span className="text-[11px] text-gray-400 flex items-center gap-1.5 shrink-0">
             <Filter size={12} /> Status:
           </span>
 
-          <div className="relative flex items-center overflow-x-auto no-scrollbar p-1 rounded-xl bg-[#050505]/80 border border-[#1a1a1a] max-w-full scroll-smooth min-h-[32px]">
-            {/* PILL */}
+          <div className="relative flex items-center overflow-x-auto no-scrollbar p-1 rounded-xl 
+            bg-[#050505]/80 border border-[#1a1a1a] max-w-full scroll-smooth min-h-[32px]">
+
+            {/* Pílula agora verde */}
             <div
-              className="absolute h-[28px] rounded-lg bg-[#ff005d]/10 border border-[#ff005d]/40 transition-all duration-300 ease-out"
+              className="absolute h-[28px] rounded-lg bg-[#02fb5c]/10 border border-[#02fb5c]/40 
+              transition-all duration-300 ease-out"
               style={{ width: pillStyle.width, left: pillStyle.left }}
             />
+
             <div className="flex flex-nowrap space-x-1">
               {STATUS_TABS.map((s, i) => (
                 <button
@@ -175,11 +193,12 @@ export default function ExtratoHeader({
                       refresh(false);
                     }
                   }}
-                  className={`relative z-10 px-4 py-1 text-[11px] rounded-lg whitespace-nowrap transition-colors ${
-                    statusFilter === s.key
-                      ? "text-[#ff005d]"
-                      : "text-gray-300 hover:text-white"
-                  }`}
+                  className={`relative z-10 px-4 py-1 text-[11px] rounded-lg whitespace-nowrap transition-colors 
+                    ${
+                      statusFilter === s.key
+                        ? "text-[#02fb5c]"
+                        : "text-gray-300 hover:text-white"
+                    }`}
                 >
                   {s.label}
                 </button>
@@ -195,24 +214,29 @@ export default function ExtratoHeader({
               size={14}
               className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none"
             />
+
             <input
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               onKeyDown={onKeyPress}
               placeholder="Search by E2E, Amount..."
               className="w-full pl-9 pr-3 py-2 text-xs rounded-lg bg-[#050505]/80 border border-[#1a1a1a]
-                text-gray-200 placeholder:text-gray-500 focus:ring-2 focus:ring-[#ff005d]/40 transition-all duration-200"
+                text-gray-200 placeholder:text-gray-500 
+                focus:ring-2 focus:ring-[#02fb5c]/40 transition-all duration-200"
             />
           </div>
 
-          {/* BOTÃO SEARCH */}
+          {/* BOTÃO SEARCH — verde */}
           <button
             onClick={() => refresh(true)}
-            className="px-4 py-2 text-xs font-medium rounded-lg bg-[#ff005d]/20 border border-[#ff005d]/40 text-[#ff005d] hover:bg-[#ff005d]/30 transition-all"
+            className="px-4 py-2 text-xs font-medium rounded-lg 
+              bg-[#02fb5c]/20 border border-[#02fb5c]/40 text-[#02fb5c] 
+              hover:bg-[#02fb5c]/30 transition-all"
           >
             Search
           </button>
         </div>
+
       </div>
     </div>
   );
