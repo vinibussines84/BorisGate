@@ -30,6 +30,9 @@ class ProviderColdFy
         $this->authorization = base64_encode("{$this->secretKey}:{$this->companyId}");
     }
 
+    /**
+     * Envia requisição para API ColdFy
+     */
     protected function request(string $method, string $endpoint, array $data = [])
     {
         try {
@@ -44,9 +47,9 @@ class ProviderColdFy
             if ($response->failed()) {
                 Log::error("❌ COLDFY_API_ERROR", [
                     'endpoint' => $endpoint,
-                    'data' => $data,
-                    'status' => $response->status(),
-                    'body' => $response->body(),
+                    'data'     => $data,
+                    'status'   => $response->status(),
+                    'body'     => $response->body(),
                 ]);
 
                 throw new Exception("Erro ao comunicar com a API ColdFy (HTTP {$response->status()})");
@@ -56,7 +59,7 @@ class ProviderColdFy
 
         } catch (\Throwable $e) {
             Log::error("🚨 COLDFY_HTTP_EXCEPTION", [
-                'error' => $e->getMessage(),
+                'error'    => $e->getMessage(),
                 'endpoint' => $endpoint,
             ]);
 
@@ -66,6 +69,7 @@ class ProviderColdFy
 
     /**
      * Criar pagamento PIX
+     * ⚠️ Não altera status local, apenas cria no provedor.
      */
     public function createPix(float $amount, array $payer)
     {
@@ -92,7 +96,7 @@ class ProviderColdFy
 
             "amount" => intval($amount * 100),
 
-            // rota definida em routes/api.php → name('webhooks.coldfy')
+            // Rota que apenas recebe o webhook — nunca muda status
             "postbackUrl" => route("webhooks.coldfy"),
         ];
 
@@ -102,7 +106,8 @@ class ProviderColdFy
     }
 
     /**
-     * Consultar status da transação
+     * Consultar status remoto
+     * ⚠️ Retorna status remoto, mas nunca altera nada local.
      */
     public function getTransactionStatus(string $transactionId)
     {
@@ -114,7 +119,7 @@ class ProviderColdFy
     }
 
     /**
-     * ColdFy NÃO possui endpoint de saque
+     * ColdFy não possui endpoint de saque
      */
     public function withdraw(float $amount, array $recipient)
     {
@@ -122,15 +127,21 @@ class ProviderColdFy
     }
 
     /**
-     * Processamento do Webhook
+     * Recebe o webhook
+     * ⚠️ Apenas registra o log, nunca muda status ou dados locais.
      */
     public function processWebhook(array $payload)
     {
-        Log::info("📬 COLDFY_WEBHOOK_RECEIVED", $payload);
+        Log::info("📬 COLDFY_WEBHOOK_RECEIVED", [
+            'received_at' => now()->toIso8601String(),
+            'payload' => $payload,
+        ]);
 
+        // Apenas confirma recebimento, sem alterar nada.
         return [
             "success" => true,
-            "received" => $payload,
+            "message" => "Webhook recebido — sem alterações aplicadas.",
+            "timestamp" => now()->toIso8601String(),
         ];
     }
 }
