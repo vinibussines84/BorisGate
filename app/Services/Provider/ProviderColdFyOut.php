@@ -28,12 +28,12 @@ class ProviderColdFyOut
             throw new Exception("ColdFyOut: credenciais ausentes. Verifique .env ou config/services.php");
         }
 
-        // Basic Auth correto para ColdFy
+        // Basic Auth correto (ColdFy usa secret_key:company_id)
         $this->authorization = base64_encode("{$this->secretKey}:{$this->companyId}");
     }
 
     /**
-     * Criar saque PIX NO provider
+     * Criar saque PIX no provider
      */
     public function createCashout(array $payload): array
     {
@@ -45,14 +45,16 @@ class ProviderColdFyOut
             'pixkey'          => $payload['pix_key'],
             'requestedamount' => intval($payload['amount'] * 100),
             'description'     => $payload['description'],
-            'postbackUrl'     => route('webhooks.coldfy'),
+
+            // 🔥 Rota correta EXCLUSIVA de CASHOUT (PIX OUT)
+            'postbackUrl'     => route('webhooks.coldfy.out'),
         ];
 
         $idempotencyKey = 'cashout_' . Str::random(12);
 
         Log::info("💸 Enviando saque ColdFyOut", [
-            'endpoint' => $endpoint,
-            'payload'  => $data,
+            'endpoint'        => $endpoint,
+            'payload'         => $data,
             'idempotency_key' => $idempotencyKey,
         ]);
 
@@ -71,6 +73,7 @@ class ProviderColdFyOut
                     'status' => $response->status(),
                     'body'   => $response->body(),
                 ]);
+
                 throw new Exception("Erro ao criar saque ColdFyOut (HTTP {$response->status()})");
             }
 

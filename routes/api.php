@@ -83,6 +83,11 @@ Route::prefix('webhooks')->group(function () {
     Route::post('/out/cn', [WebhookCnOutController::class, 'handle'])
         ->name('webhooks.cn.out');
 
+    // ───────────────────────────────────────────────
+    // COLDFY — HEALTHCHECK (GET obrigatório!)
+    // ───────────────────────────────────────────────
+    Route::get('/coldfy', fn() => response()->json(['ok' => true], 200));
+
     // COLDFY — PIX IN (pagamentos recebidos)
     Route::post('/coldfy', [WebhookColdFyController::class, 'handle'])
         ->middleware('throttle:120,1')
