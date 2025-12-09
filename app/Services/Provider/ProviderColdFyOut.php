@@ -4,7 +4,6 @@ namespace App\Services\Provider;
 
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Str;
 use Exception;
 
 class ProviderColdFyOut
@@ -20,15 +19,10 @@ class ProviderColdFyOut
         $this->companyId = (string) config('services.coldfy.company_id');
 
         if (empty($this->secretKey) || empty($this->companyId)) {
-            Log::critical('⚠️ ColdFyOut: Credenciais ausentes', [
-                'secret_key' => $this->secretKey,
-                'company_id' => $this->companyId,
-            ]);
-
-            throw new Exception("ColdFyOut: credenciais ausentes. Verifique .env ou config/services.php");
+            Log::critical('⚠️ ColdFyOut: Credenciais ausentes');
+            throw new Exception("ColdFyOut: credenciais ausentes.");
         }
 
-        // Basic Auth correto (ColdFy usa secret_key:company_id)
         $this->authorization = base64_encode("{$this->secretKey}:{$this->companyId}");
     }
 
@@ -45,17 +39,18 @@ class ProviderColdFyOut
             'pixkey'          => $payload['pix_key'],
             'requestedamount' => intval($payload['amount'] * 100),
             'description'     => $payload['description'],
-
-            // 🔥 Rota correta EXCLUSIVA de CASHOUT (PIX OUT)
             'postbackUrl'     => route('webhooks.coldfy.out'),
         ];
 
-        $idempotencyKey = 'cashout_' . Str::random(12);
+        /**
+         * IDEMPOTÊNCIA REAL
+         * Assim, qualquer retry do job vai gerar SEMPRE a mesma resposta ColdFy.
+         */
+        $idempotencyKey = "withdraw_{$payload['external_id']}";
 
         Log::info("💸 Enviando saque ColdFyOut", [
-            'endpoint'        => $endpoint,
-            'payload'         => $data,
-            'idempotency_key' => $idempotencyKey,
+            'payload' => $data,
+            'idempotency' => $idempotencyKey,
         ]);
 
         try {
@@ -65,27 +60,32 @@ class ProviderColdFyOut
                 'Accept'          => 'application/json',
                 'Idempotency-Key' => $idempotencyKey,
             ])
-            ->timeout(config('services.coldfy.timeout', 15))
-            ->post($this->baseUrl . $endpoint, $data);
+                ->timeout(20)
+                ->post($this->baseUrl . $endpoint, $data);
+
+            // ⚠️ ColdFy usa HTTP 429 quando saque duplicado em menos de 10s
+            if ($response->status() === 429) {
+                Log::warning("⏳ ColdFy rate-limit — retry permitido");
+                throw new Exception("RATE_LIMIT");
+            }
 
             if ($response->failed()) {
-                Log::error("❌ COLDFYOUT_API_ERROR", [
+                Log::error("❌ ERRO AO CRIAR SAQUE NO PROVIDER", [
                     'status' => $response->status(),
                     'body'   => $response->body(),
                 ]);
-
                 throw new Exception("Erro ao criar saque ColdFyOut (HTTP {$response->status()})");
             }
 
             return $response->json();
 
         } catch (\Throwable $e) {
-            Log::error("🚨 COLDFYOUT_HTTP_EXCEPTION", [
-                'error'    => $e->getMessage(),
-                'endpoint' => $endpoint,
+
+            Log::error("🚨 EXCEÇÃO COLDYOUT", [
+                'error' => $e->getMessage(),
             ]);
 
-            throw new Exception("Falha ao comunicar com ColdFyOut: {$e->getMessage()}");
+            throw new Exception($e->getMessage());
         }
     }
 }
