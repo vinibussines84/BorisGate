@@ -18,7 +18,7 @@ class TransactionPixController extends Controller
 {
     /*
     |--------------------------------------------------------------------------
-    | PIX CASH-IN (via ProviderService -> GetPay)
+    | PIX CASH-IN (via ProviderService -> ColdFy)
     |--------------------------------------------------------------------------
     */
     public function store(Request $request, ProviderService $provider)
@@ -71,7 +71,7 @@ class TransactionPixController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        |  📌 Criação local ANTES da GetPay — AGORA COM TIMEZONE CORRIGIDO
+        |  📌 Criação local ANTES da ColdFy
         |--------------------------------------------------------------------------
         */
         $now = Carbon::now('America/Sao_Paulo');
@@ -83,7 +83,7 @@ class TransactionPixController extends Controller
             'status'             => TransactionStatus::PENDING,
             'currency'           => 'BRL',
             'method'             => 'pix',
-            'provider'           => 'GetPay',
+            'provider'           => 'ColdFy',
             'amount'             => $amountReais,
             'fee'                => $this->computeFee($user, $amountReais),
             'external_reference' => $externalId,
@@ -95,7 +95,7 @@ class TransactionPixController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        |  🚀 GETPAY - CREATE PAYMENT
+        |  🚀 COLDFY - CREATE PAYMENT
         |--------------------------------------------------------------------------
         */
         try {
@@ -107,13 +107,14 @@ class TransactionPixController extends Controller
                 "expire"         => 3600,
             ]);
 
-            Log::info("GETPAY_CREATE_PAYMENT_RESPONSE", $response);
+            Log::info("COLDFY_CREATE_PAYMENT_RESPONSE", $response);
 
-            $transactionId = data_get($response, "uuid");
-            $qrCodeText    = data_get($response, "pix");
+            // ✅ Estrutura correta da resposta ColdFy
+            $transactionId = data_get($response, "id");
+            $qrCodeText    = data_get($response, "pix.qrcode");
 
             if (!$transactionId || !$qrCodeText) {
-                throw new \Exception("Invalid GetPay response.");
+                throw new \Exception("Invalid ColdFy response.");
             }
 
         } catch (\Throwable $e) {
@@ -121,7 +122,7 @@ class TransactionPixController extends Controller
             // ❌ só muda status em erro
             $tx->updateQuietly(['status' => TransactionStatus::FAILED]);
 
-            Log::error("GETPAY_CREATE_PAYMENT_ERROR", [
+            Log::error("COLDFY_CREATE_PAYMENT_ERROR", [
                 'error' => $e->getMessage(),
             ]);
 

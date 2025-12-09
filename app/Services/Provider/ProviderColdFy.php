@@ -36,13 +36,21 @@ class ProviderColdFy
     protected function request(string $method, string $endpoint, array $data = [])
     {
         try {
-            $response = Http::withHeaders([
+            $headers = [
                 'Authorization' => "Basic {$this->authorization}",
                 'Accept'        => 'application/json',
                 'Content-Type'  => 'application/json',
-            ])
-            ->timeout(config('services.coldfy.timeout', 15))
-            ->$method("{$this->baseUrl}{$endpoint}", $data);
+            ];
+
+            if (strtolower($method) === 'get') {
+                $response = Http::withHeaders($headers)
+                    ->timeout(config('services.coldfy.timeout', 15))
+                    ->get("{$this->baseUrl}{$endpoint}", $data);
+            } else {
+                $response = Http::withHeaders($headers)
+                    ->timeout(config('services.coldfy.timeout', 15))
+                    ->$method("{$this->baseUrl}{$endpoint}", $data);
+            }
 
             if ($response->failed()) {
                 Log::error("❌ COLDFY_API_ERROR", [
@@ -83,9 +91,7 @@ class ProviderColdFy
                     "type"   => (strlen(preg_replace('/\D/', '', $payer["document"] ?? '')) === 11 ? "CPF" : "CNPJ")
                 ],
             ],
-
             "paymentMethod" => "PIX",
-
             "items" => [
                 [
                     "title"      => "Pix",
@@ -93,10 +99,7 @@ class ProviderColdFy
                     "quantity"   => 1,
                 ]
             ],
-
             "amount" => intval($amount * 100),
-
-            // Rota que apenas recebe o webhook — nunca muda status
             "postbackUrl" => route("webhooks.coldfy"),
         ];
 
@@ -137,7 +140,6 @@ class ProviderColdFy
             'payload' => $payload,
         ]);
 
-        // Apenas confirma recebimento, sem alterar nada.
         return [
             "success" => true,
             "message" => "Webhook recebido — sem alterações aplicadas.",
