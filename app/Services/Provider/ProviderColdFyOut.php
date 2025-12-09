@@ -5,30 +5,39 @@ namespace App\Services\Provider;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Exception;
 
 class ProviderColdFyOut
 {
-    protected string $baseUrl;
+    protected string $baseUrl = "https://api.coldfypay.com/functions/v1";
+    protected string $secretKey;
+    protected string $companyId;
     protected string $authorization;
 
     public function __construct()
     {
-        $this->baseUrl = config('services.coldfy.base_url', 'https://api.coldfypay.com/functions/v1');
-        $this->authorization = config('services.coldfy.auth');
+        $this->secretKey = (string) config('services.coldfy.secret_key');
+        $this->companyId = (string) config('services.coldfy.company_id');
+
+        if (empty($this->secretKey) || empty($this->companyId)) {
+            Log::critical('⚠️ ColdFyOut: Credenciais ausentes', [
+                'secret_key' => $this->secretKey,
+                'company_id' => $this->companyId,
+            ]);
+
+            throw new Exception("ColdFyOut: credenciais ausentes. Verifique .env ou config/services.php");
+        }
+
+        // Basic Auth correto para ColdFy
+        $this->authorization = base64_encode("{$this->secretKey}:{$this->companyId}");
     }
 
     /**
-     * Criar saque (cashout PIX)
+     * Criar saque PIX NO provider
      */
     public function createCashout(array $payload): array
     {
-        $endpoint = "{$this->baseUrl}/withdrawals/cashout";
-
-        /*
-        |--------------------------------------------------------------------------
-        | Construção final do payload compatível com a API ColdFy
-        |--------------------------------------------------------------------------
-        */
+        $endpoint = "/withdrawals/cashout";
 
         $data = [
             'isPix'           => true,
@@ -39,54 +48,41 @@ class ProviderColdFyOut
             'postbackUrl'     => route('webhooks.coldfy'),
         ];
 
-        /*
-        |--------------------------------------------------------------------------
-        | Idempotência
-        |--------------------------------------------------------------------------
-        */
         $idempotencyKey = 'cashout_' . Str::random(12);
 
-        Log::info('💸 Enviando requisição CASHOUT (ColdFyOut)', [
+        Log::info("💸 Enviando saque ColdFyOut", [
             'endpoint' => $endpoint,
             'payload'  => $data,
             'idempotency_key' => $idempotencyKey,
         ]);
 
-        /*
-        |--------------------------------------------------------------------------
-        | Requisição HTTP para a ColdFy
-        |--------------------------------------------------------------------------
-        */
         try {
             $response = Http::withHeaders([
-                'Authorization'   => 'Basic ' . $this->authorization,
+                'Authorization'   => "Basic {$this->authorization}",
                 'Content-Type'    => 'application/json',
                 'Accept'          => 'application/json',
                 'Idempotency-Key' => $idempotencyKey,
-            ])->post($endpoint, $data);
+            ])
+            ->timeout(config('services.coldfy.timeout', 15))
+            ->post($this->baseUrl . $endpoint, $data);
 
             if ($response->failed()) {
-                Log::error('❌ COLDFYOUT_API_ERROR', [
+                Log::error("❌ COLDFYOUT_API_ERROR", [
                     'status' => $response->status(),
                     'body'   => $response->body(),
                 ]);
-                throw new \Exception("Erro ao criar saque na ColdFy (HTTP {$response->status()})");
+                throw new Exception("Erro ao criar saque ColdFyOut (HTTP {$response->status()})");
             }
 
-            $json = $response->json();
-
-            Log::info('✅ CASHOUT criado com sucesso (ColdFyOut)', [
-                'response' => $json,
-            ]);
-
-            return $json;
+            return $response->json();
 
         } catch (\Throwable $e) {
-            Log::error('🚨 ERRO CASHOUT_COLDFYOUT', [
-                'error' => $e->getMessage(),
+            Log::error("🚨 COLDFYOUT_HTTP_EXCEPTION", [
+                'error'    => $e->getMessage(),
+                'endpoint' => $endpoint,
             ]);
 
-            throw new \Exception("Falha ao criar saque na ColdFy: " . $e->getMessage());
+            throw new Exception("Falha ao comunicar com ColdFyOut: {$e->getMessage()}");
         }
     }
 }
