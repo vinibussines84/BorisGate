@@ -36,7 +36,7 @@ class WebhookColdFyController extends Controller
             */
             $objectId   = data_get($payload, 'objectId');
             $status     = data_get($payload, 'data.status');
-            $amount     = (float) data_get($payload, 'data.amount');
+            $amount     = ((float) data_get($payload, 'data.amount')) / 100; // ✅ converte centavos → reais
 
             if (!$objectId) {
                 return response()->json(['error' => 'missing_objectId'], 422);
@@ -151,6 +151,8 @@ class WebhookColdFyController extends Controller
 
             Log::channel('webhooks')->info("✅ COLDFY webhook processado com sucesso", [
                 'transaction_id' => $tx->id,
+                'provider_id'    => $objectId,
+                'amount'         => $amount,
                 'status'         => $newEnum->value,
                 'paid_at'        => $paidAt,
             ]);
