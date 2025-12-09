@@ -3,7 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\Withdraw;
-use App\Services\Provider\ProviderGetPayOut;
+use App\Services\Provider\ProviderColdFyOut;
 use App\Services\Withdraw\WithdrawService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -11,6 +11,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
+use App\Support\StatusMap;
 
 class ProcessWithdrawJob implements ShouldQueue
 {
@@ -31,7 +32,7 @@ class ProcessWithdrawJob implements ShouldQueue
     }
 
     public function handle(
-        ProviderGetPayOut $provider,
+        ProviderColdFyOut $provider,
         WithdrawService $withdrawService
     ) {
         /*
@@ -48,7 +49,7 @@ class ProcessWithdrawJob implements ShouldQueue
             return;
         }
 
-        Log::info('[ProcessWithdrawJob] 🚀 Iniciando processamento (GetPay)', [
+        Log::info('[ProcessWithdrawJob] 🚀 Iniciando processamento (ColdFy)', [
             'withdraw_id' => $withdraw->id,
             'payload'     => $this->payload,
         ]);
@@ -58,7 +59,7 @@ class ProcessWithdrawJob implements ShouldQueue
         | 2) Evitar reprocessar saque já finalizado
         |--------------------------------------------------------------------------
         */
-        if (in_array($withdraw->status, ['paid', 'failed'], true)) {
+        if (in_array($withdraw->status, ['paid', 'failed', 'canceled'], true)) {
             Log::warning('[ProcessWithdrawJob] ⚠️ Ignorado — saque já finalizado', [
                 'withdraw_id' => $withdraw->id,
                 'status'      => $withdraw->status,
@@ -68,106 +69,63 @@ class ProcessWithdrawJob implements ShouldQueue
 
         /*
         |--------------------------------------------------------------------------
-        | 3) Chamar provider GetPay
+        | 3) Chamar provider ColdFy
         |--------------------------------------------------------------------------
         */
         try {
-            $resp = $provider->createWithdrawal($this->payload);
+            $resp = $provider->createCashout($this->payload);
         } catch (\Throwable $e) {
-            Log::error('[ProcessWithdrawJob] 💥 Erro ao chamar GetPay', [
+            Log::error('[ProcessWithdrawJob] 💥 Erro ao chamar ColdFy', [
                 'withdraw_id' => $withdraw->id,
                 'exception'   => $e->getMessage(),
             ]);
 
-            // Falha → estorna local
-            $withdrawService->refundLocal(
-                $withdraw,
-                'Erro ao comunicar com o provider: ' . $e->getMessage()
-            );
+            // ❌ Não altera nada localmente — apenas loga
             return;
         }
 
         /*
         |--------------------------------------------------------------------------
-        | 4) Validar resposta
-        |--------------------------------------------------------------------------
-        */
-        if (!isset($resp['success']) || $resp['success'] !== true) {
-
-            $reason = $resp['message'] ?? 'Erro desconhecido do provider';
-
-            Log::error('[ProcessWithdrawJob] ❌ Falha provider', [
-                'withdraw_id' => $withdraw->id,
-                'response'    => $resp,
-            ]);
-
-            $withdrawService->refundLocal($withdraw, $reason);
-            return;
-        }
-
-        /*
-        |--------------------------------------------------------------------------
-        | 5) Capturar provider_id (UUID)
+        | 4) Capturar dados do retorno
         |--------------------------------------------------------------------------
         */
         $providerId =
-            data_get($resp, 'data.uuid')
-            ?? data_get($resp, 'data.id')
-            ?? data_get($resp, 'id');
+            data_get($resp, 'id') ??
+            data_get($resp, 'uuid') ??
+            data_get($resp, 'data.id') ??
+            null;
 
-        if (!$providerId) {
-            Log::error('[ProcessWithdrawJob] ⚠️ provider_id ausente', [
-                'withdraw_id' => $withdraw->id,
-                'response'    => $resp,
-            ]);
+        $providerStatus = strtolower(data_get($resp, 'status', 'pending'));
+        $normalizedStatus = StatusMap::normalize($providerStatus);
 
-            $withdrawService->refundLocal($withdraw, 'missing_provider_id');
-            return;
-        }
-
-        /*
-        |--------------------------------------------------------------------------
-        | 6) Registrar provider_reference
-        |--------------------------------------------------------------------------
-        */
-        $withdrawService->updateProviderReference(
-            $withdraw,
-            $providerId,
-            'processing',
-            $resp
-        );
-
-        Log::info('[ProcessWithdrawJob] 🔁 Saque enviado ao provider', [
-            'withdraw_id' => $withdraw->id,
-            'provider_id' => $providerId,
+        Log::info('[ProcessWithdrawJob] 🔁 Saque enviado ao provider ColdFy', [
+            'withdraw_id'        => $withdraw->id,
+            'provider_id'        => $providerId,
+            'provider_status'    => $providerStatus,
+            'normalized_status'  => $normalizedStatus,
+            'response'           => $resp,
         ]);
 
         /*
         |--------------------------------------------------------------------------
-        | 7) Status imediato retornado pela GetPay
+        | 5) Atualizar referência do provedor (sem alterar status local)
         |--------------------------------------------------------------------------
         */
-        $providerStatus = strtolower(data_get($resp, 'data.status', 'pending'));
-
-        if (in_array($providerStatus, ['paid', 'success', 'completed'])) {
-
-            // Pago imediato — finalizar
-            $withdrawService->markAsPaid($withdraw, $resp);
-
-            Log::info('[ProcessWithdrawJob] ✅ Pago imediatamente no retorno', [
-                'withdraw_id' => $withdraw->id,
-                'provider_id' => $providerId,
-            ]);
-
-            return;
+        if ($providerId) {
+            $withdrawService->updateProviderReference(
+                $withdraw,
+                $providerId,
+                $withdraw->status, // mantém status original
+                $resp
+            );
         }
 
         /*
         |--------------------------------------------------------------------------
-        | 8) Caso pending/processing → aguarda webhook
+        | 6) Aguardar webhook da ColdFy
         |--------------------------------------------------------------------------
         */
-        Log::info('[ProcessWithdrawJob] 🕒 Aguardando webhook (GetPay)…', [
+        Log::info('[ProcessWithdrawJob] 🕒 Aguardando webhook (ColdFy)…', [
             'withdraw_id'     => $withdraw->id,
             'provider_status' => $providerStatus,
         ]);

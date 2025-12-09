@@ -17,6 +17,7 @@ use App\Http\Controllers\Api\Webhooks\WebhookCnOutController;
 
 // Novo Controller — ColdFy
 use App\Http\Controllers\Api\Webhooks\WebhookColdFyController;
+use App\Http\Controllers\Api\Webhooks\WebhookColdFyOutController;
 
 // ───────────────────────────────────────────────────────────────────────────────
 // HEALTHCHECK
@@ -82,8 +83,13 @@ Route::prefix('webhooks')->group(function () {
     Route::post('/out/cn', [WebhookCnOutController::class, 'handle'])
         ->name('webhooks.cn.out');
 
-    // COLDFY — PIX IN/OUT (notificações gerais)
+    // COLDFY — PIX IN (pagamentos recebidos)
     Route::post('/coldfy', [WebhookColdFyController::class, 'handle'])
         ->middleware('throttle:120,1')
         ->name('webhooks.coldfy');
+
+    // COLDFY — PIX OUT (saques / cashouts)
+    Route::post('/coldfy/out', [WebhookColdFyOutController::class, 'handle'])
+        ->middleware('throttle:120,1')
+        ->name('webhooks.coldfy.out');
 });
