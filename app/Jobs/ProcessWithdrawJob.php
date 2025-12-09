@@ -12,7 +12,7 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 use App\Support\StatusMap;
-use Exception;
+use Throwable;
 
 class ProcessWithdrawJob implements ShouldQueue
 {
@@ -21,13 +21,14 @@ class ProcessWithdrawJob implements ShouldQueue
     public int $withdrawId;
     public array $payload;
 
-    public $tries   = 3;
-    public $timeout = 120;
+    public $tries   = 5;
+    public $timeout = 60;
 
     public function __construct(Withdraw $withdraw, array $payload)
     {
         $this->withdrawId = $withdraw->id;
         $this->payload    = $payload;
+
         $this->onQueue('withdraws');
     }
 
@@ -35,87 +36,165 @@ class ProcessWithdrawJob implements ShouldQueue
         ProviderColdFyOut $provider,
         WithdrawService $withdrawService
     ) {
+        /*
+        |--------------------------------------------------------------------------
+        | 1) Buscar o saque
+        |--------------------------------------------------------------------------
+        */
         $withdraw = Withdraw::find($this->withdrawId);
 
         if (!$withdraw) {
-            Log::error("[WithdrawJob] ❌ Saque não encontrado", [
+            Log::error('[ProcessWithdrawJob] ❌ Withdraw não encontrado', [
                 'withdraw_id' => $this->withdrawId,
             ]);
             return;
         }
 
-        Log::info("[WithdrawJob] 🚀 Iniciando envio ao ColdFy", [
+        Log::info('[ProcessWithdrawJob] 🚀 Iniciando processamento (ColdFy)', [
             'withdraw_id' => $withdraw->id,
-            'payload' => $this->payload,
+            'payload'     => $this->payload,
         ]);
 
-        // montar payload para provider
+        /*
+        |--------------------------------------------------------------------------
+        | 2) Evitar reprocessar saque já finalizado
+        |--------------------------------------------------------------------------
+        */
+        if (in_array($withdraw->status, ['paid', 'failed', 'canceled'], true)) {
+            Log::warning('[ProcessWithdrawJob] ⚠️ Ignorado — saque já finalizado', [
+                'withdraw_id' => $withdraw->id,
+                'status'      => $withdraw->status,
+            ]);
+            return;
+        }
+
+        /*
+        |--------------------------------------------------------------------------
+        | 3) Montar payload FINAL padronizado
+        |--------------------------------------------------------------------------
+        */
         $providerPayload = [
+            'external_id'  => $this->payload['externalId'] ?? $this->payload['external_id'],
             'pix_key'      => $this->payload['pixKey'],
             'pix_key_type' => strtolower($this->payload['pixKeyType']),
-            'amount'       => $this->payload['amount'],
             'description'  => $this->payload['description'],
+            'amount'       => (float) $this->payload['amount'],
         ];
 
-        try {
-            $response = $provider->createCashout($providerPayload);
-        } catch (Exception $e) {
-            $withdrawService->fail($withdraw, "coldfy_error");
+        Log::info('[ProcessWithdrawJob] 🔧 Payload preparado para ColdFy', [
+            'withdraw_id'       => $withdraw->id,
+            'provider_payload'   => $providerPayload,
+        ]);
 
-            Log::error("[WithdrawJob] ❌ Erro ao enviar ColdFy", [
+        /*
+        |--------------------------------------------------------------------------
+        | 4) Enviar saque para o provider (ColdFy)
+        |--------------------------------------------------------------------------
+        */
+        try {
+            $resp = $provider->createCashout($providerPayload);
+        } catch (Throwable $e) {
+
+            Log::error('[ProcessWithdrawJob] 💥 Erro ao chamar ColdFy', [
                 'withdraw_id' => $withdraw->id,
                 'exception'   => $e->getMessage(),
             ]);
 
-            // estornar saldo
+            // Marcar falha
+            $withdrawService->fail($withdraw, 'provider_error');
+
+            // Estornar saldo
             $withdrawService->refund($withdraw);
 
-            // disparar webhook de falha
+            // Disparar webhook OUT (erro)
             $withdrawService->notifyWebhook($withdraw, 'failed');
 
             return;
         }
 
-        Log::info("[WithdrawJob] 🔍 Resposta ColdFy", [
-            'withdraw_id' => $withdraw->id,
-            'response'    => $response,
+        /*
+        |--------------------------------------------------------------------------
+        | 5) Extrair dados retornados do ColdFy
+        |--------------------------------------------------------------------------
+        |
+        | ColdFy PIX OUT responde assim:
+        |
+        | {
+        |   "event": "withdrawal.created",
+        |   "withdrawal": {
+        |       "id": "...",
+        |       "status": "approved",
+        |       ...
+        |   }
+        | }
+        |--------------------------------------------------------------------------
+        */
+        $withdrawal = data_get($resp, 'withdrawal');
+
+        $providerId = data_get($withdrawal, 'id');
+        $providerStatus = strtolower(data_get($withdrawal, 'status', 'pending'));
+
+        Log::info('[ProcessWithdrawJob] 🔁 Retorno ColdFy recebido', [
+            'withdraw_id'       => $withdraw->id,
+            'provider_id'       => $providerId,
+            'provider_status'   => $providerStatus,
         ]);
 
-        // Extrair retorno
-        $data = data_get($response, 'withdrawal');
-        $providerId = data_get($data, 'id');
-        $providerStatus = strtolower(data_get($data, 'status', 'pending'));
+        /*
+        |--------------------------------------------------------------------------
+        | 6) Salvar referência do provedor
+        |--------------------------------------------------------------------------
+        */
+        if ($providerId) {
+            $withdrawService->updateProviderReference(
+                $withdraw,
+                $providerId,
+                $providerStatus,
+                $resp
+            );
+        }
 
-        // Salvar referência
-        $withdrawService->updateProviderReference($withdraw, $providerId, $providerStatus, $response);
+        /*
+        |--------------------------------------------------------------------------
+        | 7) Avaliar status retornado (ColdFy não usa webhook OUT)
+        |--------------------------------------------------------------------------
+        |
+        | Se status = "approved" → Saque pago
+        | Caso contrário → Saque falhou
+        |--------------------------------------------------------------------------
+        */
 
-        // ---------------------------
-        // STATUS FINAL DO SAQUE
-        // ---------------------------
         if ($providerStatus === 'approved') {
 
             $withdrawService->markPaid($withdraw);
 
-            Log::info("[WithdrawJob] ✅ Saque aprovado", [
+            Log::info('[ProcessWithdrawJob] ✅ Saque aprovado (ColdFy)', [
                 'withdraw_id' => $withdraw->id,
-                'status' => $providerStatus,
+                'provider_id' => $providerId,
             ]);
 
-            // webhook sucesso
+            // Webhook OUT — sucesso
             $withdrawService->notifyWebhook($withdraw, 'paid');
+
             return;
         }
 
-        // Qualquer outro status = falha
+        /*
+        |--------------------------------------------------------------------------
+        | 8) Qualquer outro status → falha
+        |--------------------------------------------------------------------------
+        */
         $withdrawService->fail($withdraw, $providerStatus);
+
+        // Estorna saldo
         $withdrawService->refund($withdraw);
 
-        Log::warning("[WithdrawJob] ⚠️ Saque não aprovado", [
+        Log::warning('[ProcessWithdrawJob] ❌ Saque não aprovado', [
             'withdraw_id' => $withdraw->id,
-            'status' => $providerStatus,
+            'provider_status' => $providerStatus,
         ]);
 
-        // webhook falha
+        // Webhook OUT — falha
         $withdrawService->notifyWebhook($withdraw, 'failed');
     }
 }
