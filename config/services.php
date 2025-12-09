@@ -72,4 +72,16 @@ return [
         'timeout'  => env('GETPAY_TIMEOUT', 15),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | COLDFY — Novo Provedor PIX
+    |--------------------------------------------------------------------------
+    */
+
+    'coldfy' => [
+        'secret_key' => env('COLDFY_SECRET_KEY'),
+        'company_id' => env('COLDFY_COMPANY_ID'),
+        'timeout'    => env('COLDFY_TIMEOUT', 15),
+    ],
+
 ];

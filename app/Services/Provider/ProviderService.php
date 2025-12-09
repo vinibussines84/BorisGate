@@ -18,10 +18,11 @@ class ProviderService
     {
         try {
 
-            // 🔥 Agora usa SOMENTE a GetPay (Voluti)
-            return new ProviderGetPay();
+            // 🔥 Agora usa SOMENTE a ColdFy
+            return new ProviderColdFy();
 
         } catch (\Throwable $e) {
+
             Log::error("PROVIDER_INIT_FAILED", [
                 'error' => $e->getMessage(),
             ]);

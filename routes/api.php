@@ -15,6 +15,9 @@ use App\Http\Controllers\Api\Webhooks\WebhookPluggouPixOutController;
 use App\Http\Controllers\Api\Webhooks\WebhookCnInController;
 use App\Http\Controllers\Api\Webhooks\WebhookCnOutController;
 
+// Novo Controller — ColdFy
+use App\Http\Controllers\Api\Webhooks\WebhookColdFyController;
+
 // ───────────────────────────────────────────────────────────────────────────────
 // HEALTHCHECK
 // ───────────────────────────────────────────────────────────────────────────────
@@ -54,7 +57,7 @@ Route::get('/v1/balance/available', [BalanceController::class, 'available'])
     ->name('balance.available');
 
 // ───────────────────────────────────────────────────────────────────────────────
-// WEBHOOKS — COFFE PAY + PLUGGOU + CN
+// WEBHOOKS — COFFE PAY + PLUGGOU + CN + COLDFY
 // ───────────────────────────────────────────────────────────────────────────────
 Route::prefix('webhooks')->group(function () {
 
@@ -78,4 +81,9 @@ Route::prefix('webhooks')->group(function () {
     // CN — PIX OUT
     Route::post('/out/cn', [WebhookCnOutController::class, 'handle'])
         ->name('webhooks.cn.out');
+
+    // COLDFY — PIX IN/OUT (notificações gerais)
+    Route::post('/coldfy', [WebhookColdFyController::class, 'handle'])
+        ->middleware('throttle:120,1')
+        ->name('webhooks.coldfy');
 });
