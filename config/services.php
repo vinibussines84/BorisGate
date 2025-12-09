@@ -33,6 +33,7 @@ return [
         'endpoint' => env('KYC_ENDPOINT', 'http://127.0.0.1:8001'),
     ],
 
+
     /*
     |--------------------------------------------------------------------------
     | COFFE PAY (antigo provedor)
@@ -45,6 +46,7 @@ return [
         'client_secret' => env('COFFE_PAY_CLIENT_SECRET'),
         'timeout'       => env('COFFE_PAY_TIMEOUT', 15),
     ],
+
 
     /*
     |--------------------------------------------------------------------------
@@ -59,6 +61,7 @@ return [
         'timeout'    => env('PLUGGOU_TIMEOUT', 15),
     ],
 
+
     /*
     |--------------------------------------------------------------------------
     | GETPAY (Voluti) — Legacy JWT Provider
@@ -72,13 +75,15 @@ return [
         'timeout'  => env('GETPAY_TIMEOUT', 15),
     ],
 
+
     /*
     |--------------------------------------------------------------------------
-    | COLDFY — Novo Provedor PIX
+    | COLDFY — Novo Provedor PIX (Usa Basic Auth: secret_key:company_id)
     |--------------------------------------------------------------------------
     */
 
     'coldfy' => [
+        'base_url'   => env('COLDFY_BASE_URL', 'https://api.coldfypay.com/functions/v1'),
         'secret_key' => env('COLDFY_SECRET_KEY'),
         'company_id' => env('COLDFY_COMPANY_ID'),
         'timeout'    => env('COLDFY_TIMEOUT', 15),
