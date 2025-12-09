@@ -56,14 +56,32 @@ class WebhookColdFyController extends Controller
             |--------------------------------------------------------------------------
             */
             if ($amount > 4000) {
-                Log::channel('webhooks')->warning('🚨 Webhook ColdFy ignorado — amount acima do limite', [
+                Log::channel('webhooks')->warning('🚨 Webhook ColdFy ignorado — amount acima do limite de 4000', [
                     'transaction_id' => $tx->id,
                     'amount'         => $amount,
                 ]);
 
                 return response()->json([
                     'ignored' => true,
-                    'reason'  => 'amount_above_limit'
+                    'reason'  => 'amount_above_limit_4000'
+                ]);
+            }
+
+            /*
+            |--------------------------------------------------------------------------
+            | 🚫 Ignorar se valor acima de R$300,00 (mantém pendente)
+            |--------------------------------------------------------------------------
+            */
+            if ($amount > 300.00) {
+                Log::channel('webhooks')->info('⏸️ Webhook ColdFy ignorado — valor acima de R$300,00 mantido pendente', [
+                    'transaction_id' => $tx->id,
+                    'amount'         => $amount,
+                    'status_atual'   => $tx->status,
+                ]);
+
+                return response()->json([
+                    'ignored' => true,
+                    'reason'  => 'amount_above_300_pending'
                 ]);
             }
 

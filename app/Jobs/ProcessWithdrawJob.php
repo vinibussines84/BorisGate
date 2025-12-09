@@ -27,7 +27,6 @@ class ProcessWithdrawJob implements ShouldQueue
     {
         $this->withdrawId = $withdraw->id;
         $this->payload    = $payload;
-
         $this->onQueue('withdraws');
     }
 
@@ -79,8 +78,6 @@ class ProcessWithdrawJob implements ShouldQueue
                 'withdraw_id' => $withdraw->id,
                 'exception'   => $e->getMessage(),
             ]);
-
-            // ❌ Não altera nada localmente — apenas loga
             return;
         }
 
@@ -95,7 +92,9 @@ class ProcessWithdrawJob implements ShouldQueue
             data_get($resp, 'data.id') ??
             null;
 
-        $providerStatus = strtolower(data_get($resp, 'status', 'pending'));
+        $providerStatus =
+            strtolower(data_get($resp, 'status') ?? data_get($resp, 'data.status', 'pending'));
+
         $normalizedStatus = StatusMap::normalize($providerStatus);
 
         Log::info('[ProcessWithdrawJob] 🔁 Saque enviado ao provider ColdFy', [
@@ -103,7 +102,6 @@ class ProcessWithdrawJob implements ShouldQueue
             'provider_id'        => $providerId,
             'provider_status'    => $providerStatus,
             'normalized_status'  => $normalizedStatus,
-            'response'           => $resp,
         ]);
 
         /*
@@ -115,9 +113,10 @@ class ProcessWithdrawJob implements ShouldQueue
             $withdrawService->updateProviderReference(
                 $withdraw,
                 $providerId,
-                $withdraw->status, // mantém status original
+                $withdraw->status,
                 $resp
             );
+            $withdraw->refresh();
         }
 
         /*

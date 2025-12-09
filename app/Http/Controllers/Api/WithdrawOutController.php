@@ -3,16 +3,15 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\ProcessWithdrawJob;
 use App\Jobs\SendWebhookWithdrawCreatedJob;
 use App\Models\User;
 use App\Models\Withdraw;
 use App\Services\Pix\KeyValidator;
 use App\Services\Withdraw\WithdrawService;
-use App\Services\Provider\ProviderColdFyOut;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
-use App\Support\StatusMap;
 
 class WithdrawOutController extends Controller
 {
@@ -45,7 +44,34 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 2) Validação
+            | 2) Normalização da chave PIX
+            |--------------------------------------------------------------------------
+            */
+            $rawKeyType = strtolower($request->input('key_type'));
+            $key = trim($request->input('key'));
+
+            // Normaliza telefone (PHONE)
+            if ($rawKeyType === 'phone') {
+                $phone = preg_replace('/\D/', '', $key);
+                if (str_starts_with($phone, '55')) {
+                    $phone = substr($phone, 2);
+                }
+                $key = $phone;
+            }
+
+            /*
+            |--------------------------------------------------------------------------
+            | 3) Converter key_type → validação interna
+            |--------------------------------------------------------------------------
+            */
+            $keyTypeForValidation = match ($rawKeyType) {
+                'random', 'evp' => 'evp',
+                default          => $rawKeyType,
+            };
+
+            /*
+            |--------------------------------------------------------------------------
+            | 4) Validação
             |--------------------------------------------------------------------------
             */
             $data = $request->validate([
@@ -56,6 +82,20 @@ class WithdrawOutController extends Controller
                 'external_id'  => ['nullable','string','max:64'],
             ]);
 
+            /*
+            |--------------------------------------------------------------------------
+            | 5) Validar chave PIX
+            |--------------------------------------------------------------------------
+            */
+            if (!KeyValidator::validate($key, strtoupper($keyTypeForValidation))) {
+                return $this->error("Chave PIX inválida.");
+            }
+
+            /*
+            |--------------------------------------------------------------------------
+            | 6) Regras de negócio
+            |--------------------------------------------------------------------------
+            */
             $gross = (float) $data['amount'];
 
             if ($gross < 10) {
@@ -68,32 +108,7 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 3) Chave PIX e normalização
-            |--------------------------------------------------------------------------
-            */
-            $rawKeyType = strtolower($data['key_type']);
-            $key = trim($data['key']);
-
-            if ($rawKeyType === 'phone') {
-                $phone = preg_replace('/\D/', '', $key);
-                if (str_starts_with($phone, '55')) {
-                    $phone = substr($phone, 2);
-                }
-                $key = $phone;
-            }
-
-            $keyTypeForValidation = match ($rawKeyType) {
-                'random', 'evp' => 'evp',
-                default => $rawKeyType,
-            };
-
-            if (!KeyValidator::validate($key, strtoupper($keyTypeForValidation))) {
-                return $this->error("Chave PIX inválida.");
-            }
-
-            /*
-            |--------------------------------------------------------------------------
-            | 4) Identificação e idempotência
+            | 7) Idempotência
             |--------------------------------------------------------------------------
             */
             $externalId = $data['external_id']
@@ -111,14 +126,14 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 5) Criar saque local (sem alterar status)
+            | 8) Criar saque local
             |--------------------------------------------------------------------------
             */
             $withdraw = $this->withdrawService->create(
                 $user,
                 $gross,
-                $gross,
-                0.0,
+                $gross, // valor líquido = bruto (sem taxa)
+                0, // sem taxa
                 [
                     'key'         => $key,
                     'key_type'    => $rawKeyType,
@@ -131,37 +146,32 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 6) Envio ao provider ColdFy
+            | 9) Formatar chave para envio ao provider
             |--------------------------------------------------------------------------
             */
-            $provider = new ProviderColdFyOut();
-
-            $payload = [
-                'pixkeytype'      => $rawKeyType,
-                'pixkey'          => $key,
-                'requestedamount' => (int) ($gross * 100), // em centavos
-                'description'     => $data['description'] ?? 'Saque via API',
-                'idempotency_key' => $externalId,
-                'isPix'           => true,
-                'postbackUrl'     => route('webhooks.coldfy'),
-            ];
-
-            $response = $provider->createCashout($payload);
-
-            // Normaliza o status da ColdFy para o formato interno
-            $remoteStatus = data_get($response, 'status', 'pending');
-            $normalizedStatus = StatusMap::normalize($remoteStatus);
-
-            Log::info('💸 ColdFy Cashout enviado', [
-                'withdraw_id' => $withdraw->id,
-                'remote_status' => $remoteStatus,
-                'normalized_status' => $normalizedStatus,
-                'response' => $response,
-            ]);
+            $formattedKey = match ($rawKeyType) {
+                'cpf','cnpj','phone' => preg_replace('/\D/', '', $key),
+                default              => trim($key),
+            };
 
             /*
             |--------------------------------------------------------------------------
-            | 7) Webhook de criação (OUT)
+            | 10) Payload COLDFY (formato esperado)
+            |--------------------------------------------------------------------------
+            */
+            $payload = [
+                "externalId"     => $externalId,
+                "pixKey"         => $formattedKey,
+                "pixKeyType"     => strtoupper($rawKeyType), // CPF, CNPJ, EMAIL, PHONE, EVP
+                "description"    => $data['description'] ?? 'Saque diário do parceiro',
+                "amount"         => (float) $gross,
+            ];
+
+            ProcessWithdrawJob::dispatch($withdraw, $payload)->onQueue('withdraws');
+
+            /*
+            |--------------------------------------------------------------------------
+            | 11) Webhook OUT
             |--------------------------------------------------------------------------
             */
             if ($user->webhook_enabled && $user->webhook_out_url) {
@@ -175,34 +185,36 @@ class WithdrawOutController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 8) Retorno
+            | 12) Resposta ao cliente
             |--------------------------------------------------------------------------
             */
             return response()->json([
                 'success' => true,
-                'message' => 'Saque enviado para a ColdFy com sucesso.',
+                'message' => 'Saque enfileirado para processamento.',
                 'data' => [
-                    'id'             => $withdraw->id,
-                    'external_id'    => $externalId,
-                    'requested'      => $gross,
-                    'pix_key'        => $withdraw->pixkey,
-                    'pix_key_type'   => $withdraw->pixkey_type,
-                    'provider'       => 'coldfy',
-                    'provider_status'=> $remoteStatus,
-                    'system_status'  => $normalizedStatus,
-                    'reference'      => data_get($response, 'id'),
-                    'created_at'     => $withdraw->created_at->toIso8601String(),
-                ],
+                    'id'               => $withdraw->id,
+                    'external_id'      => $externalId,
+                    'requested'        => $gross,
+                    'pix_key'          => $withdraw->pixkey,
+                    'pix_key_type'     => $withdraw->pixkey_type,
+                    'status'           => 'processing',
+                    'reference'        => null,
+                    'provider'         => 'coldfy',
+                    'created_at'       => $withdraw->created_at->toIso8601String(),
+                ]
             ]);
 
         } catch (\Throwable $e) {
-
             Log::error('🚨 Erro ao criar saque (ColdFy)', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
             ]);
 
-            return $this->error("Erro interno ao processar o saque. Detalhe: {$e->getMessage()}");
+            if (str_contains($e->getMessage(), 'Saldo insuficiente')) {
+                return $this->error($e->getMessage());
+            }
+
+            return $this->error("Erro interno ao processar o saque. Tente novamente mais tarde.");
         }
     }
 
