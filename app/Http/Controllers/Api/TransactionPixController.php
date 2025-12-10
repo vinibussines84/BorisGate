@@ -18,7 +18,7 @@ class TransactionPixController extends Controller
 {
     /*
     |--------------------------------------------------------------------------
-    | PIX CASH-IN (via ProviderService -> XFlow)
+    | PIX CASH-IN (ProviderService -> XFlow)
     |--------------------------------------------------------------------------
     */
     public function store(Request $request, ProviderService $provider)
@@ -95,22 +95,24 @@ class TransactionPixController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        |  🚀 XFLOW - CREATE DEPOSIT
+        |  🚀 XFLOW - CREATE DEPOSIT (Síncrono)
         |--------------------------------------------------------------------------
         */
         try {
 
             $response = $provider->createPix($amountReais, [
-                "external_id"        => $externalId,
-                "clientCallbackUrl"  => route("webhooks.xflow"),
-                "name"               => $name,
-                "email"              => $user->email ?? "cliente@example.com",
-                "document"           => $document,
+                "external_id"       => $externalId,
+                "clientCallbackUrl" => config('xflow.callback_url'),
+                "payer" => [
+                    "name"     => $name,
+                    "email"    => $user->email ?? "cliente@example.com",
+                    "document" => $document,
+                ],
             ]);
 
             Log::info("XFLOW_CREATE_PAYMENT_RESPONSE", $response);
 
-            // 🔥 Novo formato OFICIAL da XFlow
+            // ✔ Formato oficial XFlow
             $transactionId = data_get($response, "qrCodeResponse.transactionId");
             $qrCodeText    = data_get($response, "qrCodeResponse.qrcode");
 
@@ -135,7 +137,7 @@ class TransactionPixController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | 📌 Atualiza somente dados auxiliares (não status)
+        | 📌 Atualiza dados retornados pelo provedor
         |--------------------------------------------------------------------------
         */
         $tx->updateQuietly([
@@ -160,7 +162,7 @@ class TransactionPixController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | ✅ Resposta final
+        | ✅ Resposta imediata com QR CODE
         |--------------------------------------------------------------------------
         */
         return response()->json([
@@ -194,7 +196,7 @@ class TransactionPixController extends Controller
             return response()->json(['success' => false, 'error' => 'Invalid credentials.'], 401);
         }
 
-        // 🔍 busca transação local
+        // 🔍 Transação local
         $tx = Transaction::where('external_reference', $externalId)
             ->where('user_id', $user->id)
             ->first();
@@ -220,7 +222,7 @@ class TransactionPixController extends Controller
             ]);
         }
 
-        // 🔍 saque
+        // 🔍 Saque
         $withdraw = Withdraw::where('external_id', $externalId)
             ->where('user_id', $user->id)
             ->first();
@@ -267,4 +269,3 @@ class TransactionPixController extends Controller
         return round(max(0, min($fixed + ($amount * $percent / 100), $amount)), 2);
     }
 }
-

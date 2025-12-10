@@ -4,6 +4,7 @@ namespace App\Services\Provider;
 
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Exception;
 
 class ProviderXFlow
@@ -11,13 +12,15 @@ class ProviderXFlow
     protected string $baseUrl;
     protected string $token;
     protected int $timeout;
+    protected string $callbackUrl;
 
     public function __construct()
     {
-        // 🔥 Carregar valores do config/xflow.php
-        $this->token   = config("xflow.token");
-        $this->baseUrl = config("xflow.base_url", "https://api.xflowpayments.co");
-        $this->timeout = config("xflow.timeout", 15);
+        // 🔥 Carrega tudo do config/xflow.php
+        $this->token       = config("xflow.token");
+        $this->baseUrl     = config("xflow.base_url", "https://api.xflowpayments.co");
+        $this->timeout     = config("xflow.timeout", 8); // 🔥 timeout menor e mais inteligente
+        $this->callbackUrl = config("xflow.callback_url", "https://equitpay.app/api/webhooks/xflow");
 
         if (!$this->token) {
             Log::error("XFLOW_TOKEN_MISSING", [
@@ -28,25 +31,39 @@ class ProviderXFlow
     }
 
     /**
-     * 🧾 Criar PIX (gera QRCode)
+     * 🧾 Criar PIX (retorna QRCode)
      */
-    public function createPix(float $amount, array $payer)
+    public function createPix(float $amount, array $data)
     {
+        // 🔥 Corrige o formato do payload para PAYER (padrão XFlow)
         $payload = [
-            "amount" => $amount,
-            "external_id" => $payer["external_id"] ?? ("ext_" . uniqid()),
-            "clientCallbackUrl" => $payer["clientCallbackUrl"] ?? route("webhooks.xflow"),
+            "amount"         => $amount,
+
+            // Muito mais rápido que uniqid()
+            "external_id"    => $data["external_id"] ?? (string) Str::orderedUuid(),
+
+            // Não usa route() dentro do provider → muito mais rápido
+            "clientCallbackUrl" => $data["clientCallbackUrl"] ?? $this->callbackUrl,
+
             "payer" => [
-                "name"     => $payer["name"] ?? "Cliente",
-                "email"    => $payer["email"] ?? "cliente@example.com",
-                "document" => $payer["document"] ?? null,
+                "name"     => $data["payer"]["name"]     ?? $data["name"]     ?? "Cliente",
+                "email"    => $data["payer"]["email"]    ?? $data["email"]    ?? "cliente@example.com",
+                "document" => $data["payer"]["document"] ?? $data["document"] ?? null,
             ],
         ];
 
-        Log::info("XFLOW_CREATE_PIX_REQUEST", $payload);
+        // 🔥 Evita log pesado em produção
+        if (app()->environment("local")) {
+            Log::info("XFLOW_CREATE_PIX_REQUEST", $payload);
+        }
 
+        // 🚀 Conexão otimizada com keep-alive + timeout curto
         $response = Http::withToken($this->token)
+            ->withHeaders([
+                "Connection" => "keep-alive"
+            ])
             ->timeout($this->timeout)
+            ->retry(2, 150) // 🔥 Retentativa rápida (evita picos de latência)
             ->post("{$this->baseUrl}/api/payments/deposit", $payload);
 
         if ($response->failed()) {
@@ -55,6 +72,7 @@ class ProviderXFlow
                 "response" => $response->body(),
                 "payload"  => $payload,
             ]);
+
             throw new Exception("Erro ao criar PIX na XFlow.");
         }
 
@@ -69,7 +87,11 @@ class ProviderXFlow
         $url = "{$this->baseUrl}/api/payments/{$transactionId}";
 
         $response = Http::withToken($this->token)
+            ->withHeaders([
+                "Connection" => "keep-alive"
+            ])
             ->timeout($this->timeout)
+            ->retry(2, 150)
             ->get($url);
 
         if ($response->failed()) {
@@ -78,6 +100,7 @@ class ProviderXFlow
                 "status"         => $response->status(),
                 "response"       => $response->body(),
             ]);
+
             throw new Exception("Erro ao consultar status da XFlow.");
         }
 
