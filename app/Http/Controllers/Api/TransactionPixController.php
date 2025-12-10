@@ -18,7 +18,7 @@ class TransactionPixController extends Controller
 {
     /*
     |--------------------------------------------------------------------------
-    | PIX CASH-IN (via ProviderService -> ColdFy)
+    | PIX CASH-IN (via ProviderService -> XFlow)
     |--------------------------------------------------------------------------
     */
     public function store(Request $request, ProviderService $provider)
@@ -71,7 +71,7 @@ class TransactionPixController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        |  📌 Criação local ANTES da ColdFy
+        |  📌 Criação local ANTES da XFlow
         |--------------------------------------------------------------------------
         */
         $now = Carbon::now('America/Sao_Paulo');
@@ -83,7 +83,7 @@ class TransactionPixController extends Controller
             'status'             => TransactionStatus::PENDING,
             'currency'           => 'BRL',
             'method'             => 'pix',
-            'provider'           => 'ColdFy',
+            'provider'           => 'XFlow',  // 🔥 ARRUMADO
             'amount'             => $amountReais,
             'fee'                => $this->computeFee($user, $amountReais),
             'external_reference' => $externalId,
@@ -95,34 +95,37 @@ class TransactionPixController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        |  🚀 COLDFY - CREATE PAYMENT
+        |  🚀 XFLOW - CREATE DEPOSIT
         |--------------------------------------------------------------------------
         */
         try {
+
             $response = $provider->createPix($amountReais, [
-                "externalId"     => $externalId,
-                "name"           => $name,
-                "document"       => $document,
-                "identification" => null,
-                "expire"         => 3600,
+                "external_id"        => $externalId,
+                "clientCallbackUrl"  => route("webhooks.xflow"), // 🔥 se existir
+                "payer" => [
+                    "name"     => $name,
+                    "email"    => $user->email ?? "cliente@example.com",
+                    "document" => $document
+                ]
             ]);
 
-            Log::info("COLDFY_CREATE_PAYMENT_RESPONSE", $response);
+            Log::info("XFLOW_CREATE_PAYMENT_RESPONSE", $response);
 
-            // ✅ Estrutura correta da resposta ColdFy
+            // 🔥 Formato da resposta XFlow
             $transactionId = data_get($response, "id");
-            $qrCodeText    = data_get($response, "pix.qrcode");
+            $qrCodeText    = data_get($response, "qrcode_text");
 
             if (!$transactionId || !$qrCodeText) {
-                throw new \Exception("Invalid ColdFy response.");
+                throw new \Exception("Invalid XFlow response.");
             }
 
         } catch (\Throwable $e) {
 
-            // ❌ só muda status em erro
+            // ❌ só muda status em erro (NÃO ALTERADO)
             $tx->updateQuietly(['status' => TransactionStatus::FAILED]);
 
-            Log::error("COLDFY_CREATE_PAYMENT_ERROR", [
+            Log::error("XFLOW_CREATE_PAYMENT_ERROR", [
                 'error' => $e->getMessage(),
             ]);
 

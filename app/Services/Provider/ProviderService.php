@@ -18,8 +18,8 @@ class ProviderService
     {
         try {
 
-            // 🔥 Agora usa SOMENTE a ColdFy
-            return new ProviderColdFy();
+            // 🔥 Agora usa SOMENTE o XFlow
+            return new ProviderXFlow();
 
         } catch (\Throwable $e) {
 
@@ -56,7 +56,7 @@ class ProviderService
         } catch (\Throwable $e) {
 
             Log::error("PROVIDER_GET_STATUS_FAILED", [
-                'error' => $e->getMessage(),
+                'error'          => $e->getMessage(),
                 'transaction_id' => $transactionId,
             ]);
 

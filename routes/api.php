@@ -15,9 +15,8 @@ use App\Http\Controllers\Api\Webhooks\WebhookPluggouPixOutController;
 use App\Http\Controllers\Api\Webhooks\WebhookCnInController;
 use App\Http\Controllers\Api\Webhooks\WebhookCnOutController;
 
-// Novo Controller — ColdFy
-use App\Http\Controllers\Api\Webhooks\WebhookColdFyController;
-use App\Http\Controllers\Api\Webhooks\WebhookColdFyOutController;
+// NOVO — XFLOW
+use App\Http\Controllers\Api\Webhooks\WebhookXFlowController;
 
 /*
 |--------------------------------------------------------------------------
@@ -69,7 +68,7 @@ Route::get('/v1/balance/available', [BalanceController::class, 'available'])
 
 /*
 |--------------------------------------------------------------------------
-| WEBHOOKS — COFFE PAY + PLUGGOU + CN + COLDFY
+| WEBHOOKS — COFFE PAY + PLUGGOU + CN + XFLOW
 |--------------------------------------------------------------------------
 */
 Route::prefix('webhooks')->group(function () {
@@ -117,31 +116,10 @@ Route::prefix('webhooks')->group(function () {
 
     /*
     |--------------------------------------------------------------------------
-    | COLDFY — HEALTHCHECKS OBRIGATÓRIOS
+    | XFLOW — WEBHOOK PIX IN + PIX OUT
     |--------------------------------------------------------------------------
     */
-
-    // PIX IN — ColdFy envia GET ANTES de POST
-    Route::get('/coldfy', fn () => response()->json(['ok' => true], 200));
-
-    // PIX OUT — ESTE É O QUE VOCÊ IDENTIFICOU NO LOG!
-    Route::get('/coldfy/out', fn () => response()->json(['ok' => true], 200));
-
-    /*
-    |--------------------------------------------------------------------------
-    | COLDFY — PIX IN (pagamentos recebidos)
-    |--------------------------------------------------------------------------
-    */
-    Route::post('/coldfy', [WebhookColdFyController::class, 'handle'])
+    Route::post('/xflow', [WebhookXFlowController::class, 'handle'])
         ->middleware('throttle:120,1')
-        ->name('webhooks.coldfy');
-
-    /*
-    |--------------------------------------------------------------------------
-    | COLDFY — PIX OUT (saques / cashouts)
-    |--------------------------------------------------------------------------
-    */
-    Route::post('/coldfy/out', [WebhookColdFyOutController::class, 'handle'])
-        ->middleware('throttle:120,1')
-        ->name('webhooks.coldfy.out');
+        ->name('webhooks.xflow');
 });

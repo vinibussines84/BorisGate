@@ -96,7 +96,7 @@ class WebhookColdFyController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | 🧮 Atualizar saldo apenas se houve mudança de status
+            | Atualizar saldo apenas se houve mudança de status
             |--------------------------------------------------------------------------
             */
             $wallet->applyStatusChange($tx, $oldEnum, $newEnum);

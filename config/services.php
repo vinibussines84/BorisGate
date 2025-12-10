@@ -78,15 +78,15 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | COLDFY — Novo Provedor PIX (Usa Basic Auth: secret_key:company_id)
+    | XFLOW — Novo Provedor PIX (Usa Login JWT)
     |--------------------------------------------------------------------------
     */
 
-    'coldfy' => [
-        'base_url'   => env('COLDFY_BASE_URL', 'https://api.coldfypay.com/functions/v1'),
-        'secret_key' => env('COLDFY_SECRET_KEY'),
-        'company_id' => env('COLDFY_COMPANY_ID'),
-        'timeout'    => env('COLDFY_TIMEOUT', 15),
+    'xflow' => [
+        'base_url'      => env('XFLOW_BASE_URL', 'https://api.xflowpayments.co'),
+        'client_id'     => env('XFLOW_CLIENT_ID'),
+        'client_secret' => env('XFLOW_CLIENT_SECRET'),
+        'timeout'       => env('XFLOW_TIMEOUT', 15),
     ],
 
 ];
