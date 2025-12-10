@@ -48,7 +48,7 @@ class ProviderXFlow
         $payload = [
             "amount" => $amount,
             "external_id" => "ext_" . uniqid(),
-            "clientCallbackUrl" => route("webhook.xflow"),
+"clientCallbackUrl" => route("webhooks.xflow"),
             "payer" => [
                 "name"     => $payer["name"] ?? "Cliente",
                 "email"    => $payer["email"] ?? null,
