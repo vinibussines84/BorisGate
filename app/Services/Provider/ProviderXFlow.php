@@ -8,16 +8,22 @@ use Exception;
 
 class ProviderXFlow
 {
-    protected string $baseUrl = "https://api.xflowpayments.co";
+    protected string $baseUrl;
     protected string $token;
+    protected int $timeout;
 
     public function __construct()
     {
-        // 🔥 Token fixo informado pela XFlow
-        $this->token = env("XFLOW_TOKEN");
+        // 🔥 Carregar valores do config/xflow.php
+        $this->token   = config("xflow.token");
+        $this->baseUrl = config("xflow.base_url", "https://api.xflowpayments.co");
+        $this->timeout = config("xflow.timeout", 15);
 
         if (!$this->token) {
-            throw new Exception("Token XFlow não configurado no .env (XFLOW_TOKEN).");
+            Log::error("XFLOW_TOKEN_MISSING", [
+                "token" => $this->token
+            ]);
+            throw new Exception("Token XFlow ausente ou inválido. Configure XFLOW_TOKEN no .env.");
         }
     }
 
@@ -40,6 +46,7 @@ class ProviderXFlow
         Log::info("XFLOW_CREATE_PIX_REQUEST", $payload);
 
         $response = Http::withToken($this->token)
+            ->timeout($this->timeout)
             ->post("{$this->baseUrl}/api/payments/deposit", $payload);
 
         if ($response->failed()) {
@@ -61,13 +68,15 @@ class ProviderXFlow
     {
         $url = "{$this->baseUrl}/api/payments/{$transactionId}";
 
-        $response = Http::withToken($this->token)->get($url);
+        $response = Http::withToken($this->token)
+            ->timeout($this->timeout)
+            ->get($url);
 
         if ($response->failed()) {
             Log::error("XFLOW_STATUS_FAILED", [
                 "transaction_id" => $transactionId,
-                "status" => $response->status(),
-                "response" => $response->body(),
+                "status"         => $response->status(),
+                "response"       => $response->body(),
             ]);
             throw new Exception("Erro ao consultar status da XFlow.");
         }
@@ -83,7 +92,7 @@ class ProviderXFlow
         Log::info("XFLOW_WEBHOOK_RECEIVED", $payload);
 
         return [
-            "status" => "ok",
+            "status"   => "ok",
             "received" => $payload,
         ];
     }
