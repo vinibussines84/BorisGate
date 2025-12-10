@@ -9,34 +9,15 @@ use Exception;
 class ProviderXFlow
 {
     protected string $baseUrl = "https://api.xflowpayments.co";
-    protected ?string $token = null;
+    protected string $token;
 
     public function __construct()
     {
-        $this->authenticate();
-    }
-
-    /**
-     * 🔐 Autenticação para gerar token JWT
-     */
-    private function authenticate()
-    {
-        $response = Http::post("{$this->baseUrl}/api/auth/login", [
-            "client_id"     => env("XFLOW_CLIENT_ID"),
-            "client_secret" => env("XFLOW_CLIENT_SECRET"),
-        ]);
-
-        if ($response->failed()) {
-            Log::error("XFLOW_AUTH_FAILED", [
-                "response" => $response->body(),
-            ]);
-            throw new Exception("Falha na autenticação XFlow.");
-        }
-
-        $this->token = $response->json("token");
+        // 🔥 Token fixo informado pela XFlow
+        $this->token = env("XFLOW_TOKEN");
 
         if (!$this->token) {
-            throw new Exception("Token inválido retornado pela XFlow.");
+            throw new Exception("Token XFlow não configurado no .env (XFLOW_TOKEN).");
         }
     }
 
@@ -47,20 +28,23 @@ class ProviderXFlow
     {
         $payload = [
             "amount" => $amount,
-            "external_id" => "ext_" . uniqid(),
-"clientCallbackUrl" => route("webhooks.xflow"),
+            "external_id" => $payer["external_id"] ?? ("ext_" . uniqid()),
+            "clientCallbackUrl" => $payer["clientCallbackUrl"] ?? route("webhooks.xflow"),
             "payer" => [
                 "name"     => $payer["name"] ?? "Cliente",
-                "email"    => $payer["email"] ?? null,
+                "email"    => $payer["email"] ?? "cliente@example.com",
                 "document" => $payer["document"] ?? null,
             ],
         ];
+
+        Log::info("XFLOW_CREATE_PIX_REQUEST", $payload);
 
         $response = Http::withToken($this->token)
             ->post("{$this->baseUrl}/api/payments/deposit", $payload);
 
         if ($response->failed()) {
             Log::error("XFLOW_CREATE_PIX_FAILED", [
+                "status"   => $response->status(),
                 "response" => $response->body(),
                 "payload"  => $payload,
             ]);
@@ -75,26 +59,20 @@ class ProviderXFlow
      */
     public function getTransactionStatus(string $transactionId)
     {
-        $response = Http::withToken($this->token)
-            ->get("{$this->baseUrl}/api/payments/{$transactionId}");
+        $url = "{$this->baseUrl}/api/payments/{$transactionId}";
+
+        $response = Http::withToken($this->token)->get($url);
 
         if ($response->failed()) {
             Log::error("XFLOW_STATUS_FAILED", [
                 "transaction_id" => $transactionId,
+                "status" => $response->status(),
                 "response" => $response->body(),
             ]);
             throw new Exception("Erro ao consultar status da XFlow.");
         }
 
         return $response->json();
-    }
-
-    /**
-     * 💸 Saque (não existe no trecho, mas deixei pronto)
-     */
-    public function withdraw(float $amount, array $recipient)
-    {
-        throw new Exception("Withdraw ainda não implementado na XFlow.");
     }
 
     /**
@@ -108,5 +86,13 @@ class ProviderXFlow
             "status" => "ok",
             "received" => $payload,
         ];
+    }
+
+    /**
+     * 💸 Saque (placeholder)
+     */
+    public function withdraw(float $amount, array $recipient)
+    {
+        throw new Exception("Withdraw ainda não implementado na XFlow.");
     }
 }

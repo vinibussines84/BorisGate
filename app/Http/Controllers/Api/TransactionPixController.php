@@ -83,7 +83,7 @@ class TransactionPixController extends Controller
             'status'             => TransactionStatus::PENDING,
             'currency'           => 'BRL',
             'method'             => 'pix',
-            'provider'           => 'XFlow',  // 🔥 ARRUMADO
+            'provider'           => 'XFlow',
             'amount'             => $amountReais,
             'fee'                => $this->computeFee($user, $amountReais),
             'external_reference' => $externalId,
@@ -102,27 +102,25 @@ class TransactionPixController extends Controller
 
             $response = $provider->createPix($amountReais, [
                 "external_id"        => $externalId,
-                "clientCallbackUrl"  => route("webhooks.xflow"), // 🔥 se existir
-                "payer" => [
-                    "name"     => $name,
-                    "email"    => $user->email ?? "cliente@example.com",
-                    "document" => $document
-                ]
+                "clientCallbackUrl"  => route("webhooks.xflow"),
+                "name"               => $name,
+                "email"              => $user->email ?? "cliente@example.com",
+                "document"           => $document,
             ]);
 
             Log::info("XFLOW_CREATE_PAYMENT_RESPONSE", $response);
 
-            // 🔥 Formato da resposta XFlow
-            $transactionId = data_get($response, "id");
-            $qrCodeText    = data_get($response, "qrcode_text");
+            // 🔥 Novo formato OFICIAL da XFlow
+            $transactionId = data_get($response, "qrCodeResponse.transactionId");
+            $qrCodeText    = data_get($response, "qrCodeResponse.qrcode");
 
             if (!$transactionId || !$qrCodeText) {
+                Log::error("XFLOW_INVALID_RESPONSE", $response);
                 throw new \Exception("Invalid XFlow response.");
             }
 
         } catch (\Throwable $e) {
 
-            // ❌ só muda status em erro (NÃO ALTERADO)
             $tx->updateQuietly(['status' => TransactionStatus::FAILED]);
 
             Log::error("XFLOW_CREATE_PAYMENT_ERROR", [
@@ -152,7 +150,7 @@ class TransactionPixController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | 🔔 Webhook assíncrono (somente created)
+        | 🔔 Webhook assíncrono
         |--------------------------------------------------------------------------
         */
         if ($user->webhook_enabled && $user->webhook_in_url) {
@@ -179,7 +177,7 @@ class TransactionPixController extends Controller
 
     /*
     |--------------------------------------------------------------------------
-    | STATUS POR EXTERNAL_ID (NÃO ALTERA NADA)
+    | STATUS POR EXTERNAL_ID
     |--------------------------------------------------------------------------
     */
     public function statusByExternal(Request $request, string $externalId)
@@ -196,7 +194,7 @@ class TransactionPixController extends Controller
             return response()->json(['success' => false, 'error' => 'Invalid credentials.'], 401);
         }
 
-        // 🔍 busca transação local (somente retorna)
+        // 🔍 busca transação local
         $tx = Transaction::where('external_reference', $externalId)
             ->where('user_id', $user->id)
             ->first();
@@ -269,3 +267,4 @@ class TransactionPixController extends Controller
         return round(max(0, min($fixed + ($amount * $percent / 100), $amount)), 2);
     }
 }
+
