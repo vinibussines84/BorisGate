@@ -17,3 +17,7 @@ composer.lock
 npm-debug.log
 yarn-error.log
 pnpm-debug.log
+
+**/caddy
+frankenphp
+frankenphp-worker.php
