@@ -47,9 +47,9 @@ class WithdrawOutController extends Controller
             $data = $request->validate([
                 'amount'      => ['required', 'numeric', 'min:10'],
                 'key'         => ['required', 'string'],
-                'key_type'    => ['required', Rule::in(['cpf','cnpj','email','phone','evp'])],
-                'description' => ['nullable','string','max:255'],
-                'external_id' => ['nullable','string','max:64'],
+                'key_type'    => ['required', Rule::in(['cpf', 'cnpj', 'email', 'phone', 'evp'])],
+                'description' => ['nullable', 'string', 'max:255'],
+                'external_id' => ['nullable', 'string', 'max:64'],
             ]);
 
             /* ===============================================================
@@ -104,7 +104,7 @@ class WithdrawOutController extends Controller
 
             /* ===============================================================
              | 7) Criar saque local (DEBITA SALDO)
-             | 🔥 PAYLOAD CORRETO PARA WithdrawService
+             | 🔥 Payload CORRETO para WithdrawService
              ===============================================================*/
             $withdraw = $this->withdrawService->create(
                 $user,
@@ -112,31 +112,23 @@ class WithdrawOutController extends Controller
                 $gross, // líquido
                 0,      // taxa
                 [
-                    'key'          => $key,
-                    'key_type'     => $rawKeyType,
-                    'external_id'  => $externalId,
-                    'internal_ref' => $internalRef,
-                    'provider'     => 'xflow',
+                    'pixkey'           => $key,
+                    'pixkey_type'      => $rawKeyType,
+                    'external_id'      => $externalId,
+                    'idempotency_key'  => $internalRef,
+                    'provider'         => 'xflow',
                 ]
             );
 
             /* ===============================================================
-             | 8) Payload XFLOW (provider)
+             | 8) Payload PARA O JOB (DOMÍNIO INTERNO)
+             | 🚨 NÃO USAR pix_key AQUI
              ===============================================================*/
-            $keyTypeForProvider = match ($rawKeyType) {
-                'cpf'   => 'CPF',
-                'cnpj'  => 'CNPJ',
-                'email' => 'EMAIL',
-                'phone' => 'PHONE',
-                'evp'   => 'EVP',
-                default => throw new \Exception('Tipo de chave PIX não suportado.'),
-            };
-
             $payload = [
                 'amount'       => $gross,
                 'external_id'  => $externalId,
-                'pix_key'      => $key,
-                'key_type'     => $keyTypeForProvider,
+                'key'          => $key,          // ✅ CORRETO
+                'key_type'     => $rawKeyType,   // ✅ cpf | cnpj | email | phone | evp
                 'description' => $data['description'] ?? 'Saque solicitado via API',
             ];
 
