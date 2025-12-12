@@ -22,16 +22,15 @@ class WithdrawOutController extends Controller
     public function store(Request $request)
     {
         try {
-            /*
-            |--------------------------------------------------------------------------
-            | 1) Autenticação
-            |--------------------------------------------------------------------------
-            */
+
+            /* ===============================================================
+             | 1) Autenticação
+             ===============================================================*/
             $authKey   = $request->header('X-Auth-Key');
             $secretKey = $request->header('X-Secret-Key');
 
             if (!$authKey || !$secretKey) {
-                return $this->error("Headers ausentes. É necessário enviar X-Auth-Key e X-Secret-Key.");
+                return $this->error('Headers ausentes. Informe X-Auth-Key e X-Secret-Key.');
             }
 
             $user = User::where('authkey', $authKey)
@@ -39,173 +38,144 @@ class WithdrawOutController extends Controller
                 ->first();
 
             if (!$user) {
-                return $this->error("Credenciais inválidas.");
+                return $this->error('Credenciais inválidas.');
             }
 
-            /*
-            |--------------------------------------------------------------------------
-            | 2) Normalização da chave PIX
-            |--------------------------------------------------------------------------
-            */
-            $rawKeyType = strtolower($request->input('key_type'));
-            $key = trim($request->input('key'));
-
-            // Normaliza telefone (PHONE)
-            if ($rawKeyType === 'phone') {
-                $phone = preg_replace('/\D/', '', $key);
-                if (str_starts_with($phone, '55')) {
-                    $phone = substr($phone, 2);
-                }
-                $key = $phone;
-            }
-
-            /*
-            |--------------------------------------------------------------------------
-            | 3) Converter key_type → validação interna
-            |--------------------------------------------------------------------------
-            */
-            $keyTypeForValidation = match ($rawKeyType) {
-                'random', 'evp' => 'evp',
-                default          => $rawKeyType,
-            };
-
-            /*
-            |--------------------------------------------------------------------------
-            | 4) Validação
-            |--------------------------------------------------------------------------
-            */
+            /* ===============================================================
+             | 2) Validação
+             ===============================================================*/
             $data = $request->validate([
-                'amount'       => ['required', 'numeric', 'min:0.01'],
-                'key'          => ['required', 'string'],
-                'key_type'     => ['required', Rule::in(['cpf','cnpj','email','phone','evp'])],
-                'description'  => ['nullable','string','max:255'],
-                'external_id'  => ['nullable','string','max:64'],
+                'amount'      => ['required', 'numeric', 'min:10'],
+                'key'         => ['required', 'string'],
+                'key_type'    => ['required', Rule::in(['cpf','cnpj','email','phone','evp'])],
+                'description' => ['nullable','string','max:255'],
+                'external_id' => ['nullable','string','max:64'],
             ]);
 
-            /*
-            |--------------------------------------------------------------------------
-            | 5) Validar chave PIX
-            |--------------------------------------------------------------------------
-            */
-            if (!KeyValidator::validate($key, strtoupper($keyTypeForValidation))) {
-                return $this->error("Chave PIX inválida.");
+            /* ===============================================================
+             | 3) Normalização da chave PIX
+             ===============================================================*/
+            $rawKeyType = strtolower($data['key_type']);
+            $key        = trim($data['key']);
+
+            if ($rawKeyType === 'phone') {
+                $key = preg_replace('/\D/', '', $key);
+                if (str_starts_with($key, '55')) {
+                    $key = substr($key, 2);
+                }
             }
 
-            /*
-            |--------------------------------------------------------------------------
-            | 6) Regras de negócio
-            |--------------------------------------------------------------------------
-            */
+            /* ===============================================================
+             | 4) Validação da chave PIX
+             ===============================================================*/
+            $keyTypeForValidation = match ($rawKeyType) {
+                'evp' => 'EVP',
+                default => strtoupper($rawKeyType),
+            };
+
+            if (!KeyValidator::validate($key, $keyTypeForValidation)) {
+                return $this->error('Chave PIX inválida.');
+            }
+
+            /* ===============================================================
+             | 5) Regras de negócio
+             ===============================================================*/
+            if (!$user->tax_out_enabled) {
+                return $this->error('Cashout desabilitado para este usuário.');
+            }
+
             $gross = (float) $data['amount'];
 
-            if ($gross < 10) {
-                return $this->error("Valor mínimo para saque é R$ 10,00.");
-            }
-
-            if (!$user->tax_out_enabled) {
-                return $this->error("Cashout desabilitado para este usuário.");
-            }
-
-            /*
-            |--------------------------------------------------------------------------
-            | 7) Idempotência
-            |--------------------------------------------------------------------------
-            */
+            /* ===============================================================
+             | 6) Idempotência
+             ===============================================================*/
             $externalId = $data['external_id']
-                ?: 'WD_' . now()->timestamp . '_' . rand(1000, 9999);
+                ?: 'WD_' . now()->timestamp . '_' . random_int(1000, 9999);
 
             if (
                 Withdraw::where('user_id', $user->id)
-                ->where('external_id', $externalId)
-                ->exists()
+                    ->where('external_id', $externalId)
+                    ->exists()
             ) {
-                return $this->error("External ID duplicado. Este saque já foi processado.");
+                return $this->error('External ID duplicado. Saque já processado.');
             }
 
-            $internalRef = 'withdraw_' . now()->timestamp . '_' . rand(1000, 9999);
+            $internalRef = 'withdraw_' . now()->timestamp . '_' . random_int(1000, 9999);
 
-            /*
-            |--------------------------------------------------------------------------
-            | 8) Criar saque local
-            |--------------------------------------------------------------------------
-            */
+            /* ===============================================================
+             | 7) Criar saque local (PENDING)
+             ===============================================================*/
             $withdraw = $this->withdrawService->create(
                 $user,
-                $gross,
-                $gross, // valor líquido = bruto (sem taxa)
-                0, // sem taxa
+                $gross,        // amount (líquido)
+                $gross,        // gross_amount
+                0,             // fee_amount
                 [
-                    'key'         => $key,
-                    'key_type'    => $rawKeyType,
-                    'external_id' => $externalId,
-                    'internal_ref'=> $internalRef,
-                    'provider'    => 'coldfy',
-                    'status'      => 'processing',
+                    'pixkey'        => $key,
+                    'pixkey_type'   => $rawKeyType,
+                    'external_id'   => $externalId,
+                    'idempotency_key'=> $internalRef,
+                    'provider'      => 'xflow',
+                    'status'        => Withdraw::STATUS_PENDING,
+                    'description'   => $data['description'] ?? null,
                 ]
             );
 
-            /*
-            |--------------------------------------------------------------------------
-            | 9) Formatar chave para envio ao provider
-            |--------------------------------------------------------------------------
-            */
-            $formattedKey = match ($rawKeyType) {
-                'cpf','cnpj','phone' => preg_replace('/\D/', '', $key),
-                default              => trim($key),
+            /* ===============================================================
+             | 8) Payload XFLOW (CORRETO)
+             ===============================================================*/
+            $keyTypeForProvider = match ($rawKeyType) {
+                'cpf'   => 'CPF',
+                'cnpj'  => 'CNPJ',
+                'email' => 'EMAIL',
+                'phone' => 'PHONE',
+                'evp'   => 'EVP',
+                default => throw new \Exception('Tipo de chave PIX não suportado.'),
             };
 
-            /*
-            |--------------------------------------------------------------------------
-            | 10) Payload COLDFY (formato esperado)
-            |--------------------------------------------------------------------------
-            */
             $payload = [
-                "externalId"     => $externalId,
-                "pixKey"         => $formattedKey,
-                "pixKeyType"     => strtoupper($rawKeyType),
-                "description"    => $data['description'] ?? 'Saque diário do parceiro',
-                "amount"         => (float) $gross,
+                'amount'       => $gross,
+                'external_id'  => $externalId,
+                'pix_key'      => $key,
+                'key_type'     => $keyTypeForProvider,
+                'description' => $data['description'] ?? 'Saque solicitado via API',
             ];
 
-            ProcessWithdrawJob::dispatch($withdraw, $payload)->onQueue('withdraws');
+            ProcessWithdrawJob::dispatch($withdraw, $payload)
+                ->onQueue('withdraws');
 
-            /*
-            |--------------------------------------------------------------------------
-            | 11) Webhook OUT
-            |--------------------------------------------------------------------------
-            */
+            /* ===============================================================
+             | 9) Webhook OUT
+             ===============================================================*/
             if ($user->webhook_enabled && $user->webhook_out_url) {
                 SendWebhookWithdrawCreatedJob::dispatch(
                     $user->id,
                     $withdraw->id,
-                    'processing',
+                    Withdraw::STATUS_PENDING,
                     null
                 )->onQueue('webhooks');
             }
 
-            /*
-            |--------------------------------------------------------------------------
-            | 12) Resposta ao cliente
-            |--------------------------------------------------------------------------
-            */
+            /* ===============================================================
+             | 10) Resposta
+             ===============================================================*/
             return response()->json([
                 'success' => true,
                 'message' => 'Saque enfileirado para processamento.',
                 'data' => [
-                    'id'               => $withdraw->id,
-                    'external_id'      => $externalId,
-                    'requested'        => $gross,
-                    'pix_key'          => $withdraw->pixkey,
-                    'pix_key_type'     => $withdraw->pixkey_type,
-                    'status'           => 'processing',
-                    'reference'        => null,
-                    'provider'         => 'coldfy',
-                    'created_at'       => $withdraw->created_at->toIso8601String(),
-                ]
+                    'id'           => $withdraw->id,
+                    'external_id'  => $externalId,
+                    'amount'       => $gross,
+                    'pix_key'      => $withdraw->pixkey,
+                    'pix_key_type' => $withdraw->pixkey_type,
+                    'status'       => Withdraw::STATUS_PENDING,
+                    'provider'     => 'xflow',
+                    'created_at'   => $withdraw->created_at->toIso8601String(),
+                ],
             ]);
 
         } catch (\Throwable $e) {
-            Log::error('🚨 Erro ao criar saque (ColdFy)', [
+            Log::error('🚨 Erro ao criar saque (XFlow)', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
             ]);
@@ -214,7 +184,7 @@ class WithdrawOutController extends Controller
                 return $this->error($e->getMessage());
             }
 
-            return $this->error("Erro interno ao processar o saque. Tente novamente mais tarde.");
+            return $this->error('Erro interno ao processar o saque.');
         }
     }
 

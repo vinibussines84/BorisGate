@@ -3,7 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\Withdraw;
-use App\Services\Provider\ProviderColdFyOut;
+use App\Services\Provider\XflowWithdraw;
 use App\Services\Withdraw\WithdrawService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -20,103 +20,118 @@ class ProcessWithdrawJob implements ShouldQueue
     public int $withdrawId;
     public array $payload;
 
-    // 🔥 NÃO REFAZ automaticamente
-    public $tries   = 1;
-    public $timeout = 60;
+    // 🔥 Não refaz automaticamente
+    public int $tries   = 1;
+    public int $timeout = 60;
 
     public function __construct(Withdraw $withdraw, array $payload)
     {
         $this->withdrawId = $withdraw->id;
         $this->payload    = $payload;
+
         $this->onQueue('withdraws');
     }
 
     public function handle(
-        ProviderColdFyOut $provider,
+        XflowWithdraw $provider,
         WithdrawService $withdrawService
-    ) {
+    ): void {
         $withdraw = Withdraw::find($this->withdrawId);
 
         if (!$withdraw) {
-            Log::error('[ProcessWithdrawJob] ❌ Withdraw não encontrado');
+            Log::error('[ProcessWithdrawJob][XFLOW] ❌ Withdraw não encontrado');
             return;
         }
 
-        Log::info('[ProcessWithdrawJob] 🚀 Iniciando processamento', [
+        Log::info('[ProcessWithdrawJob][XFLOW] 🚀 Iniciando saque', [
             'withdraw_id' => $withdraw->id,
         ]);
 
         /**
-         * ✔ EVITAR reprocessar se já enviado ao provider
+         * ✔ Evitar duplicidade
          */
         if (!empty($withdraw->provider_reference)) {
-            Log::warning('[ProcessWithdrawJob] ❌ Já tem provider_reference — ignorando');
+            Log::warning('[ProcessWithdrawJob][XFLOW] ⏭ Já enviado ao provider');
             return;
         }
 
         /**
          * ✔ Evitar reprocessar se já finalizado
          */
-        if (in_array($withdraw->status, ['paid','failed','canceled'], true)) {
-            Log::warning('[ProcessWithdrawJob] ❌ Já finalizado — ignorando');
+        if (in_array($withdraw->status, [
+            Withdraw::STATUS_PAID,
+            Withdraw::STATUS_FAILED,
+            Withdraw::STATUS_CANCELED,
+        ], true)) {
+            Log::warning('[ProcessWithdrawJob][XFLOW] ⏭ Saque já finalizado');
             return;
         }
 
         /**
-         * ✔ Criar payload para provider
+         * ✔ Payload no formato XFlow
          */
         $providerPayload = [
-            'external_id'  => $this->payload['externalId'] ?? $this->payload['external_id'],
-            'pix_key'      => $this->payload['pixKey'],
-            'pix_key_type' => strtolower($this->payload['pixKeyType']),
-            'description'  => $this->payload['description'],
             'amount'       => (float) $this->payload['amount'],
+            'external_id'  => $this->payload['external_id'],
+            'pix_key'      => $this->payload['pix_key'],
+            'key_type'     => strtoupper($this->payload['key_type']), // EMAIL | CPF | CNPJ | PHONE
+            'description'  => $this->payload['description'] ?? 'Saque solicitado',
+            'clientCallbackUrl' => $this->payload['clientCallbackUrl'] ?? null,
         ];
 
         try {
-            $resp = $provider->createCashout($providerPayload);
+            $resp = $provider->withdraw(
+                $providerPayload['amount'],
+                $providerPayload
+            );
 
         } catch (Throwable $e) {
 
-            // ⚠️ SE FOR RATE-LIMIT → PERMITIR retry MANUAL
-            if ($e->getMessage() === "RATE_LIMIT") {
-                Log::warning('[ProcessWithdrawJob] ⏳ Rate limit — tentando novamente em 10s');
-
+            // 🔁 Rate limit → retry manual
+            if (str_contains($e->getMessage(), 'RATE_LIMIT')) {
+                Log::warning('[ProcessWithdrawJob][XFLOW] ⏳ Rate limit — retry em 10s');
                 $this->release(10);
                 return;
             }
 
-            // ❌ ERRO REAL → NÃO CHAMAR DE NOVO
-            Log::error('[ProcessWithdrawJob] ❌ Falha real ao chamar provider', [
+            Log::error('[ProcessWithdrawJob][XFLOW] ❌ Erro ao chamar provider', [
                 'error' => $e->getMessage(),
             ]);
 
-            $withdrawService->refundLocal($withdraw, "Erro ao criar saque: ".$e->getMessage());
+            $withdrawService->refundLocal(
+                $withdraw,
+                'Erro ao criar saque na XFlow: ' . $e->getMessage()
+            );
             return;
         }
 
         /**
-         * ✔ Processar resposta
+         * ✔ Resposta esperada da XFlow
+         * {
+         *   "id": "transaction-123",
+         *   "status": "PENDING"
+         * }
          */
-        $withdrawal      = data_get($resp, 'withdrawal');
-        $providerId      = data_get($withdrawal, 'id');
-        $providerStatus  = strtolower(data_get($withdrawal, 'status', 'pending'));
+        $providerId     = data_get($resp, 'id');
+        $providerStatus = strtolower(data_get($resp, 'status', 'pending'));
 
-        Log::info('[ProcessWithdrawJob] 🔁 Retorno provider', [
+        Log::info('[ProcessWithdrawJob][XFLOW] 🔁 Retorno provider', [
             'withdraw_id'     => $withdraw->id,
             'provider_id'     => $providerId,
             'provider_status' => $providerStatus,
         ]);
 
         /**
-         * ✔ Converter approved → paid
+         * ✔ Normalização de status
          */
-        if ($providerStatus === 'approved') {
-            $providerStatus = 'paid';
+        if (in_array($providerStatus, ['completed', 'success', 'paid'], true)) {
+            $providerStatus = Withdraw::STATUS_PAID;
+        } elseif (!in_array($providerStatus, ['pending', 'processing'], true)) {
+            $providerStatus = Withdraw::STATUS_FAILED;
         }
 
         /**
-         * ✔ Salvar provider_reference
+         * ✔ Salvar referência do provider
          */
         if ($providerId) {
             $withdrawService->updateProviderReference(
@@ -129,32 +144,33 @@ class ProcessWithdrawJob implements ShouldQueue
         }
 
         /**
-         * ✔ Se for considerado pago → marcar como paid
+         * ✅ Pago imediatamente
          */
-        if ($providerStatus === 'paid') {
+        if ($providerStatus === Withdraw::STATUS_PAID) {
             $withdrawService->markAsPaid(
                 $withdraw,
                 payload: $resp,
                 extra: [
                     'paid_at' => now(),
-                    'provider_status' => 'paid'
+                    'provider_status' => 'paid',
                 ]
             );
 
-            Log::info('[ProcessWithdrawJob] ✅ Saque concluído como PAID');
+            Log::info('[ProcessWithdrawJob][XFLOW] ✅ Saque finalizado como PAID');
             return;
         }
 
         /**
-         * ❌ Falha real do provider
+         * ❌ Qualquer outro cenário → estorno
          */
         $withdrawService->refundLocal(
             $withdraw,
-            "ColdFy retornou status: {$providerStatus}"
+            "XFlow retornou status inválido: {$providerStatus}"
         );
 
-        Log::warning('[ProcessWithdrawJob] ❌ Saque marcado como FAILED (provider não aprovou)', [
-            'withdraw_id' => $withdraw->id
+        Log::warning('[ProcessWithdrawJob][XFLOW] ❌ Saque FAILED', [
+            'withdraw_id' => $withdraw->id,
+            'status'      => $providerStatus,
         ]);
     }
 }

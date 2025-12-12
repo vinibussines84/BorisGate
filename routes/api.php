@@ -11,12 +11,15 @@ use App\Http\Controllers\Api\WebhookCoffePayController;
 use App\Http\Controllers\Api\Webhooks\WebhookPluggouController;
 use App\Http\Controllers\Api\Webhooks\WebhookPluggouPixOutController;
 
-// Novos Controllers CN
+// Controllers CN
 use App\Http\Controllers\Api\Webhooks\WebhookCnInController;
 use App\Http\Controllers\Api\Webhooks\WebhookCnOutController;
 
-// NOVO — XFLOW
+// XFLOW — PIX (IN / OUT)
 use App\Http\Controllers\Api\Webhooks\WebhookXFlowController;
+
+// ✅ XFLOW — WITHDRAW (SAQUE)
+use App\Http\Controllers\Api\Webhooks\XflowWithdrawWebhookController;
 
 /*
 |--------------------------------------------------------------------------
@@ -116,10 +119,19 @@ Route::prefix('webhooks')->group(function () {
 
     /*
     |--------------------------------------------------------------------------
-    | XFLOW — WEBHOOK PIX IN + PIX OUT
+    | XFLOW — PIX (IN / OUT genérico)
     |--------------------------------------------------------------------------
     */
     Route::post('/xflow', [WebhookXFlowController::class, 'handle'])
         ->middleware('throttle:120,1')
         ->name('webhooks.xflow');
+
+    /*
+    |--------------------------------------------------------------------------
+    | ✅ XFLOW — WITHDRAW (SAQUE)
+    |--------------------------------------------------------------------------
+    */
+    Route::post('/xflow/withdraw', XflowWithdrawWebhookController::class)
+        ->middleware('throttle:120,1')
+        ->name('webhooks.xflow.withdraw');
 });

@@ -6,12 +6,9 @@ return [
     |--------------------------------------------------------------------------
     | XFlow – Credenciais de Autenticação
     |--------------------------------------------------------------------------
-    |
-    | client_id e client_secret fornecidos pela XFlow
-    |
     */
 
-    'client_id' => env('XFLOW_CLIENT_ID'),
+    'client_id'     => env('XFLOW_CLIENT_ID'),
     'client_secret' => env('XFLOW_CLIENT_SECRET'),
 
     /*
@@ -19,8 +16,7 @@ return [
     | XFlow – Token (cache)
     |--------------------------------------------------------------------------
     |
-    | O token NÃO deve ser fixo.
-    | Ele será salvo em cache automaticamente pelo service.
+    | Token é obtido via /auth/login e armazenado em cache
     |
     */
 
@@ -32,7 +28,7 @@ return [
     |--------------------------------------------------------------------------
     */
 
-    'base_url' => env('XFLOW_BASE_URL', 'https://api.xflowpayments.co'),
+    'base_url'      => env('XFLOW_BASE_URL', 'https://api.xflowpayments.co'),
     'auth_endpoint' => '/api/auth/login',
 
     /*
@@ -41,18 +37,25 @@ return [
     |--------------------------------------------------------------------------
     */
 
-    'timeout' => env('XFLOW_TIMEOUT', 10),
-    'retry_times' => 2,
-    'retry_sleep' => 150,
+    'timeout'       => env('XFLOW_TIMEOUT', 10),
+    'retry_times'   => env('XFLOW_RETRY_TIMES', 2),
+    'retry_sleep'   => env('XFLOW_RETRY_SLEEP', 150),
 
     /*
     |--------------------------------------------------------------------------
-    | XFlow – Webhook
+    | XFlow – Webhooks (SEPARADOS)
     |--------------------------------------------------------------------------
     */
 
-    'callback_url' => env(
-        'XFLOW_CALLBACK_URL',
+    // PIX IN / OUT
+    'callback_url_pix' => env(
+        'XFLOW_PIX_CALLBACK_URL',
         'https://equitpay.app/api/webhooks/xflow'
+    ),
+
+    // WITHDRAW (SAQUE)
+    'callback_url_withdraw' => env(
+        'XFLOW_WITHDRAW_CALLBACK_URL',
+        'https://equitpay.app/api/webhooks/xflow/withdraw'
     ),
 ];
