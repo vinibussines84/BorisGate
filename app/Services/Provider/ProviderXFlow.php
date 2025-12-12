@@ -19,9 +19,17 @@ class ProviderXFlow
     {
         $this->baseUrl       = config('xflow.base_url');
         $this->timeout       = config('xflow.timeout', 10);
-        $this->callbackUrl   = config('xflow.callback_url');
         $this->tokenCacheKey = config('xflow.token_cache_key', 'xflow_api_token');
 
+        /**
+         * 🔒 CALLBACK PIX (OBRIGATÓRIO)
+         */
+        $this->callbackUrl = config('xflow.callback_url_pix')
+            ?? throw new Exception('XFlow callback_url_pix não configurada.');
+
+        /**
+         * 🔒 CREDENCIAIS
+         */
         if (!config('xflow.client_id') || !config('xflow.client_secret')) {
             throw new Exception('Credenciais da XFlow não configuradas.');
         }
@@ -80,13 +88,13 @@ class ProviderXFlow
     }
 
     /**
-     * 🧾 Criar PIX
+     * 🧾 Criar PIX (Cash-in)
      */
     public function createPix(float $amount, array $data): array
     {
         $payload = [
-            'amount' => $amount,
-            'external_id' => $data['external_id'] ?? (string) Str::orderedUuid(),
+            'amount'            => $amount,
+            'external_id'       => $data['external_id'] ?? (string) Str::orderedUuid(),
             'clientCallbackUrl' => $data['clientCallbackUrl'] ?? $this->callbackUrl,
             'payer' => [
                 'name'     => $data['payer']['name']     ?? 'Cliente',
@@ -96,7 +104,9 @@ class ProviderXFlow
         ];
 
         if (app()->environment('local')) {
-            Log::info('XFLOW_CREATE_PIX_REQUEST', $payload);
+            Log::info('XFLOW_CREATE_PIX_REQUEST', [
+                'payload' => $payload,
+            ]);
         }
 
         $response = $this->http()
@@ -115,7 +125,7 @@ class ProviderXFlow
     }
 
     /**
-     * 🔍 Consultar status da transação
+     * 🔍 Consultar status da transação PIX
      */
     public function getTransactionStatus(string $transactionId): array
     {
@@ -136,11 +146,13 @@ class ProviderXFlow
     }
 
     /**
-     * 📩 Processar Webhook
+     * 📩 Processar Webhook (apenas log / ACK)
      */
     public function processWebhook(array $payload): array
     {
-        Log::info('XFLOW_WEBHOOK_RECEIVED', $payload);
+        Log::info('XFLOW_WEBHOOK_RECEIVED', [
+            'payload' => $payload,
+        ]);
 
         return [
             'status' => 'ok',
