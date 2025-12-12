@@ -3,6 +3,7 @@
 namespace App\Services\Provider;
 
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Exception;
@@ -10,121 +11,139 @@ use Exception;
 class ProviderXFlow
 {
     protected string $baseUrl;
-    protected string $token;
     protected int $timeout;
     protected string $callbackUrl;
+    protected string $tokenCacheKey;
 
     public function __construct()
     {
-        // 🔥 Carrega tudo do config/xflow.php
-        $this->token       = config("xflow.token");
-        $this->baseUrl     = config("xflow.base_url", "https://api.xflowpayments.co");
-        $this->timeout     = config("xflow.timeout", 8); // 🔥 timeout menor e mais inteligente
-        $this->callbackUrl = config("xflow.callback_url", "https://equitpay.app/api/webhooks/xflow");
+        $this->baseUrl       = config('xflow.base_url');
+        $this->timeout       = config('xflow.timeout', 10);
+        $this->callbackUrl   = config('xflow.callback_url');
+        $this->tokenCacheKey = config('xflow.token_cache_key', 'xflow_api_token');
 
-        if (!$this->token) {
-            Log::error("XFLOW_TOKEN_MISSING", [
-                "token" => $this->token
-            ]);
-            throw new Exception("Token XFlow ausente ou inválido. Configure XFLOW_TOKEN no .env.");
+        if (!config('xflow.client_id') || !config('xflow.client_secret')) {
+            throw new Exception('Credenciais da XFlow não configuradas.');
         }
     }
 
     /**
-     * 🧾 Criar PIX (retorna QRCode)
+     * 🔐 Retorna um token válido (cacheado e renovável)
      */
-    public function createPix(float $amount, array $data)
+    protected function getToken(): string
     {
-        // 🔥 Corrige o formato do payload para PAYER (padrão XFlow)
+        return Cache::remember(
+            $this->tokenCacheKey,
+            now()->addMinutes(45), // margem segura antes do exp real
+            function () {
+                $response = Http::timeout($this->timeout)
+                    ->post("{$this->baseUrl}/api/auth/login", [
+                        'client_id'     => config('xflow.client_id'),
+                        'client_secret' => config('xflow.client_secret'),
+                    ]);
+
+                if ($response->failed() || !$response->json('token')) {
+                    Log::error('XFLOW_AUTH_FAILED', [
+                        'status' => $response->status(),
+                        'body'   => $response->body(),
+                    ]);
+
+                    throw new Exception('Erro ao autenticar na XFlow.');
+                }
+
+                return $response->json('token');
+            }
+        );
+    }
+
+    /**
+     * 🚀 Client HTTP autenticado
+     * - retry automático
+     * - renova token se receber 401
+     */
+    protected function http()
+    {
+        return Http::withToken($this->getToken())
+            ->withHeaders([
+                'Connection' => 'keep-alive',
+            ])
+            ->timeout($this->timeout)
+            ->retry(
+                2,
+                150,
+                function ($exception) {
+                    if ($exception->response?->status() === 401) {
+                        Cache::forget($this->tokenCacheKey);
+                    }
+                }
+            );
+    }
+
+    /**
+     * 🧾 Criar PIX
+     */
+    public function createPix(float $amount, array $data): array
+    {
         $payload = [
-            "amount"         => $amount,
-
-            // Muito mais rápido que uniqid()
-            "external_id"    => $data["external_id"] ?? (string) Str::orderedUuid(),
-
-            // Não usa route() dentro do provider → muito mais rápido
-            "clientCallbackUrl" => $data["clientCallbackUrl"] ?? $this->callbackUrl,
-
-            "payer" => [
-                "name"     => $data["payer"]["name"]     ?? $data["name"]     ?? "Cliente",
-                "email"    => $data["payer"]["email"]    ?? $data["email"]    ?? "cliente@example.com",
-                "document" => $data["payer"]["document"] ?? $data["document"] ?? null,
+            'amount' => $amount,
+            'external_id' => $data['external_id'] ?? (string) Str::orderedUuid(),
+            'clientCallbackUrl' => $data['clientCallbackUrl'] ?? $this->callbackUrl,
+            'payer' => [
+                'name'     => $data['payer']['name']     ?? 'Cliente',
+                'email'    => $data['payer']['email']    ?? 'cliente@email.com',
+                'document' => $data['payer']['document'] ?? null,
             ],
         ];
 
-        // 🔥 Evita log pesado em produção
-        if (app()->environment("local")) {
-            Log::info("XFLOW_CREATE_PIX_REQUEST", $payload);
+        if (app()->environment('local')) {
+            Log::info('XFLOW_CREATE_PIX_REQUEST', $payload);
         }
 
-        // 🚀 Conexão otimizada com keep-alive + timeout curto
-        $response = Http::withToken($this->token)
-            ->withHeaders([
-                "Connection" => "keep-alive"
-            ])
-            ->timeout($this->timeout)
-            ->retry(2, 150) // 🔥 Retentativa rápida (evita picos de latência)
+        $response = $this->http()
             ->post("{$this->baseUrl}/api/payments/deposit", $payload);
 
         if ($response->failed()) {
-            Log::error("XFLOW_CREATE_PIX_FAILED", [
-                "status"   => $response->status(),
-                "response" => $response->body(),
-                "payload"  => $payload,
+            Log::error('XFLOW_CREATE_PIX_FAILED', [
+                'status' => $response->status(),
+                'body'   => $response->body(),
             ]);
 
-            throw new Exception("Erro ao criar PIX na XFlow.");
+            throw new Exception('Erro ao criar PIX na XFlow.');
         }
 
         return $response->json();
     }
 
     /**
-     * 🔍 Consultar status
+     * 🔍 Consultar status da transação
      */
-    public function getTransactionStatus(string $transactionId)
+    public function getTransactionStatus(string $transactionId): array
     {
-        $url = "{$this->baseUrl}/api/payments/{$transactionId}";
-
-        $response = Http::withToken($this->token)
-            ->withHeaders([
-                "Connection" => "keep-alive"
-            ])
-            ->timeout($this->timeout)
-            ->retry(2, 150)
-            ->get($url);
+        $response = $this->http()
+            ->get("{$this->baseUrl}/api/payments/{$transactionId}");
 
         if ($response->failed()) {
-            Log::error("XFLOW_STATUS_FAILED", [
-                "transaction_id" => $transactionId,
-                "status"         => $response->status(),
-                "response"       => $response->body(),
+            Log::error('XFLOW_STATUS_FAILED', [
+                'transaction_id' => $transactionId,
+                'status'         => $response->status(),
+                'body'           => $response->body(),
             ]);
 
-            throw new Exception("Erro ao consultar status da XFlow.");
+            throw new Exception('Erro ao consultar transação XFlow.');
         }
 
         return $response->json();
     }
 
     /**
-     * 📩 Processar webhook
+     * 📩 Processar Webhook
      */
-    public function processWebhook(array $payload)
+    public function processWebhook(array $payload): array
     {
-        Log::info("XFLOW_WEBHOOK_RECEIVED", $payload);
+        Log::info('XFLOW_WEBHOOK_RECEIVED', $payload);
 
         return [
-            "status"   => "ok",
-            "received" => $payload,
+            'status' => 'ok',
         ];
-    }
-
-    /**
-     * 💸 Saque (placeholder)
-     */
-    public function withdraw(float $amount, array $recipient)
-    {
-        throw new Exception("Withdraw ainda não implementado na XFlow.");
     }
 }
