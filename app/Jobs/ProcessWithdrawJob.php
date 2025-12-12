@@ -20,7 +20,7 @@ class ProcessWithdrawJob implements ShouldQueue
     public int $withdrawId;
     public array $payload;
 
-    // 🔥 Não refaz automaticamente
+    // 🔥 não refaz automaticamente
     public int $tries   = 1;
     public int $timeout = 60;
 
@@ -68,26 +68,30 @@ class ProcessWithdrawJob implements ShouldQueue
         }
 
         /**
-         * ✔ Payload no formato XFlow
+         * ✔ Payload INTERNO (NÃO É PIX AINDA)
+         * Domínio sempre usa: key / key_type
          */
-        $providerPayload = [
+        $domainPayload = [
             'amount'       => (float) $this->payload['amount'],
             'external_id'  => $this->payload['external_id'],
-            'pix_key'      => $this->payload['pix_key'],
-            'key_type'     => strtoupper($this->payload['key_type']), // EMAIL | CPF | CNPJ | PHONE
+            'key'          => $this->payload['key'],
+            'key_type'     => strtolower($this->payload['key_type']),
             'description'  => $this->payload['description'] ?? 'Saque solicitado',
             'clientCallbackUrl' => $this->payload['clientCallbackUrl'] ?? null,
         ];
 
         try {
+            /**
+             * 🔥 Conversão para pix_key acontece DENTRO do provider
+             */
             $resp = $provider->withdraw(
-                $providerPayload['amount'],
-                $providerPayload
+                $domainPayload['amount'],
+                $domainPayload
             );
 
         } catch (Throwable $e) {
 
-            // 🔁 Rate limit → retry manual
+            // ⏳ Rate limit → retry manual
             if (str_contains($e->getMessage(), 'RATE_LIMIT')) {
                 Log::warning('[ProcessWithdrawJob][XFLOW] ⏳ Rate limit — retry em 10s');
                 $this->release(10);
@@ -131,7 +135,7 @@ class ProcessWithdrawJob implements ShouldQueue
         }
 
         /**
-         * ✔ Salvar referência do provider
+         * ✔ Salvar provider_reference
          */
         if ($providerId) {
             $withdrawService->updateProviderReference(

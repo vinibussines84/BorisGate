@@ -86,20 +86,26 @@ class XflowWithdraw
     }
 
     /**
-     * 💸 Criar saque PIX
+     * 💸 Criar saque PIX (XFlow)
+     *
+     * Espera SEMPRE:
+     * - key
+     * - key_type
      */
     public function withdraw(float $amount, array $data): array
     {
-        foreach (['pix_key', 'key_type'] as $field) {
+        // 🔒 Validação do domínio (CORRETA)
+        foreach (['key', 'key_type'] as $field) {
             if (empty($data[$field])) {
                 throw new Exception("Campo obrigatório ausente: {$field}");
             }
         }
 
+        // 🔁 Conversão para formato XFlow
         $payload = [
             'amount'            => $amount,
             'external_id'       => $data['external_id'] ?? (string) Str::orderedUuid(),
-            'pix_key'           => $data['pix_key'],
+            'pix_key'           => $data['key'], // ✅ conversão AQUI
             'key_type'          => strtoupper($data['key_type']), // EMAIL | CPF | CNPJ | PHONE
             'description'       => $data['description'] ?? 'Saque solicitado',
             'clientCallbackUrl' => $this->callbackUrl,

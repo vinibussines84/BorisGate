@@ -103,26 +103,25 @@ class WithdrawOutController extends Controller
             $internalRef = 'withdraw_' . now()->timestamp . '_' . random_int(1000, 9999);
 
             /* ===============================================================
-             | 7) Criar saque local (PENDING)
+             | 7) Criar saque local (DEBITA SALDO)
+             | 🔥 PAYLOAD CORRETO PARA WithdrawService
              ===============================================================*/
             $withdraw = $this->withdrawService->create(
                 $user,
-                $gross,        // amount (líquido)
-                $gross,        // gross_amount
-                0,             // fee_amount
+                $gross, // bruto
+                $gross, // líquido
+                0,      // taxa
                 [
-                    'pixkey'        => $key,
-                    'pixkey_type'   => $rawKeyType,
-                    'external_id'   => $externalId,
-                    'idempotency_key'=> $internalRef,
-                    'provider'      => 'xflow',
-                    'status'        => Withdraw::STATUS_PENDING,
-                    'description'   => $data['description'] ?? null,
+                    'key'          => $key,
+                    'key_type'     => $rawKeyType,
+                    'external_id'  => $externalId,
+                    'internal_ref' => $internalRef,
+                    'provider'     => 'xflow',
                 ]
             );
 
             /* ===============================================================
-             | 8) Payload XFLOW (CORRETO)
+             | 8) Payload XFLOW (provider)
              ===============================================================*/
             $keyTypeForProvider = match ($rawKeyType) {
                 'cpf'   => 'CPF',
@@ -145,7 +144,7 @@ class WithdrawOutController extends Controller
                 ->onQueue('withdraws');
 
             /* ===============================================================
-             | 9) Webhook OUT
+             | 9) Webhook OUT (created)
              ===============================================================*/
             if ($user->webhook_enabled && $user->webhook_out_url) {
                 SendWebhookWithdrawCreatedJob::dispatch(
@@ -175,6 +174,7 @@ class WithdrawOutController extends Controller
             ]);
 
         } catch (\Throwable $e) {
+
             Log::error('🚨 Erro ao criar saque (XFlow)', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
