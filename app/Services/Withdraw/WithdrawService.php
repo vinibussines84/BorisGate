@@ -12,6 +12,7 @@ class WithdrawService
 {
     /**
      * Criar saque local + debitar saldo
+     * DOMÍNIO → SEM pix_key
      */
     public function create(
         User $user,
@@ -30,30 +31,31 @@ class WithdrawService
                 throw new \Exception('Saldo insuficiente.');
             }
 
-            // Debita saldo (BRUTO)
+            // 🔥 Debita saldo
             $u->amount_available = round($u->amount_available - $gross, 2);
             $u->save();
 
             return Withdraw::create([
-                'user_id'            => $u->id,
-                'amount'             => $net,
-                'gross_amount'       => $gross,
-                'fee_amount'         => $fee,
+                'user_id'      => $u->id,
+                'amount'       => $net,
+                'gross_amount' => $gross,
+                'fee_amount'   => $fee,
 
-                // ✅ CHAVES CORRETAS
-                'pixkey'             => $payload['pixkey'],
-                'pixkey_type'        => $payload['pixkey_type'],
+                // ✅ DOMÍNIO PADRÃO
+                'pixkey'      => $payload['key'],
+                'pixkey_type' => $payload['key_type'],
 
-                'status'             => Withdraw::STATUS_PENDING,
-                'provider'           => $payload['provider'] ?? 'xflow',
+                'status'      => Withdraw::STATUS_PENDING,
+                'provider'    => $payload['provider'] ?? 'xflow',
+
                 'external_id'        => $payload['external_id'],
                 'provider_reference' => null,
 
-                // ✅ IDEMPOTÊNCIA CORRETA
-                'idempotency_key'    => $payload['idempotency_key'],
+                // ✅ idempotência única
+                'idempotency_key' => $payload['internal_ref'],
 
                 'meta' => [
-                    'internal_reference' => $payload['idempotency_key'],
+                    'internal_reference' => $payload['internal_ref'],
                     'refund_done'        => false,
                     'provider'           => $payload['provider'] ?? 'xflow',
                     'api_request'        => true,
@@ -63,7 +65,7 @@ class WithdrawService
     }
 
     /**
-     * Falhou → estorna imediatamente
+     * Falha → estorno imediato
      */
     public function refundLocal(Withdraw $withdraw, string $reason): void
     {
@@ -78,7 +80,7 @@ class WithdrawService
                 ->lockForUpdate()
                 ->first();
 
-            // Evita estorno duplo
+            // Evita estorno duplicado
             if (!($withdraw->meta['refund_done'] ?? false)) {
                 $u->amount_available = round(
                     $u->amount_available + $withdraw->gross_amount,
@@ -89,8 +91,8 @@ class WithdrawService
 
             $meta = $withdraw->meta ?? [];
             $meta['refund_done'] = true;
-            $meta['error'] = $reason;
-            $meta['failed_at'] = now();
+            $meta['error']       = $reason;
+            $meta['failed_at']   = now();
 
             $withdraw->update([
                 'status'       => Withdraw::STATUS_FAILED,
@@ -117,7 +119,7 @@ class WithdrawService
     }
 
     /**
-     * Atualização após criação no provider
+     * Atualiza referência do provider
      */
     public function updateProviderReference(
         Withdraw $withdraw,
@@ -136,7 +138,9 @@ class WithdrawService
                 'status'             => $status,
                 'meta'               => array_merge(
                     $withdraw->meta ?? [],
-                    ['provider_initial_response' => $providerPayload]
+                    [
+                        'provider_initial_response' => $providerPayload,
+                    ]
                 ),
             ]);
         });
@@ -155,7 +159,7 @@ class WithdrawService
             $processedAt = $extra['paid_at'] ?? now();
             $meta = $withdraw->meta ?? [];
 
-            // Limpa erros antigos
+            // Limpa lixo de falha
             unset(
                 $meta['error'],
                 $meta['failed_at'],
@@ -164,7 +168,7 @@ class WithdrawService
             );
 
             $meta['paid_payload'] = $payload;
-            $meta['paid_at'] = $processedAt;
+            $meta['paid_at']      = $processedAt;
 
             if (!empty($extra)) {
                 $meta['provider_webhook'] = $extra;
