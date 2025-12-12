@@ -104,31 +104,31 @@ class WithdrawOutController extends Controller
 
             /* ===============================================================
              | 7) Criar saque local (DEBITA SALDO)
-             | 🔥 Payload CORRETO para WithdrawService
+             | ✅ PAYLOAD CORRETO PARA WithdrawService
              ===============================================================*/
             $withdraw = $this->withdrawService->create(
                 $user,
-                $gross, // bruto
-                $gross, // líquido
-                0,      // taxa
+                $gross,
+                $gross,
+                0,
                 [
-                    'pixkey'           => $key,
-                    'pixkey_type'      => $rawKeyType,
-                    'external_id'      => $externalId,
-                    'idempotency_key'  => $internalRef,
-                    'provider'         => 'xflow',
+                    // 🔥 DOMÍNIO CORRETO
+                    'key'          => $key,
+                    'key_type'     => $rawKeyType,
+                    'external_id'  => $externalId,
+                    'internal_ref' => $internalRef,
+                    'provider'     => 'xflow',
                 ]
             );
 
             /* ===============================================================
              | 8) Payload PARA O JOB (DOMÍNIO INTERNO)
-             | 🚨 NÃO USAR pix_key AQUI
              ===============================================================*/
             $payload = [
                 'amount'       => $gross,
                 'external_id'  => $externalId,
-                'key'          => $key,          // ✅ CORRETO
-                'key_type'     => $rawKeyType,   // ✅ cpf | cnpj | email | phone | evp
+                'key'          => $key,
+                'key_type'     => $rawKeyType,
                 'description' => $data['description'] ?? 'Saque solicitado via API',
             ];
 
@@ -148,7 +148,7 @@ class WithdrawOutController extends Controller
             }
 
             /* ===============================================================
-             | 10) Resposta
+             | 10) RESPONSE — IGUAL AO SEU (SEM ALTERAÇÃO)
              ===============================================================*/
             return response()->json([
                 'success' => true,

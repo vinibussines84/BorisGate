@@ -7,12 +7,13 @@ use App\Models\Withdraw;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use App\Jobs\SendWebhookWithdrawUpdatedJob;
+use InvalidArgumentException;
 
 class WithdrawService
 {
     /**
      * Criar saque local + debitar saldo
-     * DOMÍNIO → SEM pix_key
+     * DOMÍNIO → usa SEMPRE key / key_type
      */
     public function create(
         User $user,
@@ -21,8 +22,23 @@ class WithdrawService
         float $fee,
         array $payload
     ): Withdraw {
+
+        /**
+         * 🔐 Blindagem do domínio
+         */
+        foreach (['key', 'key_type', 'external_id', 'internal_ref'] as $field) {
+            if (!array_key_exists($field, $payload)) {
+                throw new InvalidArgumentException(
+                    "Payload inválido para criação de saque. Campo ausente: {$field}"
+                );
+            }
+        }
+
         return DB::transaction(function () use ($user, $gross, $net, $fee, $payload) {
 
+            /**
+             * 🔒 Lock de saldo
+             */
             $u = User::where('id', $user->id)
                 ->lockForUpdate()
                 ->first();
@@ -31,10 +47,18 @@ class WithdrawService
                 throw new \Exception('Saldo insuficiente.');
             }
 
-            // 🔥 Debita saldo
-            $u->amount_available = round($u->amount_available - $gross, 2);
+            /**
+             * 💸 Debita saldo
+             */
+            $u->amount_available = round(
+                $u->amount_available - $gross,
+                2
+            );
             $u->save();
 
+            /**
+             * 🧾 Cria saque local
+             */
             return Withdraw::create([
                 'user_id'      => $u->id,
                 'amount'       => $net,
@@ -43,15 +67,15 @@ class WithdrawService
 
                 // ✅ DOMÍNIO PADRÃO
                 'pixkey'      => $payload['key'],
-                'pixkey_type' => $payload['key_type'],
+                'pixkey_type' => strtolower($payload['key_type']),
 
-                'status'      => Withdraw::STATUS_PENDING,
-                'provider'    => $payload['provider'] ?? 'xflow',
+                'status'   => Withdraw::STATUS_PENDING,
+                'provider' => $payload['provider'] ?? 'xflow',
 
                 'external_id'        => $payload['external_id'],
                 'provider_reference' => null,
 
-                // ✅ idempotência única
+                // ✅ idempotência única e rastreável
                 'idempotency_key' => $payload['internal_ref'],
 
                 'meta' => [
@@ -65,7 +89,7 @@ class WithdrawService
     }
 
     /**
-     * Falha → estorno imediato
+     * ❌ Falha → estorno imediato
      */
     public function refundLocal(Withdraw $withdraw, string $reason): void
     {
@@ -80,7 +104,9 @@ class WithdrawService
                 ->lockForUpdate()
                 ->first();
 
-            // Evita estorno duplicado
+            /**
+             * 🔁 Evita estorno duplicado
+             */
             if (!($withdraw->meta['refund_done'] ?? false)) {
                 $u->amount_available = round(
                     $u->amount_available + $withdraw->gross_amount,
@@ -90,6 +116,7 @@ class WithdrawService
             }
 
             $meta = $withdraw->meta ?? [];
+
             $meta['refund_done'] = true;
             $meta['error']       = $reason;
             $meta['failed_at']   = now();
@@ -101,11 +128,17 @@ class WithdrawService
             ]);
         });
 
+        /**
+         * 📤 Webhook FAILED
+         */
         SendWebhookWithdrawUpdatedJob::dispatch(
             userId: $withdraw->user_id,
             withdrawId: $withdraw->id,
             status: 'FAILED',
-            reference: (string) ($withdraw->provider_reference ?? $withdraw->external_id),
+            reference: (string) (
+                $withdraw->provider_reference
+                ?? $withdraw->external_id
+            ),
             raw: [
                 'data' => [
                     'description' => $reason,
@@ -119,7 +152,7 @@ class WithdrawService
     }
 
     /**
-     * Atualiza referência do provider
+     * 🔁 Atualiza referência do provider
      */
     public function updateProviderReference(
         Withdraw $withdraw,
@@ -147,7 +180,7 @@ class WithdrawService
     }
 
     /**
-     * Marca como pago
+     * ✅ Marca saque como pago
      */
     public function markAsPaid(
         Withdraw $withdraw,
@@ -159,7 +192,9 @@ class WithdrawService
             $processedAt = $extra['paid_at'] ?? now();
             $meta = $withdraw->meta ?? [];
 
-            // Limpa lixo de falha
+            /**
+             * 🧹 Limpa lixo de falha
+             */
             unset(
                 $meta['error'],
                 $meta['failed_at'],
@@ -181,6 +216,9 @@ class WithdrawService
             ]);
         });
 
+        /**
+         * 📤 Webhook PAID
+         */
         SendWebhookWithdrawUpdatedJob::dispatch(
             $withdraw->user_id,
             $withdraw->id,

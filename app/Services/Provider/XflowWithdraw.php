@@ -88,32 +88,32 @@ class XflowWithdraw
     /**
      * 💸 Criar saque PIX (XFlow)
      *
-     * Espera SEMPRE:
+     * ⚠️ NÃO MUDA O PAYLOAD DO DOMÍNIO
+     * Espera exatamente o que o Job já envia:
      * - key
      * - key_type
+     * - external_id (opcional)
+     * - description (opcional)
      */
     public function withdraw(float $amount, array $data): array
     {
-        // 🔒 Validação do domínio (CORRETA)
-        foreach (['key', 'key_type'] as $field) {
-            if (empty($data[$field])) {
-                throw new Exception("Campo obrigatório ausente: {$field}");
-            }
+        // Blindagem mínima (não muda contrato)
+        if (empty($data['key']) || empty($data['key_type'])) {
+            throw new Exception('Payload inválido para saque XFlow.');
         }
 
-        // 🔁 Conversão para formato XFlow
         $payload = [
             'amount'            => $amount,
-            'external_id'       => $data['external_id'] ?? (string) Str::orderedUuid(),
-            'pix_key'           => $data['key'], // ✅ conversão AQUI
-            'key_type'          => strtoupper($data['key_type']), // EMAIL | CPF | CNPJ | PHONE
+            'external_id'       => (string) ($data['external_id'] ?? Str::orderedUuid()),
+            'pix_key'           => $data['key'], // 🔁 apenas adaptação
+            'key_type'          => strtoupper($data['key_type']),
             'description'       => $data['description'] ?? 'Saque solicitado',
             'clientCallbackUrl' => $this->callbackUrl,
         ];
 
-        if (app()->environment('local')) {
-            Log::info('XFLOW_WITHDRAW_REQUEST', $payload);
-        }
+        Log::info('XFLOW_WITHDRAW_REQUEST', [
+            'payload' => $payload,
+        ]);
 
         $response = $this->http()->post(
             "{$this->baseUrl}/api/withdrawals/withdraw",
@@ -126,7 +126,9 @@ class XflowWithdraw
                 'body'   => $response->body(),
             ]);
 
-            throw new Exception('Erro ao criar saque na XFlow.');
+            throw new Exception(
+                'Erro ao criar saque na XFlow: HTTP ' . $response->status()
+            );
         }
 
         return $response->json();
