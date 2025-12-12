@@ -16,19 +16,13 @@ class XflowWithdrawWebhookController extends Controller
 
     public function __invoke(Request $request)
     {
-        /**
-         * 📩 LOG DE ENTRADA
-         */
         Log::info('[XFLOW][WITHDRAW][WEBHOOK] 📩 Recebido', [
             'payload' => $request->all(),
-            'headers' => $request->headers->all(),
         ]);
 
-        /**
-         * ✅ VALIDAÇÃO DO PAYLOAD
-         */
         $data = $request->validate([
-            'transaction_id' => ['required', 'string'],
+            'transaction_id' => ['nullable', 'string'],
+            'external_id'    => ['nullable', 'string'],
             'status'         => ['required', 'string'],
             'amount'         => ['required', 'numeric'],
             'fee'            => ['nullable', 'numeric'],
@@ -38,24 +32,38 @@ class XflowWithdrawWebhookController extends Controller
         ]);
 
         /**
-         * 🔎 LOCALIZA O SAQUE PELO transaction_id DA XFLOW
+         * 🔎 1) Busca pelo transaction_id (provider)
          */
-        $withdraw = Withdraw::where(
-            'provider_reference',
-            $data['transaction_id']
-        )->first();
+        $withdraw = null;
 
-        if (! $withdraw) {
+        if (!empty($data['transaction_id'])) {
+            $withdraw = Withdraw::where(
+                'provider_reference',
+                $data['transaction_id']
+            )->first();
+        }
+
+        /**
+         * 🔎 2) Fallback: busca pelo external_id (SEU)
+         */
+        if (!$withdraw && !empty($data['external_id'])) {
+            $withdraw = Withdraw::where(
+                'external_id',
+                $data['external_id']
+            )->first();
+        }
+
+        if (!$withdraw) {
             Log::warning('[XFLOW][WITHDRAW][WEBHOOK] ❌ Saque não encontrado', [
-                'transaction_id' => $data['transaction_id'],
+                'transaction_id' => $data['transaction_id'] ?? null,
+                'external_id'    => $data['external_id'] ?? null,
             ]);
 
-            // ⚠️ Sempre responder 200 para não gerar retry infinito
             return response()->json(['ok' => true]);
         }
 
         /**
-         * 🔒 IDEMPOTÊNCIA — JÁ FINALIZADO
+         * 🔒 Idempotência
          */
         if (in_array($withdraw->status, [
             Withdraw::STATUS_PAID,
@@ -65,15 +73,22 @@ class XflowWithdrawWebhookController extends Controller
             return response()->json(['ok' => true]);
         }
 
-        /**
-         * 🔁 NORMALIZA STATUS DO PROVIDER
-         */
         $providerStatus = strtoupper($data['status']);
 
         /**
-         * ✅ SAQUE CONCLUÍDO
+         * ✅ COMPLETED
          */
         if ($providerStatus === 'COMPLETED') {
+
+            // 🔥 garante que o provider_reference fique salvo
+            if (empty($withdraw->provider_reference) && !empty($data['transaction_id'])) {
+                $this->withdrawService->updateProviderReference(
+                    $withdraw,
+                    $data['transaction_id'],
+                    strtolower($providerStatus),
+                    $data
+                );
+            }
 
             $this->withdrawService->markAsPaid(
                 $withdraw,
@@ -88,7 +103,7 @@ class XflowWithdrawWebhookController extends Controller
         }
 
         /**
-         * ❌ SAQUE FALHOU / CANCELADO
+         * ❌ FAILED / CANCELED
          */
         if (in_array($providerStatus, ['FAILED', 'CANCELED'], true)) {
 
@@ -96,18 +111,7 @@ class XflowWithdrawWebhookController extends Controller
                 $withdraw,
                 "XFlow retornou status {$providerStatus}"
             );
-
-            return response()->json(['ok' => true]);
         }
-
-        /**
-         * ⏳ STATUS INTERMEDIÁRIO (PENDING / PROCESSING / ETC)
-         * → Apenas ignora e aguarda próximo webhook
-         */
-        Log::info('[XFLOW][WITHDRAW][WEBHOOK] ⏳ Status intermediário ignorado', [
-            'withdraw_id'     => $withdraw->id,
-            'provider_status' => $providerStatus,
-        ]);
 
         return response()->json(['ok' => true]);
     }
