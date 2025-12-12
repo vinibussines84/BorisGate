@@ -37,8 +37,10 @@ class ProcessWithdrawJob implements ShouldQueue
     ): void {
         $withdraw = Withdraw::find($this->withdrawId);
 
-        if (!$withdraw) {
-            Log::error('[ProcessWithdrawJob][XFLOW] ❌ Withdraw não encontrado');
+        if (! $withdraw) {
+            Log::error('[ProcessWithdrawJob][XFLOW] ❌ Withdraw não encontrado', [
+                'withdraw_id' => $this->withdrawId,
+            ]);
             return;
         }
 
@@ -46,9 +48,13 @@ class ProcessWithdrawJob implements ShouldQueue
             'withdraw_id' => $withdraw->id,
         ]);
 
-        // 🔒 Idempotência
+        /**
+         * 🔒 IDOTEMPÊNCIA
+         */
         if ($withdraw->provider_reference) {
-            Log::warning('[ProcessWithdrawJob][XFLOW] ⏭ Já enviado ao provider');
+            Log::warning('[ProcessWithdrawJob][XFLOW] ⏭ Já enviado ao provider', [
+                'provider_reference' => $withdraw->provider_reference,
+            ]);
             return;
         }
 
@@ -57,19 +63,20 @@ class ProcessWithdrawJob implements ShouldQueue
             Withdraw::STATUS_FAILED,
             Withdraw::STATUS_CANCELED,
         ], true)) {
-            Log::warning('[ProcessWithdrawJob][XFLOW] ⏭ Saque já finalizado');
+            Log::warning('[ProcessWithdrawJob][XFLOW] ⏭ Saque já finalizado', [
+                'status' => $withdraw->status,
+            ]);
             return;
         }
 
         /**
-         * ✅ PAYLOAD CORRETO DO DOMÍNIO
-         * 🔥 NUNCA pix_key AQUI
+         * ✅ PAYLOAD DE DOMÍNIO (XFLOW)
          */
         $domainPayload = [
             'amount'      => (float) $this->payload['amount'],
             'external_id' => $this->payload['external_id'],
-            'key'         => $this->payload['key'],       // ✅ OBRIGATÓRIO
-            'key_type'    => $this->payload['key_type'],  // ✅ OBRIGATÓRIO
+            'key'         => $this->payload['key'],
+            'key_type'    => $this->payload['key_type'],
             'description' => $this->payload['description'] ?? 'Saque solicitado',
         ];
 
@@ -81,8 +88,9 @@ class ProcessWithdrawJob implements ShouldQueue
         } catch (Throwable $e) {
 
             Log::error('[ProcessWithdrawJob][XFLOW] ❌ Erro ao chamar provider', [
-                'error' => $e->getMessage(),
-                'payload' => $domainPayload,
+                'withdraw_id' => $withdraw->id,
+                'error'       => $e->getMessage(),
+                'payload'     => $domainPayload,
             ]);
 
             $withdrawService->refundLocal(
@@ -92,8 +100,13 @@ class ProcessWithdrawJob implements ShouldQueue
             return;
         }
 
-        $providerId     = data_get($resp, 'id');
-        $providerStatus = strtolower(data_get($resp, 'status', 'pending'));
+        /**
+         * ✅ LEITURA CORRETA DO RETORNO DA XFLOW
+         */
+        $providerId = data_get($resp, 'withdrawal.transaction_id');
+        $providerStatus = strtolower(
+            data_get($resp, 'withdrawal.status', 'pending')
+        );
 
         Log::info('[ProcessWithdrawJob][XFLOW] 🔁 Retorno provider', [
             'withdraw_id'     => $withdraw->id,
@@ -101,13 +114,27 @@ class ProcessWithdrawJob implements ShouldQueue
             'provider_status' => $providerStatus,
         ]);
 
-        if ($providerId) {
-            $withdrawService->updateProviderReference(
+        if (! $providerId) {
+            Log::error('[ProcessWithdrawJob][XFLOW] ❌ transaction_id não retornado', [
+                'withdraw_id' => $withdraw->id,
+                'response'    => $resp,
+            ]);
+
+            $withdrawService->refundLocal(
                 $withdraw,
-                $providerId,
-                $providerStatus,
-                $resp
+                'XFlow não retornou transaction_id'
             );
+            return;
         }
+
+        /**
+         * ✅ SALVA VÍNCULO DEFINITIVO
+         */
+        $withdrawService->updateProviderReference(
+            $withdraw,
+            $providerId,
+            $providerStatus,
+            $resp
+        );
     }
 }
