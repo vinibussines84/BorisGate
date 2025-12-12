@@ -20,7 +20,6 @@ class ProcessWithdrawJob implements ShouldQueue
     public int $withdrawId;
     public array $payload;
 
-    // 🔥 não refaz automaticamente
     public int $tries   = 1;
     public int $timeout = 60;
 
@@ -48,7 +47,7 @@ class ProcessWithdrawJob implements ShouldQueue
         ]);
 
         /**
-         * ✔ Evitar duplicidade
+         * Evita duplicidade
          */
         if (!empty($withdraw->provider_reference)) {
             Log::warning('[ProcessWithdrawJob][XFLOW] ⏭ Já enviado ao provider');
@@ -56,7 +55,7 @@ class ProcessWithdrawJob implements ShouldQueue
         }
 
         /**
-         * ✔ Evitar reprocessar se já finalizado
+         * Evita reprocessar finalizados
          */
         if (in_array($withdraw->status, [
             Withdraw::STATUS_PAID,
@@ -68,22 +67,17 @@ class ProcessWithdrawJob implements ShouldQueue
         }
 
         /**
-         * ✔ Payload INTERNO (NÃO É PIX AINDA)
-         * Domínio sempre usa: key / key_type
+         * ✅ PAYLOAD PADRÃO (CORRETO)
          */
         $domainPayload = [
             'amount'       => (float) $this->payload['amount'],
             'external_id'  => $this->payload['external_id'],
-            'key'          => $this->payload['key'],
-            'key_type'     => strtolower($this->payload['key_type']),
+            'pix_key'      => $this->payload['pix_key'],
+            'key_type'     => strtoupper($this->payload['key_type']),
             'description'  => $this->payload['description'] ?? 'Saque solicitado',
-            'clientCallbackUrl' => $this->payload['clientCallbackUrl'] ?? null,
         ];
 
         try {
-            /**
-             * 🔥 Conversão para pix_key acontece DENTRO do provider
-             */
             $resp = $provider->withdraw(
                 $domainPayload['amount'],
                 $domainPayload
@@ -91,7 +85,6 @@ class ProcessWithdrawJob implements ShouldQueue
 
         } catch (Throwable $e) {
 
-            // ⏳ Rate limit → retry manual
             if (str_contains($e->getMessage(), 'RATE_LIMIT')) {
                 Log::warning('[ProcessWithdrawJob][XFLOW] ⏳ Rate limit — retry em 10s');
                 $this->release(10);
@@ -110,11 +103,8 @@ class ProcessWithdrawJob implements ShouldQueue
         }
 
         /**
-         * ✔ Resposta esperada da XFlow
-         * {
-         *   "id": "transaction-123",
-         *   "status": "PENDING"
-         * }
+         * Resposta esperada:
+         * { id, status }
          */
         $providerId     = data_get($resp, 'id');
         $providerStatus = strtolower(data_get($resp, 'status', 'pending'));
@@ -126,7 +116,7 @@ class ProcessWithdrawJob implements ShouldQueue
         ]);
 
         /**
-         * ✔ Normalização de status
+         * Normalização de status
          */
         if (in_array($providerStatus, ['completed', 'success', 'paid'], true)) {
             $providerStatus = Withdraw::STATUS_PAID;
@@ -135,7 +125,7 @@ class ProcessWithdrawJob implements ShouldQueue
         }
 
         /**
-         * ✔ Salvar provider_reference
+         * Salva provider reference
          */
         if ($providerId) {
             $withdrawService->updateProviderReference(
@@ -148,7 +138,7 @@ class ProcessWithdrawJob implements ShouldQueue
         }
 
         /**
-         * ✅ Pago imediatamente
+         * Pago imediatamente
          */
         if ($providerStatus === Withdraw::STATUS_PAID) {
             $withdrawService->markAsPaid(
@@ -165,7 +155,7 @@ class ProcessWithdrawJob implements ShouldQueue
         }
 
         /**
-         * ❌ Qualquer outro cenário → estorno
+         * Qualquer outro caso → estorno
          */
         $withdrawService->refundLocal(
             $withdraw,
